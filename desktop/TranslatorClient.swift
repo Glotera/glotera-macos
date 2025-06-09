@@ -3,24 +3,70 @@ import Foundation
 class TranslatorClient {
     static let shared = TranslatorClient()
     let endpoint = "http://localhost:1145/translate"
+    private let timeoutInterval: TimeInterval = 30.0 // 10秒超时
 
     func translate(text: String, to: String, completion: @escaping (String?) -> Void) {
         print("[LOG] Calling translation API: text=\(text), to=\(to)")
-        guard let url = URL(string: endpoint) else { completion(nil); return }
+        guard let url = URL(string: endpoint) else { 
+            print("[LOG] Invalid URL: \(endpoint)")
+            completion(nil)
+            return 
+        }
+        
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = timeoutInterval
+        
         let body: [String: Any] = ["text": text, "to": to]
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        let task = URLSession.shared.dataTask(with: request) { data, _, _ in
-            print("[LOG] Translation API response: \(String(data: data ?? Data(), encoding: .utf8) ?? "nil")")
-            guard let data = data,
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let translated = json["translated"] as? String else {
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        } catch {
+            print("[LOG] Failed to serialize request body: \(error)")
+            completion(nil)
+            return
+        }
+        
+        let task = URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                print("[LOG] Translation API error: \(error.localizedDescription)")
                 completion(nil)
                 return
             }
-            completion(translated)
+            
+            guard let httpResponse = response as? HTTPURLResponse else {
+                print("[LOG] Invalid response type")
+                completion(nil)
+                return
+            }
+            
+            guard httpResponse.statusCode == 200 else {
+                print("[LOG] Translation API HTTP error: \(httpResponse.statusCode)")
+                completion(nil)
+                return
+            }
+            
+            guard let data = data else {
+                print("[LOG] No data received from translation API")
+                completion(nil)
+                return
+            }
+            
+            print("[LOG] Translation API response: \(String(data: data, encoding: .utf8) ?? "nil")")
+            
+            do {
+                guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let translated = json["translated"] as? String else {
+                    print("[LOG] Failed to parse translation response")
+                    completion(nil)
+                    return
+                }
+                print("[LOG] Translation successful: \(translated)")
+                completion(translated)
+            } catch {
+                print("[LOG] Failed to parse JSON response: \(error)")
+                completion(nil)
+            }
         }
         task.resume()
     }

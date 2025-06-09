@@ -2,16 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- Disable App Sandbox to allow global event monitoring -->
-    <key>com.apple.security.app-sandbox</key>
-    <false/>
-    
-    <!-- Allow outgoing network connections for translation API -->
-    <key>com.apple.security.network.client</key>
-    <true/>
-    
-    <!-- Allow application to get info about other applications -->
-    <key>com.apple.security.automation.apple-events</key>
-    <true/>
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+	<key>com.apple.security.network.client</key>
+	<true/>
 </dict>
 </plist>
