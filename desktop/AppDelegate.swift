@@ -14,6 +14,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Try to setup event monitoring
         setupEventMonitoring()
         
+        // 启动选中文本监听
+        AXController.shared.startSelectionMonitoring()
+        
         // Setup a timer to retry if permissions are granted later (check every 5 seconds, max 10 times)
         var retryCount = 0
         retryTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] timer in

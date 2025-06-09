@@ -117,15 +117,9 @@ class InputMonitor {
         // 显示翻译中状态
         TranslationStatusWindow.shared.showTranslating(near: focusedElement)
         
-        // 禁用输入（通过设置只读属性）
-        AXController.shared.disableInput()
-        
-        // 开始翻译
+        // 开始翻译（不禁用输入，避免死锁）
         TranslatorClient.shared.translate(text: text, to: lang) { [weak self] translated in
             DispatchQueue.main.async {
-                // 恢复输入
-                AXController.shared.enableInput()
-                
                 if let translated = translated {
                     print("[LOG] Translation result: \(translated)")
                     // 显示成功状态
@@ -214,15 +208,9 @@ class InputMonitor {
         // 显示翻译中状态
         TranslationStatusWindow.shared.showTranslating(near: focusedElement)
         
-        // 禁用输入
-        AXController.shared.disableInput()
-        
-        // 开始翻译
+        // 开始翻译（不禁用输入，避免死锁）
         TranslatorClient.shared.translate(text: text, to: lang) { [weak self] translated in
             DispatchQueue.main.async {
-                // 恢复输入
-                AXController.shared.enableInput()
-                
                 if let translated = translated {
                     print("[LOG] Translation result: \(translated)")
                     // 显示成功状态

@@ -1,5 +1,6 @@
 import Cocoa
 import ApplicationServices
+import CoreFoundation
 
 class AXController {
     static let shared = AXController()
@@ -19,7 +20,7 @@ class AXController {
     ]
     
     // 检查当前活跃应用是否为浏览器
-    private func getCurrentBrowserInfo() -> (bundleId: String, appName: String)? {
+    func getCurrentBrowserInfo() -> (bundleId: String, appName: String)? {
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
               let bundleId = frontmostApp.bundleIdentifier else {
             return nil
@@ -33,7 +34,7 @@ class AXController {
     }
     
     // 检查是否在Web环境中
-    private func isWebEnvironment() -> Bool {
+    func isWebEnvironment() -> Bool {
         return getCurrentBrowserInfo() != nil
     }
 
@@ -67,6 +68,13 @@ class AXController {
             print("[LOG] Newlines found at positions: \(lineBreaks)")
         }
         
+        // 预处理内容：清理可能的干扰文本
+        let cleanedValue = preprocessContent(value)
+        if cleanedValue != value {
+            print("[LOG] Content after preprocessing: '\(cleanedValue)'")
+            print("[LOG] Cleaned content length: \(cleanedValue.count) characters")
+        }
+        
         // 检查多种触发模式，支持多行文本
         let patterns = [
             #"^(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\s*$"#,  // 标准模式
@@ -78,8 +86,8 @@ class AXController {
         for (index, pattern) in patterns.enumerated() {
             // 添加 dotMatchesLineSeparators 选项以支持多行文本
             if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) {
-                let nsValue = value as NSString
-                let results = regex.matches(in: value, options: [], range: NSRange(location: 0, length: nsValue.length))
+                let nsValue = cleanedValue as NSString
+                let results = regex.matches(in: cleanedValue, options: [], range: NSRange(location: 0, length: nsValue.length))
                 
                 if let match = results.first, match.numberOfRanges >= 3 {
                     let textRange = match.range(at: 1)
@@ -104,6 +112,54 @@ class AXController {
         
         print("[LOG] No trigger pattern matched")
         return nil
+    }
+    
+    // 预处理内容：清理可能的干扰文本
+    private func preprocessContent(_ content: String) -> String {
+        var cleaned = content
+        
+        // 移除常见的Notion界面元素文本
+        let notionInterferencePatterns = [
+            "Add cover",
+            "Add icon",
+            "Add comment",
+            "Untitled",
+            "Type '/' for commands",
+            "Press Enter to continue writing or type '/' for commands",
+            "Empty page",
+            "Start writing...",
+            "Click to edit",
+            "Add a page inside",
+            "New page",
+            "Template",
+            "Import",
+            "Database",
+            "Gallery",
+            "Board",
+            "Timeline",
+            "Calendar",
+            "List"
+        ]
+        
+        // 移除这些干扰文本（不区分大小写）
+        for pattern in notionInterferencePatterns {
+            cleaned = cleaned.replacingOccurrences(of: pattern, with: "", options: .caseInsensitive)
+        }
+        
+        // 移除表格相关的干扰内容
+        // 匹配类似 "Column 1Column 2Column 3" 这样的表格标题
+        cleaned = cleaned.replacingOccurrences(of: #"Column\s*\d+"#, with: "", options: .regularExpression)
+        
+        // 移除多余的空白字符和换行符
+        cleaned = cleaned.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // 如果清理后的内容太短或为空，返回原内容
+        if cleaned.isEmpty || cleaned.count < 3 {
+            return content
+        }
+        
+        return cleaned
     }
     
     // 获取输入框内容，支持Web环境
@@ -191,6 +247,7 @@ class AXController {
         
         guard let browserInfo = getCurrentBrowserInfo() else { return nil }
         
+        // 使用简化的JavaScript代码，避免复杂逻辑导致死锁
         var script = ""
         
         switch browserInfo.bundleId {
@@ -202,19 +259,13 @@ class AXController {
                             set jsResult to execute javascript "
                                 var activeElement = document.activeElement;
                                 if (activeElement) {
-                                    var content = '';
                                     if (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA') {
-                                        // 对于表单元素，获取完整的value
-                                        content = activeElement.value || '';
+                                        return activeElement.value || '';
                                     } else if (activeElement.contentEditable === 'true') {
-                                        // 对于contenteditable元素，优先获取textContent保持换行
-                                        content = activeElement.textContent || activeElement.innerText || '';
+                                        return activeElement.textContent || activeElement.innerText || '';
                                     }
-                                    // 确保保留换行符
-                                    return content;
-                                } else {
-                                    return '';
                                 }
+                                return '';
                             "
                             return jsResult
                         end tell
@@ -231,19 +282,13 @@ class AXController {
                             set jsResult to do JavaScript "
                                 var activeElement = document.activeElement;
                                 if (activeElement) {
-                                    var content = '';
                                     if (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA') {
-                                        // 对于表单元素，获取完整的value
-                                        content = activeElement.value || '';
+                                        return activeElement.value || '';
                                     } else if (activeElement.contentEditable === 'true') {
-                                        // 对于contenteditable元素，优先获取textContent保持换行
-                                        content = activeElement.textContent || activeElement.innerText || '';
+                                        return activeElement.textContent || activeElement.innerText || '';
                                     }
-                                    // 确保保留换行符
-                                    return content;
-                                } else {
-                                    return '';
                                 }
+                                return '';
                             "
                             return jsResult
                         end tell
@@ -256,6 +301,7 @@ class AXController {
             return nil
         }
         
+        // 使用同步执行，但添加简单的错误处理
         if let appleScript = NSAppleScript(source: script) {
             var error: NSDictionary?
             let result = appleScript.executeAndReturnError(&error)
@@ -397,42 +443,15 @@ class AXController {
                             set jsResult to execute javascript "
                                 var activeElement = document.activeElement;
                                 if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
-                                    // 对于标准输入框
                                     activeElement.value = '\(escapedText)';
                                     activeElement.focus();
-                                    
-                                    // 触发输入事件，确保React等框架能检测到变化
-                                    var inputEvent = new Event('input', { bubbles: true });
-                                    activeElement.dispatchEvent(inputEvent);
-                                    
-                                    var changeEvent = new Event('change', { bubbles: true });
-                                    activeElement.dispatchEvent(changeEvent);
-                                    
-                                    // 设置光标到末尾
-                                    activeElement.setSelectionRange(activeElement.value.length, activeElement.value.length);
-                                    
-                                    'success';
+                                    return 'success';
                                 } else if (activeElement && activeElement.contentEditable === 'true') {
-                                    // 对于contenteditable元素
-                                    activeElement.innerHTML = '';
                                     activeElement.textContent = '\(escapedText)';
                                     activeElement.focus();
-                                    
-                                    // 移动光标到末尾
-                                    var selection = window.getSelection();
-                                    var range = document.createRange();
-                                    range.selectNodeContents(activeElement);
-                                    range.collapse(false);
-                                    selection.removeAllRanges();
-                                    selection.addRange(range);
-                                    
-                                    // 触发输入事件
-                                    var inputEvent = new Event('input', { bubbles: true });
-                                    activeElement.dispatchEvent(inputEvent);
-                                    
-                                    'success';
+                                    return 'success';
                                 } else {
-                                    'no_active_input';
+                                    return 'no_active_input';
                                 }
                             "
                             return jsResult
@@ -452,32 +471,13 @@ class AXController {
                                 if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
                                     activeElement.value = '\(escapedText)';
                                     activeElement.focus();
-                                    
-                                    var inputEvent = new Event('input', { bubbles: true });
-                                    activeElement.dispatchEvent(inputEvent);
-                                    
-                                    var changeEvent = new Event('change', { bubbles: true });
-                                    activeElement.dispatchEvent(changeEvent);
-                                    
-                                    activeElement.setSelectionRange(activeElement.value.length, activeElement.value.length);
-                                    'success';
+                                    return 'success';
                                 } else if (activeElement && activeElement.contentEditable === 'true') {
-                                    activeElement.innerHTML = '';
                                     activeElement.textContent = '\(escapedText)';
                                     activeElement.focus();
-                                    
-                                    var selection = window.getSelection();
-                                    var range = document.createRange();
-                                    range.selectNodeContents(activeElement);
-                                    range.collapse(false);
-                                    selection.removeAllRanges();
-                                    selection.addRange(range);
-                                    
-                                    var inputEvent = new Event('input', { bubbles: true });
-                                    activeElement.dispatchEvent(inputEvent);
-                                    'success';
+                                    return 'success';
                                 } else {
-                                    'no_active_input';
+                                    return 'no_active_input';
                                 }
                             "
                             return jsResult
@@ -502,7 +502,6 @@ class AXController {
             
             let resultString = result.stringValue ?? ""
             print("[LOG] AppleScript replacement result: \(resultString)")
-            
             return resultString == "success"
         }
         
@@ -619,6 +618,249 @@ class AXController {
         return nil
     }
     
+    // 获取当前选中的文本
+    func getSelectedText() -> (text: String, element: AXUIElement)? {
+        guard let focused = getFocusedElement() else {
+            print("[LOG] No focused element for selection")
+            return nil
+        }
+        
+        // 首先尝试通过AX API获取选中文本
+        if let selectedText = getSelectedTextAttribute(of: focused), !selectedText.isEmpty {
+            print("[LOG] Got selected text via AX: '\(selectedText)'")
+            return (text: selectedText, element: focused)
+        }
+        
+        // 如果在浏览器环境中，尝试通过JavaScript获取选中文本
+        if isWebEnvironment() {
+            if let selectedText = getWebSelectedText(), !selectedText.isEmpty {
+                print("[LOG] Got selected text via Web: '\(selectedText)'")
+                return (text: selectedText, element: focused)
+            }
+        }
+        
+        print("[LOG] No text selected")
+        return nil
+    }
+    
+    // 通过JavaScript获取Web环境中的选中文本
+    private func getWebSelectedText() -> String? {
+        guard let browserInfo = getCurrentBrowserInfo() else { return nil }
+        
+        var script = ""
+        
+        switch browserInfo.bundleId {
+        case "com.google.Chrome":
+            script = """
+                tell application "Google Chrome"
+                    try
+                        tell active tab of front window
+                            set jsResult to execute javascript "
+                                var selection = window.getSelection();
+                                if (selection.rangeCount > 0) {
+                                    return selection.toString();
+                                }
+                                return '';
+                            "
+                            return jsResult
+                        end tell
+                    on error
+                        return ""
+                    end try
+                end tell
+            """
+        case "com.apple.Safari":
+            script = """
+                tell application "Safari"
+                    try
+                        tell front document
+                            set jsResult to do JavaScript "
+                                var selection = window.getSelection();
+                                if (selection.rangeCount > 0) {
+                                    return selection.toString();
+                                }
+                                return '';
+                            "
+                            return jsResult
+                        end tell
+                    on error
+                        return ""
+                    end try
+                end tell
+            """
+        default:
+            return nil
+        }
+        
+        if let appleScript = NSAppleScript(source: script) {
+            var error: NSDictionary?
+            let result = appleScript.executeAndReturnError(&error)
+            
+            if let error = error {
+                print("[LOG] AppleScript error getting selection: \(error)")
+                return nil
+            }
+            
+            let selectedText = result.stringValue ?? ""
+            return selectedText.isEmpty ? nil : selectedText
+        }
+        
+        return nil
+    }
+    
+    // 开始监听选中文本变化
+    func startSelectionMonitoring() {
+        print("[LOG] Starting selection monitoring (keyboard-event-safe)")
+        
+        // 延迟启动鼠标监听，确保键盘监听优先建立
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            self.startMouseEventMonitoring()
+        }
+        
+        // 使用较低频率的定时器进一步减少对系统的影响
+        Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+            self.checkForTextSelection()
+        }
+    }
+    
+    private var lastSelectedText: String = ""
+    private var lastSelectionCheckTime: Date = Date()
+    private var isMenuShowing: Bool = false
+    private var isMouseDragging: Bool = false
+    private var lastMouseUpTime: Date = Date.distantPast
+    private var mouseEventMonitor: Any?
+    
+    // 监听鼠标事件
+    private func startMouseEventMonitoring() {
+        // 只监听鼠标事件，绝对不影响键盘事件处理
+        // 使用NSEvent.addGlobalMonitorForEvents，这不会阻塞其他事件监听器
+        mouseEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp, .leftMouseDragged]) { [weak self] event in
+            // 这个回调是异步的，不会阻塞主事件流
+            DispatchQueue.main.async {
+                self?.handleMouseEvent(event)
+            }
+        }
+        
+        print("[LOG] Mouse event monitoring started (completely non-blocking)")
+    }
+    
+    private func handleMouseEvent(_ event: NSEvent) {
+        // 只处理鼠标拖拽相关的状态，不做任何可能影响键盘的操作
+        switch event.type {
+        case .leftMouseDown:
+            // 鼠标按下，重置拖拽状态
+            isMouseDragging = false
+            
+        case .leftMouseDragged:
+            // 鼠标拖拽中，标记为拖拽状态
+            if !isMouseDragging {
+                isMouseDragging = true
+                // 减少日志输出，避免影响性能
+            }
+            
+        case .leftMouseUp:
+            // 鼠标释放
+            if isMouseDragging {
+                lastMouseUpTime = Date()
+                // 延迟检查，给文本选择时间稳定
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    self.checkForTextSelectionAfterMouseUp()
+                }
+            }
+            isMouseDragging = false
+            
+        default:
+            break
+        }
+    }
+    
+    // 检查文本选中状态
+    private func checkForTextSelection() {
+        // 如果菜单正在显示，不要重复检查
+        if isMenuShowing {
+            return
+        }
+        
+        // 如果正在拖拽鼠标，不要检查（等待拖拽完成）
+        if isMouseDragging {
+            return
+        }
+        
+        // 如果刚刚完成鼠标拖拽，等待特殊检查方法处理
+        let timeSinceMouseUp = Date().timeIntervalSince(lastMouseUpTime)
+        if timeSinceMouseUp < 1.0 && lastMouseUpTime != Date.distantPast {
+            return
+        }
+        
+        // 防抖：至少间隔0.3秒才检查
+        let now = Date()
+        if now.timeIntervalSince(lastSelectionCheckTime) < 0.3 {
+            return
+        }
+        lastSelectionCheckTime = now
+        
+        checkSelectedTextAndShowMenu()
+    }
+    
+    // 鼠标释放后的专门检查
+    private func checkForTextSelectionAfterMouseUp() {
+        print("[LOG] Checking text selection after mouse up")
+        
+        // 等待一个更长的延迟，确保选择完全稳定
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            self.checkSelectedTextAndShowMenu()
+        }
+    }
+    
+    // 统一的选中文本检查和菜单显示逻辑
+    private func checkSelectedTextAndShowMenu() {
+        guard let selection = getSelectedText() else {
+            // 如果没有选中文本，隐藏菜单并重置状态
+            if !lastSelectedText.isEmpty {
+                TranslationMenuWindow.shared.hideMenu()
+                lastSelectedText = ""
+                isMenuShowing = false
+            }
+            return
+        }
+        
+        // 过滤掉太短的选中文本，但保留原始文本格式
+        let originalText = selection.text
+        let trimmedForCheck = originalText.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        if trimmedForCheck.count < 3 {
+            if !lastSelectedText.isEmpty {
+                TranslationMenuWindow.shared.hideMenu()
+                lastSelectedText = ""
+                isMenuShowing = false
+            }
+            return
+        }
+        
+        // 使用原始文本（保留前后空白）进行比较和传递
+        if originalText != lastSelectedText {
+            lastSelectedText = originalText
+            isMenuShowing = true
+            
+            print("[LOG] Selected text: '\(originalText)' (length: \(originalText.count))")
+            print("[LOG] Trimmed for check: '\(trimmedForCheck)' (length: \(trimmedForCheck.count))")
+            
+            // 获取选中文本的位置
+            let mouseLocation = NSEvent.mouseLocation
+            
+            // 显示翻译菜单，传递原始文本
+            TranslationMenuWindow.shared.showMenu(
+                at: mouseLocation,
+                with: originalText,
+                sourceElement: selection.element,
+                onMenuClosed: { [weak self] in
+                    self?.isMenuShowing = false
+                    self?.lastSelectedText = ""
+                }
+            )
+        }
+    }
+    
     // 使用剪贴板强力替换内容
     private func forceReplaceWithClipboard(element: AXUIElement, text: String) {
         print("[LOG] Using clipboard force replace method")
@@ -652,51 +894,236 @@ class AXController {
     
     // 模拟 Cmd+A 全选
     private func simulateSelectAll() {
-        let source = CGEventSource(stateID: .hidSystemState)
-        
-        // Cmd+A
-        let cmdKeyCode: CGKeyCode = 55  // Command key
-        let aKeyCode: CGKeyCode = 0     // A key
-        
-        if let cmdDown = CGEvent(keyboardEventSource: source, virtualKey: cmdKeyCode, keyDown: true),
-           let aDown = CGEvent(keyboardEventSource: source, virtualKey: aKeyCode, keyDown: true),
-           let aUp = CGEvent(keyboardEventSource: source, virtualKey: aKeyCode, keyDown: false),
-           let cmdUp = CGEvent(keyboardEventSource: source, virtualKey: cmdKeyCode, keyDown: false) {
+        // 添加延迟，确保与InputMonitor的事件处理分离
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            let source = CGEventSource(stateID: .hidSystemState)
             
-            aDown.flags = .maskCommand
-            aUp.flags = .maskCommand
+            // Cmd+A
+            let cmdKeyCode: CGKeyCode = 55  // Command key
+            let aKeyCode: CGKeyCode = 0     // A key
             
-            cmdDown.post(tap: .cghidEventTap)
-            aDown.post(tap: .cghidEventTap)
-            aUp.post(tap: .cghidEventTap)
-            cmdUp.post(tap: .cghidEventTap)
-            
-            print("[LOG] Simulated Cmd+A select all")
+            if let cmdDown = CGEvent(keyboardEventSource: source, virtualKey: cmdKeyCode, keyDown: true),
+               let aDown = CGEvent(keyboardEventSource: source, virtualKey: aKeyCode, keyDown: true),
+               let aUp = CGEvent(keyboardEventSource: source, virtualKey: aKeyCode, keyDown: false),
+               let cmdUp = CGEvent(keyboardEventSource: source, virtualKey: cmdKeyCode, keyDown: false) {
+                
+                aDown.flags = .maskCommand
+                aUp.flags = .maskCommand
+                
+                // 恢复使用原始tap位置，通过时序分离避免冲突
+                cmdDown.post(tap: .cghidEventTap)
+                aDown.post(tap: .cghidEventTap)
+                aUp.post(tap: .cghidEventTap)
+                cmdUp.post(tap: .cghidEventTap)
+                
+                print("[LOG] Simulated Cmd+A select all (with timing separation)")
+            }
         }
     }
     
     // 模拟 Cmd+V 粘贴
     private func simulatePaste() {
-        let source = CGEventSource(stateID: .hidSystemState)
+        // 添加延迟，确保与InputMonitor的事件处理分离
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            let source = CGEventSource(stateID: .hidSystemState)
+            
+            // Cmd+V
+            let cmdKeyCode: CGKeyCode = 55  // Command key
+            let vKeyCode: CGKeyCode = 9     // V key
+            
+            if let cmdDown = CGEvent(keyboardEventSource: source, virtualKey: cmdKeyCode, keyDown: true),
+               let vDown = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: true),
+               let vUp = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: false),
+               let cmdUp = CGEvent(keyboardEventSource: source, virtualKey: cmdKeyCode, keyDown: false) {
+                
+                vDown.flags = .maskCommand
+                vUp.flags = .maskCommand
+                
+                // 恢复使用原始tap位置，通过时序分离避免冲突
+                cmdDown.post(tap: .cghidEventTap)
+                vDown.post(tap: .cghidEventTap)
+                vUp.post(tap: .cghidEventTap)
+                cmdUp.post(tap: .cghidEventTap)
+                
+                print("[LOG] Simulated Cmd+V paste (with timing separation)")
+            }
+        }
+    }
+    
+    // 添加一个新的方法来重新选中文本，用于替换时保持选中状态
+    func reselectText(in element: AXUIElement, with text: String) -> Bool {
+        print("[LOG] Attempting to reselect text for replacement")
         
-        // Cmd+V
-        let cmdKeyCode: CGKeyCode = 55  // Command key
-        let vKeyCode: CGKeyCode = 9     // V key
+        // 如果在Web环境中，使用JavaScript重新选中
+        if isWebEnvironment() {
+            return reselectWebText(with: text)
+        }
         
-        if let cmdDown = CGEvent(keyboardEventSource: source, virtualKey: cmdKeyCode, keyDown: true),
-           let vDown = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: true),
-           let vUp = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: false),
-           let cmdUp = CGEvent(keyboardEventSource: source, virtualKey: cmdKeyCode, keyDown: false) {
+        // 对于标准应用，尝试通过AX API选中所有文本
+        return reselectStandardText(in: element, with: text)
+    }
+    
+    private func reselectWebText(with originalText: String) -> Bool {
+        guard let browserInfo = getCurrentBrowserInfo() else { return false }
+        
+        // 转义JavaScript字符串
+        let escapedText = originalText
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+        
+        var script = ""
+        
+        switch browserInfo.bundleId {
+        case "com.google.Chrome":
+            script = """
+                tell application "Google Chrome"
+                    try
+                        tell active tab of front window
+                            set jsResult to execute javascript "
+                                try {
+                                    // 查找并选中包含原始文本的节点
+                                    function findAndSelectText(text) {
+                                        var walker = document.createTreeWalker(
+                                            document.body,
+                                            NodeFilter.SHOW_TEXT,
+                                            null,
+                                            false
+                                        );
+                                        
+                                        var node;
+                                        while (node = walker.nextNode()) {
+                                            if (node.textContent.includes(text)) {
+                                                var range = document.createRange();
+                                                var startIndex = node.textContent.indexOf(text);
+                                                range.setStart(node, startIndex);
+                                                range.setEnd(node, startIndex + text.length);
+                                                
+                                                var selection = window.getSelection();
+                                                selection.removeAllRanges();
+                                                selection.addRange(range);
+                                                return true;
+                                            }
+                                        }
+                                        return false;
+                                    }
+                                    
+                                    return findAndSelectText('\(escapedText)') ? 'success' : 'not_found';
+                                } catch (e) {
+                                    return 'error: ' + e.message;
+                                }
+                            "
+                            return jsResult
+                        end tell
+                    on error errMsg
+                        return "applescript_error: " & errMsg
+                    end try
+                end tell
+            """
+        case "com.apple.Safari":
+            script = """
+                tell application "Safari"
+                    try
+                        tell front document
+                            set jsResult to do JavaScript "
+                                try {
+                                    function findAndSelectText(text) {
+                                        var walker = document.createTreeWalker(
+                                            document.body,
+                                            NodeFilter.SHOW_TEXT,
+                                            null,
+                                            false
+                                        );
+                                        
+                                        var node;
+                                        while (node = walker.nextNode()) {
+                                            if (node.textContent.includes(text)) {
+                                                var range = document.createRange();
+                                                var startIndex = node.textContent.indexOf(text);
+                                                range.setStart(node, startIndex);
+                                                range.setEnd(node, startIndex + text.length);
+                                                
+                                                var selection = window.getSelection();
+                                                selection.removeAllRanges();
+                                                selection.addRange(range);
+                                                return true;
+                                            }
+                                        }
+                                        return false;
+                                    }
+                                    
+                                    return findAndSelectText('\(escapedText)') ? 'success' : 'not_found';
+                                } catch (e) {
+                                    return 'error: ' + e.message;
+                                }
+                            "
+                            return jsResult
+                        end tell
+                    on error errMsg
+                        return "applescript_error: " & errMsg
+                    end try
+                end tell
+            """
+        default:
+            return false
+        }
+        
+        if let appleScript = NSAppleScript(source: script) {
+            var error: NSDictionary?
+            let result = appleScript.executeAndReturnError(&error)
             
-            vDown.flags = .maskCommand
-            vUp.flags = .maskCommand
+            if let error = error {
+                print("[LOG] AppleScript error reselecting text: \(error)")
+                return false
+            }
             
-            cmdDown.post(tap: .cghidEventTap)
-            vDown.post(tap: .cghidEventTap)
-            vUp.post(tap: .cghidEventTap)
-            cmdUp.post(tap: .cghidEventTap)
+            let resultString = result.stringValue ?? ""
+            print("[LOG] Reselect text result: \(resultString)")
+            return resultString == "success"
+        }
+        
+        return false
+    }
+    
+    private func reselectStandardText(in element: AXUIElement, with originalText: String) -> Bool {
+        // 对于标准应用，尝试通过文本查找来重新选中
+        guard let fullText = getValue(of: element) else { return false }
+        
+        // 查找原始文本在完整文本中的位置
+        if let range = fullText.range(of: originalText) {
+            let startIndex = fullText.distance(from: fullText.startIndex, to: range.lowerBound)
+            let length = originalText.count
             
-            print("[LOG] Simulated Cmd+V paste")
+            // 尝试设置选中范围
+            var cfRange = CFRangeMake(startIndex, length)
+            if let axValue = AXValueCreate(AXValueType.cfRange, &cfRange) {
+                let result = AXUIElementSetAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, axValue)
+            
+                            if result == .success {
+                    print("[LOG] Successfully reselected text at range: \(startIndex)-\(startIndex + length)")
+                    return true
+                } else {
+                    print("[LOG] Failed to reselect text via AX API: \(result.rawValue)")
+                }
+            } else {
+                print("[LOG] Failed to create AXValue for range")
+            }
+        }
+        
+        return false
+    }
+    
+    deinit {
+        stopSelectionMonitoring()
+    }
+    
+    func stopSelectionMonitoring() {
+        if let monitor = mouseEventMonitor {
+            NSEvent.removeMonitor(monitor)
+            mouseEventMonitor = nil
+            print("[LOG] Mouse event monitor removed")
         }
     }
 } 
