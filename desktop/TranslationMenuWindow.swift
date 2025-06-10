@@ -129,6 +129,10 @@ class TranslationMenuWindow: NSWindow {
             return
         }
         
+        // 检查源元素是否可编辑
+        let isEditable = sourceElement != nil ? AXController.shared.isElementEditable(sourceElement!) : false
+        print("[LOG] Source element editable: \(isEditable)")
+        
         // 隐藏菜单，显示翻译状态
         hideMenu()
         TranslationStatusWindow.shared.showTranslating(near: sourceElement)
@@ -140,11 +144,18 @@ class TranslationMenuWindow: NSWindow {
                     print("[LOG] Translation result: \(translated)")
                     TranslationStatusWindow.shared.showSuccess()
                     
-                    // 替换选中的文本
-                    if let element = self?.sourceElement {
-                        self?.replaceSelectedText(in: element, with: translated)
+                    if isEditable {
+                        // 可编辑元素：替换选中的文本
+                        print("[LOG] Replacing text in editable element")
+                        if let element = self?.sourceElement {
+                            self?.replaceSelectedText(in: element, with: translated)
+                        } else {
+                            print("[LOG] No source element available for text replacement")
+                        }
                     } else {
-                        print("[LOG] No source element available for text replacement")
+                        // 不可编辑元素：显示翻译结果浮窗
+                        print("[LOG] Showing translation result in popup")
+                        self?.showTranslationResult(original: self?.selectedText ?? "", translated: translated)
                     }
                 } else {
                     print("[LOG] Translation failed or empty result")
@@ -157,6 +168,9 @@ class TranslationMenuWindow: NSWindow {
     private func replaceSelectedText(in element: AXUIElement, with text: String) {
         print("[LOG] Attempting to replace selected text with: '\(text)'")
         print("[LOG] Original selected text was: '\(selectedText)'")
+        
+        // 暂时禁用选中文本监听，防止我们的操作触发新的菜单
+        AXController.shared.pauseSelectionMonitoring()
         
         // 使用最简单直接的方法：剪贴板替换
         replaceTextViaSimpleClipboard(with: text)
@@ -274,6 +288,22 @@ class TranslationMenuWindow: NSWindow {
         }
     }
     
+    // 显示翻译结果浮窗
+    private func showTranslationResult(original: String, translated: String) {
+        print("[LOG] Creating translation result popup")
+        
+        // 创建翻译结果窗口
+        let resultWindow = TranslationResultWindow(original: original, translated: translated)
+        
+        // 获取当前鼠标位置
+        let mouseLocation = NSEvent.mouseLocation
+        
+        // 显示窗口在鼠标附近
+        resultWindow.showAt(point: mouseLocation)
+        
+        // 不再自动隐藏，改为手动关闭
+    }
+
     // 恢复剪贴板内容
     private func restoreClipboard(_ originalClipboard: String?) {
         let pasteboard = NSPasteboard.general
@@ -285,6 +315,10 @@ class TranslationMenuWindow: NSWindow {
             pasteboard.clearContents()
             print("[LOG] Cleared clipboard as no original content")
         }
+        
+        // 重新启用选中文本监听
+        AXController.shared.resumeSelectionMonitoring()
+        print("[LOG] Resumed selection monitoring")
     }
 }
 
@@ -315,7 +349,7 @@ struct TranslationMenuView: View {
                 // 直接使用当前选中的语言进行翻译
                 onTranslate(selectedLanguage)
             }) {
-                Text("Translate to")
+                Text("Translate To")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(.primary)
             }

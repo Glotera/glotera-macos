@@ -7,6 +7,9 @@ class AXController {
     private var isInputDisabled = false
     private var originalValue: String?
     private var disabledElement: AXUIElement?
+    
+    // 选中文本监听相关变量
+    private var isSelectionMonitoringPaused = false
 
     // 支持的浏览器应用bundle标识符
     private let browserBundleIds = [
@@ -98,7 +101,7 @@ class AXController {
                         var lang = nsValue.substring(with: langRange).lowercased()
                         
                         // 转换 jp 为 ja
-                        if lang == "jp" { lang = "ja" }
+            if lang == "jp" { lang = "ja" }
                         
                         if !text.isEmpty {
                             print("[LOG] Trigger found using pattern \(index + 1): text='\(text)', lang='\(lang)'")
@@ -327,16 +330,16 @@ class AXController {
         var focusedApp: CFTypeRef?
         AXUIElementCopyAttributeValue(sysWide, kAXFocusedApplicationAttribute as CFString, &focusedApp)
         guard let app = focusedApp else {
-            print("[LOG] No focused app found")
+            // print("[LOG] No focused app found")
             return nil
         }
         var focusedElem: CFTypeRef?
         AXUIElementCopyAttributeValue(app as! AXUIElement, kAXFocusedUIElementAttribute as CFString, &focusedElem)
         if let elem = focusedElem {
-            print("[LOG] Focused element found")
+            // print("[LOG] Focused element found")
             return (elem as! AXUIElement)
         }
-        print("[LOG] No focused element found")
+        // print("[LOG] No focused element found")
         return nil
     }
 
@@ -389,6 +392,10 @@ class AXController {
             return
         }
         
+        // 暂停选中文本监听，防止自动翻译回填时触发翻译菜单
+        pauseSelectionMonitoring()
+        print("[LOG] Paused selection monitoring for auto-translation")
+        
         // 检查是否在浏览器环境中
         let isWeb = isWebEnvironment()
         if let browserInfo = getCurrentBrowserInfo() {
@@ -401,6 +408,13 @@ class AXController {
         } else {
             // 使用原有的桌面应用替换方法
             forceReplaceWithClipboard(element: focused, text: text)
+        }
+        
+        // 延迟恢复选中文本监听，给文本替换足够的时间
+        // 使用更长的延迟，确保自动翻译完全完成且文本状态稳定
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            self.resumeSelectionMonitoring()
+            print("[LOG] Resumed selection monitoring after auto-translation")
         }
     }
     
@@ -618,10 +632,143 @@ class AXController {
         return nil
     }
     
+    // 检查元素是否可编辑
+    func isElementEditable(_ element: AXUIElement) -> Bool {
+        // 检查元素的角色（Role）
+        var role: CFTypeRef?
+        let roleResult = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
+        
+        if roleResult == .success, let roleString = role as? String {
+            let editableRoles = [
+                "AXTextField",          // 文本输入框
+                "AXTextArea",           // 文本区域
+                "AXComboBox",           // 组合框
+                "AXSecureTextField",    // 密码输入框
+                "AXSearchField",        // 搜索框
+                "AXStaticText"          // 静态文本（某些情况下可编辑）
+            ]
+            
+            print("[LOG] Element role: \(roleString)")
+            
+            // 如果是明确的可编辑控件
+            if editableRoles.prefix(5).contains(roleString) {
+                return true
+            }
+            
+            // 对于StaticText，需要进一步检查是否可编辑
+            if roleString == "AXStaticText" {
+                // 检查是否有编辑相关的属性
+                var isEditable: CFTypeRef?
+                let editableResult = AXUIElementCopyAttributeValue(element, "AXEnabled" as CFString, &isEditable)
+                if editableResult == .success, let enabled = isEditable as? Bool {
+                    return enabled
+                }
+                // StaticText通常不可编辑，除非特别标记
+                return false
+            }
+        }
+        
+        // 在Web环境中，通过JavaScript检查
+        if isWebEnvironment() {
+            return isWebElementEditable()
+        }
+        
+        // 默认假设不可编辑
+        return false
+    }
+    
+    // 检查Web元素是否可编辑
+    private func isWebElementEditable() -> Bool {
+        guard let browserInfo = getCurrentBrowserInfo() else { return false }
+        
+        var script = ""
+        
+        switch browserInfo.bundleId {
+        case "com.google.Chrome":
+            script = """
+                tell application "Google Chrome"
+                    try
+                        tell active tab of front window
+                            set jsResult to execute javascript "
+                                var activeElement = document.activeElement;
+                                if (!activeElement) return false;
+                                
+                                // 检查是否是可编辑的输入元素
+                                var editableTypes = ['input', 'textarea'];
+                                if (editableTypes.includes(activeElement.tagName.toLowerCase())) {
+                                    var inputType = activeElement.type ? activeElement.type.toLowerCase() : '';
+                                    var nonEditableTypes = ['button', 'submit', 'reset', 'image', 'file', 'radio', 'checkbox'];
+                                    return !nonEditableTypes.includes(inputType);
+                                }
+                                
+                                // 检查contentEditable属性
+                                if (activeElement.contentEditable === 'true') return true;
+                                if (activeElement.isContentEditable) return true;
+                                
+                                // 检查是否有designMode
+                                if (document.designMode === 'on') return true;
+                                
+                                return false;
+                            "
+                            return jsResult as boolean
+                        end tell
+                    on error
+                        return false
+                    end try
+                end tell
+            """
+        case "com.apple.Safari":
+            script = """
+                tell application "Safari"
+                    try
+                        tell front document
+                            set jsResult to do JavaScript "
+                                var activeElement = document.activeElement;
+                                if (!activeElement) return false;
+                                
+                                var editableTypes = ['input', 'textarea'];
+                                if (editableTypes.includes(activeElement.tagName.toLowerCase())) {
+                                    var inputType = activeElement.type ? activeElement.type.toLowerCase() : '';
+                                    var nonEditableTypes = ['button', 'submit', 'reset', 'image', 'file', 'radio', 'checkbox'];
+                                    return !nonEditableTypes.includes(inputType);
+                                }
+                                
+                                if (activeElement.contentEditable === 'true') return true;
+                                if (activeElement.isContentEditable) return true;
+                                if (document.designMode === 'on') return true;
+                                
+                                return false;
+                            "
+                            return jsResult
+                        end tell
+                    on error
+                        return false
+                    end try
+                end tell
+            """
+        default:
+            return false
+        }
+        
+        if let appleScript = NSAppleScript(source: script) {
+            var error: NSDictionary?
+            let result = appleScript.executeAndReturnError(&error)
+            
+            if let error = error {
+                print("[LOG] AppleScript error checking editability: \(error)")
+                return false
+            }
+            
+            return result.booleanValue
+        }
+        
+        return false
+    }
+
     // 获取当前选中的文本
     func getSelectedText() -> (text: String, element: AXUIElement)? {
         guard let focused = getFocusedElement() else {
-            print("[LOG] No focused element for selection")
+            // print("[LOG] No focused element for selection")
             return nil
         }
         
@@ -639,7 +786,7 @@ class AXController {
             }
         }
         
-        print("[LOG] No text selected")
+        // print("[LOG] No text selected")
         return nil
     }
     
@@ -776,6 +923,11 @@ class AXController {
     
     // 检查文本选中状态
     private func checkForTextSelection() {
+        // 如果选中文本监听被暂停，不执行任何操作
+        if isSelectionMonitoringPaused {
+            return
+        }
+        
         // 如果菜单正在显示，不要重复检查
         if isMenuShowing {
             return
@@ -812,8 +964,47 @@ class AXController {
         }
     }
     
+    // 用于跟踪最近的自动翻译操作
+    private var lastAutoTranslationTime: Date = Date.distantPast
+    private var lastAutoTranslationText: String = ""
+    
+    // 标记自动翻译开始
+    func markAutoTranslationStart(withText text: String) {
+        lastAutoTranslationTime = Date()
+        lastAutoTranslationText = text
+        print("[LOG] Marked auto-translation start for text: '\(text)'")
+    }
+    
+    // 检查文本是否可能是刚完成的自动翻译结果
+    private func isLikelyTranslationResult(_ text: String) -> Bool {
+        let timeSinceLastTranslation = Date().timeIntervalSince(lastAutoTranslationTime)
+        
+        // 只在最近5秒内进行过自动翻译时才检查
+        if timeSinceLastTranslation > 5.0 {
+            return false
+        }
+        
+        // 检查文本是否与原始翻译文本相似或相关
+        // 这里使用更保守的检查，避免误判
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let originalText = lastAutoTranslationText.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // 如果选中的文本长度与原始文本相近，可能是翻译结果
+        if abs(trimmedText.count - originalText.count) < originalText.count / 3 {
+            print("[LOG] Detected potential translation result within 5s of auto-translation")
+            return true
+        }
+        
+        return false
+    }
+
     // 统一的选中文本检查和菜单显示逻辑
     private func checkSelectedTextAndShowMenu() {
+        // 如果选中文本监听被暂停，不执行任何操作
+        if isSelectionMonitoringPaused {
+            return
+        }
+        
         guard let selection = getSelectedText() else {
             // 如果没有选中文本，隐藏菜单并重置状态
             if !lastSelectedText.isEmpty {
@@ -821,6 +1012,12 @@ class AXController {
                 lastSelectedText = ""
                 isMenuShowing = false
             }
+            return
+        }
+        
+        // 检查是否是刚刚完成的自动翻译结果，避免对翻译结果再次触发菜单
+        if isLikelyTranslationResult(selection.text) {
+            print("[LOG] Skipping menu for likely translation result: '\(selection.text)'")
             return
         }
         
@@ -1125,5 +1322,17 @@ class AXController {
             mouseEventMonitor = nil
             print("[LOG] Mouse event monitor removed")
         }
+    }
+    
+    // 暂停选中文本监听
+    func pauseSelectionMonitoring() {
+        isSelectionMonitoringPaused = true
+        print("[LOG] Selection monitoring paused")
+    }
+    
+    // 恢复选中文本监听
+    func resumeSelectionMonitoring() {
+        isSelectionMonitoringPaused = false
+        print("[LOG] Selection monitoring resumed")
     }
 } 

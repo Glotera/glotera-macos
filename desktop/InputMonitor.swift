@@ -111,6 +111,9 @@ class InputMonitor {
     }
     
     private func startTranslation(text: String, lang: String) {
+        // 标记自动翻译开始，用于后续过滤
+        AXController.shared.markAutoTranslationStart(withText: text)
+        
         // 获取当前焦点元素用于定位状态窗口
         let focusedElement = AXController.shared.getFocusedElement()
         
@@ -202,6 +205,9 @@ class InputMonitor {
     
     // 翻译完成后自动发送
     private func startTranslationWithAutoSend(text: String, lang: String) {
+        // 标记自动翻译开始，用于后续过滤
+        AXController.shared.markAutoTranslationStart(withText: text)
+        
         // 获取当前焦点元素用于定位状态窗口
         let focusedElement = AXController.shared.getFocusedElement()
         
