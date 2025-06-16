@@ -28,10 +28,10 @@ class TranslationResultWindow: NSWindow {
     
     // 计算窗口大小以适应内容
     private static func calculateWindowSize(original: String, translated: String) -> NSSize {
-        let maxWidth: CGFloat = 500
-        let minWidth: CGFloat = 350
-        let padding: CGFloat = 32 // 左右各16的padding
-        let verticalSpacing: CGFloat = 120 // 标题栏、间距等的固定高度
+        let maxWidth: CGFloat = 450 // 从500减少到450
+        let minWidth: CGFloat = 300 // 从350减少到300
+        let padding: CGFloat = 24 // 从32减少到24
+        let verticalSpacing: CGFloat = 80 // 从120减少到80
         
         // 计算文本所需的高度
         let font = NSFont.systemFont(ofSize: 13)
@@ -50,19 +50,19 @@ class TranslationResultWindow: NSWindow {
         ).height
         
         // 确保每个文本框至少有合适的高度，并为ScrollView预留空间
-        let minTextHeight: CGFloat = 30
-        let maxTextHeight: CGFloat = 150 // 增加最大文本高度
-        let finalOriginalHeight = min(max(originalHeight + 20, minTextHeight), maxTextHeight)
-        let finalTranslatedHeight = min(max(translatedHeight + 20, minTextHeight), maxTextHeight)
+        let minTextHeight: CGFloat = 25 // 从30减少到25
+        let maxTextHeight: CGFloat = 120 // 从150减少到120
+        let finalOriginalHeight = min(max(originalHeight + 15, minTextHeight), maxTextHeight) // 从20减少到15
+        let finalTranslatedHeight = min(max(translatedHeight + 15, minTextHeight), maxTextHeight)
         
         // 计算总高度：固定元素 + 两个文本框的高度 + 额外间距
-        let totalHeight = verticalSpacing + finalOriginalHeight + finalTranslatedHeight + 50 // 增加额外间距
+        let totalHeight = verticalSpacing + finalOriginalHeight + finalTranslatedHeight + 30 // 从50减少到30
         
         // 限制最大高度，但提供更多空间
-        let maxHeight: CGFloat = 600
+        let maxHeight: CGFloat = 500 // 从600减少到500
         let finalHeight = min(totalHeight, maxHeight)
         
-        return NSSize(width: maxWidth, height: max(finalHeight, 200)) // 增加最小高度
+        return NSSize(width: maxWidth, height: max(finalHeight, 150)) // 从200减少到150
     }
     
     private func setupContent(original: String, translated: String) {
@@ -215,19 +215,38 @@ struct TranslationResultView: View {
     @State private var showingCopySuccess = false
     
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 8) {
             // 标题栏（可拖动）
             HStack {
                 Image(systemName: "hand.draw")
                     .font(.system(size: 12))
                     .foregroundColor(.secondary.opacity(0.6))
-                    .help("拖动移动窗口")
+                    .help("Drag to move window")
                 
-                Text("翻译结果")
+                Text("Translation Result")
                     .font(.headline)
                     .foregroundColor(.primary)
                 
                 Spacer()
+                
+                // 复制按钮
+                Button(action: {
+                    onCopy(translated)
+                    showCopyFeedback()
+                }) {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 14))
+                        .foregroundColor(.blue)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .help("Copy to clipboard")
+                .onHover { isHovered in
+                    if isHovered {
+                        NSCursor.pointingHand.push()
+                    } else {
+                        NSCursor.pop()
+                    }
+                }
                 
                 Button(action: onClose) {
                     Image(systemName: "xmark.circle.fill")
@@ -243,8 +262,7 @@ struct TranslationResultView: View {
                     }
                 }
             }
-            .padding(.top, 4)
-            .padding(.bottom, 4)
+            .padding(.vertical, 2)
             .onHover { isHovered in
                 if isHovered {
                     NSCursor.openHand.push()
@@ -253,85 +271,46 @@ struct TranslationResultView: View {
                 }
             }
             
-            // 原文
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("原文:")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+            // 原文 - 只保留blockquote引用线，去掉背景框
+            VStack(alignment: .leading, spacing: 4) {
+                // blockquote风格的原文显示
+                HStack(alignment: .center, spacing: 12) {
+                    // 左侧引用线 - 只保持一行高
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.3))
+                        .frame(width: 3, height: 20)
+                        .cornerRadius(1.5)
                     
-                    Spacer()
-                    
-                    Button(action: {
-                        onCopy(original)
-                        showCopyFeedback()
-                    }) {
-                        Image(systemName: "doc.on.doc")
-                            .font(.system(size: 12))
-                            .foregroundColor(.blue)
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                    .help("复制原文")
-                }
-                
-                ScrollView {
+                    // 原文内容 - 只显示一行
                     Text(original)
                         .font(.system(size: 13))
-                        .foregroundColor(.primary)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
-                        .padding(.horizontal, 4)
                 }
-                .padding(8)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color(NSColor.controlBackgroundColor))
-                )
-                .frame(minHeight: 30, maxHeight: 150)
+                .padding(.vertical, 4)
+                .padding(.horizontal, 12)
             }
             
-            // 译文
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("译文:")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    
-                    Spacer()
-                    
-                    Button(action: {
-                        onCopy(translated)
-                        showCopyFeedback()
-                    }) {
-                        Image(systemName: "doc.on.doc")
-                            .font(.system(size: 12))
-                            .foregroundColor(.blue)
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                    .help("复制译文")
-                }
-                
+            // 译文 - 去掉背景框
+            VStack(alignment: .leading, spacing: 4) {
                 ScrollView {
                     Text(translated)
-                        .font(.system(size: 13))
+                        .font(.system(size: 14))
                         .foregroundColor(.primary)
+                        .lineSpacing(4)
+                        .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                         .padding(.horizontal, 4)
                 }
-                .padding(8)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color(NSColor.selectedContentBackgroundColor).opacity(0.1))
-                )
-                .frame(minHeight: 30, maxHeight: 150)
+                .frame(minHeight: 30, maxHeight: 120)
             }
-            
-            Spacer()
         }
-        .padding(16)
+        .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color(NSColor.windowBackgroundColor))
@@ -345,7 +324,7 @@ struct TranslationResultView: View {
             // 复制成功提示
             Group {
                 if showingCopySuccess {
-                    Text("已复制")
+                    Text("Copied")
                         .font(.caption)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)

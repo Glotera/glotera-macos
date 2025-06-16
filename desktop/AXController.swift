@@ -59,9 +59,22 @@ class AXController {
         // 获取输入框内容，使用Web环境特殊处理
         guard let value = getValueWithWebSupport(of: focused, isWeb: isWeb) else {
             print("[LOG] No value found in focused element")
+            
+            // 尝试备用方法获取内容
+            print("[LOG] Trying alternative content retrieval methods...")
+            if let alternativeValue = getAlternativeValue(of: focused) {
+                print("[LOG] Got content via alternative method: '\(alternativeValue)'")
+                return processContentForTrigger(alternativeValue)
+            }
+            
             return nil
         }
         
+        return processContentForTrigger(value)
+    }
+    
+    // 处理内容以检测触发器
+    private func processContentForTrigger(_ value: String) -> (text: String, lang: String)? {
         print("[LOG] Current input content: '\(value)'")
         print("[LOG] Content length: \(value.count) characters")
         
@@ -80,10 +93,10 @@ class AXController {
         
         // 检查多种触发模式，支持多行文本
         let patterns = [
-            #"^(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\s*$"#,  // 标准模式
-            #"(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)$"#,      // 无空格结尾
-            #"(.*?)\s+[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\s*$"#, // 空格分隔
-            #"(?s)(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\s*$"# // 使用内联修饰符支持多行
+            #"(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\s*$"#,      // 标准模式（最常用，Discord场景）
+            #"^(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\s*$"#,     // 严格开头模式
+            #"(.*?)\s+[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\s*$"#,   // 空格分隔
+            #"(?s)(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\s*$"#   // 多行支持
         ]
         
         for (index, pattern) in patterns.enumerated() {
@@ -97,15 +110,22 @@ class AXController {
                     let langRange = match.range(at: 2)
                     
                     if textRange.location != NSNotFound && langRange.location != NSNotFound {
-                        let text = nsValue.substring(with: textRange).trimmingCharacters(in: .whitespacesAndNewlines)
+                        // 提取文本，保留内部换行符，只去掉首尾空白
+                        let rawText = nsValue.substring(with: textRange)
+                        let text = rawText.trimmingCharacters(in: .whitespaces) // 只去掉空格和制表符，保留换行符
                         var lang = nsValue.substring(with: langRange).lowercased()
                         
                         // 转换 jp 为 ja
-            if lang == "jp" { lang = "ja" }
+                        if lang == "jp" { lang = "ja" }
                         
                         if !text.isEmpty {
                             print("[LOG] Trigger found using pattern \(index + 1): text='\(text)', lang='\(lang)'")
                             print("[LOG] Full text content (with potential newlines): '\(text)'")
+                            // 显示换行符位置以便调试
+                            let textLineBreaks = text.enumerated().compactMap { $0.element == "\n" ? $0.offset : nil }
+                            if !textLineBreaks.isEmpty {
+                                print("[LOG] Extracted text newlines at positions: \(textLineBreaks)")
+                            }
                             return (text: text, lang: lang)
                         }
                     }
@@ -114,6 +134,70 @@ class AXController {
         }
         
         print("[LOG] No trigger pattern matched")
+        
+        // 添加详细的调试信息
+        print("[LOG] Debug - checking for common trigger patterns in content:")
+        let commonTriggers = ["@en", "#en", "@zh", "#zh", "@id", "#id", "@ja", "#ja", "@ko", "#ko"]
+        for trigger in commonTriggers {
+            if cleanedValue.lowercased().contains(trigger) {
+                print("[LOG] Debug - Found '\(trigger)' in content but pattern didn't match")
+                print("[LOG] Debug - Content around trigger: '\(getContextAroundTrigger(cleanedValue, trigger: trigger))'")
+            }
+        }
+        
+        return nil
+    }
+    
+    // 获取触发器周围的上下文
+    private func getContextAroundTrigger(_ content: String, trigger: String) -> String {
+        let lowercased = content.lowercased()
+        if let range = lowercased.range(of: trigger) {
+            let start = max(content.startIndex, content.index(range.lowerBound, offsetBy: -20, limitedBy: content.startIndex) ?? content.startIndex)
+            let end = min(content.endIndex, content.index(range.upperBound, offsetBy: 20, limitedBy: content.endIndex) ?? content.endIndex)
+            return String(content[start..<end])
+        }
+        return ""
+    }
+    
+    // 备用内容获取方法
+    private func getAlternativeValue(of element: AXUIElement) -> String? {
+        print("[LOG] Trying alternative value retrieval methods")
+        
+        // 方法1: 尝试获取选中文本
+        if let selectedText = getSelectedTextAttribute(of: element), !selectedText.isEmpty {
+            print("[LOG] Got content via selected text: \(selectedText)")
+            return selectedText
+        }
+        
+        // 方法2: 尝试不同的属性
+        let attributes = [
+            kAXDescriptionAttribute,
+            kAXTitleAttribute,
+            kAXHelpAttribute,
+            kAXPlaceholderValueAttribute
+        ]
+        
+        for attribute in attributes {
+            var value: CFTypeRef?
+            let result = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
+            if result == .success, let stringValue = value as? String, !stringValue.isEmpty {
+                print("[LOG] Got content via \(attribute): \(stringValue)")
+                return stringValue
+            }
+        }
+        
+        // 方法3: 如果在Web环境，强制重试AppleScript
+        if isWebEnvironment() {
+            print("[LOG] Forcing AppleScript retry for web content")
+            // 等待一小段时间后重试
+            Thread.sleep(forTimeInterval: 0.1)
+            if let webContent = getWebContentViaAppleScript() {
+                print("[LOG] Got content via forced AppleScript retry: \(webContent)")
+                return webContent
+            }
+        }
+        
+        print("[LOG] All alternative methods failed")
         return nil
     }
     
@@ -121,6 +205,19 @@ class AXController {
     private func preprocessContent(_ content: String) -> String {
         var cleaned = content
         
+        // 检查当前应用是否为Discord或其他聊天应用
+        let isDiscordOrChat = isDiscordOrChatApp()
+        
+        // 对于Discord等聊天应用，使用更保守的清理策略
+        if isDiscordOrChat {
+            print("[LOG] Detected Discord/Chat app - using conservative preprocessing")
+            // 只进行基本的空格合并，不移除任何文本内容
+            cleaned = cleaned.replacingOccurrences(of: #"[ \t]+"#, with: " ", options: .regularExpression)
+            cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+            return cleaned
+        }
+        
+        // 对于其他应用（如Notion），使用更激进的清理策略
         // 移除常见的Notion界面元素文本
         let notionInterferencePatterns = [
             "Add cover",
@@ -153,8 +250,15 @@ class AXController {
         // 匹配类似 "Column 1Column 2Column 3" 这样的表格标题
         cleaned = cleaned.replacingOccurrences(of: #"Column\s*\d+"#, with: "", options: .regularExpression)
         
-        // 移除多余的空白字符和换行符
-        cleaned = cleaned.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        // 只合并连续的空格和制表符，保留换行符
+        cleaned = cleaned.replacingOccurrences(of: #"[ \t]+"#, with: " ", options: .regularExpression)
+        
+        // 移除行首行尾的空白，但保留换行符
+        let lines = cleaned.components(separatedBy: .newlines)
+        let trimmedLines = lines.map { $0.trimmingCharacters(in: .whitespaces) }
+        cleaned = trimmedLines.joined(separator: "\n")
+        
+        // 最终去掉首尾空白
         cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
         
         // 如果清理后的内容太短或为空，返回原内容
@@ -163,6 +267,32 @@ class AXController {
         }
         
         return cleaned
+    }
+    
+    // 检查当前应用是否为Discord或其他聊天应用
+    func isDiscordOrChatApp() -> Bool {
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+              let bundleId = frontmostApp.bundleIdentifier else {
+            return false
+        }
+        
+        let chatAppBundleIds = [
+            "com.hnc.Discord",
+            "com.discord.Discord",
+            "com.tencent.xinWeChat",
+            "com.apple.iChat",
+            "com.microsoft.teams",
+            "us.zoom.xos",
+            "com.skype.skype",
+            "org.whispersystems.signal-desktop",
+            "com.tdesktop.Telegram"
+        ]
+        
+        let result = chatAppBundleIds.contains(bundleId)
+        if result {
+            print("[LOG] Detected chat app: \(frontmostApp.localizedName ?? "Unknown") (\(bundleId))")
+        }
+        return result
     }
     
     // 获取输入框内容，支持Web环境
@@ -385,10 +515,11 @@ class AXController {
     }
 
     // 替换输入框内容
-    func replaceInput(with text: String) {
+    func replaceInput(with text: String, completion: (() -> Void)? = nil) {
         print("[LOG] Replacing input with: \(text)")
         guard let focused = getFocusedElement() else {
             print("[LOG] No focused element to replace")
+            completion?()
             return
         }
         
@@ -404,10 +535,14 @@ class AXController {
         
         if isWeb {
             // 使用Web专用的替换方法
-            replaceWebInputContent(element: focused, text: text)
+            replaceWebInputContent(element: focused, text: text) {
+                completion?()
+            }
         } else {
             // 使用原有的桌面应用替换方法
-            forceReplaceWithClipboard(element: focused, text: text)
+            forceReplaceWithClipboard(element: focused, text: text) {
+                completion?()
+            }
         }
         
         // 延迟恢复选中文本监听，给文本替换足够的时间
@@ -419,24 +554,32 @@ class AXController {
     }
     
     // Web输入框内容替换的专用方法
-    private func replaceWebInputContent(element: AXUIElement, text: String) {
+    private func replaceWebInputContent(element: AXUIElement, text: String, completion: @escaping () -> Void) {
         print("[LOG] Using Web input replacement method")
         
         // 方法1: 尝试AppleScript + JavaScript进行精确替换
+        print("[LOG] Attempting AppleScript + JavaScript replacement first")
         if replaceViaAppleScriptJS(text: text) {
             print("[LOG] Successfully replaced via AppleScript + JavaScript")
+            completion()
             return
         }
         
+        print("[LOG] AppleScript + JavaScript failed, falling back to clipboard method")
         // 方法2: 回退到剪贴板方法，但增加额外的验证和重试
-        replaceWebViaClipboardWithRetry(element: element, text: text)
+        replaceWebViaClipboardWithRetry(element: element, text: text, completion: completion)
     }
     
     // 使用AppleScript + JavaScript进行Web内容替换
     private func replaceViaAppleScriptJS(text: String) -> Bool {
         print("[LOG] Attempting AppleScript + JavaScript replacement")
         
-        guard let browserInfo = getCurrentBrowserInfo() else { return false }
+        guard let browserInfo = getCurrentBrowserInfo() else { 
+            print("[LOG] No browser info available")
+            return false 
+        }
+        
+        print("[LOG] Browser detected: \(browserInfo.appName) (\(browserInfo.bundleId))")
         
         // 转义JavaScript字符串中的特殊字符
         let escapedText = text
@@ -445,6 +588,8 @@ class AXController {
             .replacingOccurrences(of: "\"", with: "\\\"")
             .replacingOccurrences(of: "\n", with: "\\n")
             .replacingOccurrences(of: "\r", with: "\\r")
+        
+        print("[LOG] Escaped text for JavaScript: '\(escapedText)'")
         
         var script = ""
         
@@ -455,16 +600,40 @@ class AXController {
                     try
                         tell active tab of front window
                             set jsResult to execute javascript "
+                                console.log('Starting text replacement...');
                                 var activeElement = document.activeElement;
+                                console.log('Active element:', activeElement);
+                                
                                 if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
+                                    console.log('Found INPUT/TEXTAREA element');
+                                    var oldValue = activeElement.value;
                                     activeElement.value = '\(escapedText)';
                                     activeElement.focus();
+                                    
+                                    // 触发input事件，确保页面知道内容已更改
+                                    var inputEvent = new Event('input', { bubbles: true });
+                                    activeElement.dispatchEvent(inputEvent);
+                                    
+                                    // 触发change事件
+                                    var changeEvent = new Event('change', { bubbles: true });
+                                    activeElement.dispatchEvent(changeEvent);
+                                    
+                                    console.log('Text replaced from:', oldValue, 'to:', activeElement.value);
                                     return 'success';
                                 } else if (activeElement && activeElement.contentEditable === 'true') {
+                                    console.log('Found contentEditable element');
+                                    var oldContent = activeElement.textContent;
                                     activeElement.textContent = '\(escapedText)';
                                     activeElement.focus();
+                                    
+                                    // 触发input事件
+                                    var inputEvent = new Event('input', { bubbles: true });
+                                    activeElement.dispatchEvent(inputEvent);
+                                    
+                                    console.log('Content replaced from:', oldContent, 'to:', activeElement.textContent);
                                     return 'success';
                                 } else {
+                                    console.log('No suitable active input element found');
                                     return 'no_active_input';
                                 }
                             "
@@ -481,16 +650,40 @@ class AXController {
                     try
                         tell front document
                             set jsResult to do JavaScript "
+                                console.log('Starting text replacement...');
                                 var activeElement = document.activeElement;
+                                console.log('Active element:', activeElement);
+                                
                                 if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
+                                    console.log('Found INPUT/TEXTAREA element');
+                                    var oldValue = activeElement.value;
                                     activeElement.value = '\(escapedText)';
                                     activeElement.focus();
+                                    
+                                    // 触发input事件，确保页面知道内容已更改
+                                    var inputEvent = new Event('input', { bubbles: true });
+                                    activeElement.dispatchEvent(inputEvent);
+                                    
+                                    // 触发change事件
+                                    var changeEvent = new Event('change', { bubbles: true });
+                                    activeElement.dispatchEvent(changeEvent);
+                                    
+                                    console.log('Text replaced from:', oldValue, 'to:', activeElement.value);
                                     return 'success';
                                 } else if (activeElement && activeElement.contentEditable === 'true') {
+                                    console.log('Found contentEditable element');
+                                    var oldContent = activeElement.textContent;
                                     activeElement.textContent = '\(escapedText)';
                                     activeElement.focus();
+                                    
+                                    // 触发input事件
+                                    var inputEvent = new Event('input', { bubbles: true });
+                                    activeElement.dispatchEvent(inputEvent);
+                                    
+                                    console.log('Content replaced from:', oldContent, 'to:', activeElement.textContent);
                                     return 'success';
                                 } else {
+                                    console.log('No suitable active input element found');
                                     return 'no_active_input';
                                 }
                             "
@@ -502,9 +695,11 @@ class AXController {
                 end tell
             """
         default:
+            print("[LOG] Unsupported browser: \(browserInfo.bundleId)")
             return false
         }
         
+        print("[LOG] Executing AppleScript...")
         if let appleScript = NSAppleScript(source: script) {
             var error: NSDictionary?
             let result = appleScript.executeAndReturnError(&error)
@@ -515,15 +710,23 @@ class AXController {
             }
             
             let resultString = result.stringValue ?? ""
-            print("[LOG] AppleScript replacement result: \(resultString)")
-            return resultString == "success"
+            print("[LOG] AppleScript replacement result: '\(resultString)'")
+            
+            if resultString == "success" {
+                print("[LOG] AppleScript replacement successful")
+                return true
+            } else {
+                print("[LOG] AppleScript replacement failed with result: \(resultString)")
+                return false
+            }
+        } else {
+            print("[LOG] Failed to create AppleScript object")
+            return false
         }
-        
-        return false
     }
     
     // Web环境下的剪贴板替换，带重试机制
-    private func replaceWebViaClipboardWithRetry(element: AXUIElement, text: String) {
+    private func replaceWebViaClipboardWithRetry(element: AXUIElement, text: String, completion: @escaping () -> Void) {
         print("[LOG] Using Web clipboard replacement with retry")
         
         // 保存原始剪贴板内容
@@ -547,6 +750,7 @@ class AXController {
                                 pasteboard.setString(original, forType: .string)
                             }
                             print("[LOG] Clipboard content restored")
+                            completion()
                         }
                     }
                 }
@@ -558,6 +762,7 @@ class AXController {
                         pasteboard.setString(original, forType: .string)
                     }
                     print("[LOG] Clipboard content restored")
+                    completion()
                 }
             }
         }
@@ -634,6 +839,9 @@ class AXController {
     
     // 检查元素是否可编辑
     func isElementEditable(_ element: AXUIElement) -> Bool {
+        // 检查当前应用是否是微信
+        let isWeChat = isWeChatApp()
+        
         // 检查元素的角色（Role）
         var role: CFTypeRef?
         let roleResult = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
@@ -648,11 +856,20 @@ class AXController {
                 "AXStaticText"          // 静态文本（某些情况下可编辑）
             ]
             
-            print("[LOG] Element role: \(roleString)")
+            NSLog("[LOG] Element role: \(roleString), isWeChat: \(isWeChat)")
             
             // 如果是明确的可编辑控件
             if editableRoles.prefix(5).contains(roleString) {
                 return true
+            }
+            
+            // 对于微信，特殊处理
+            if isWeChat {
+                // 微信中的文本通常都可以被替换，即使是StaticText
+                if roleString == "AXStaticText" || roleString == "AXTextArea" || roleString == "AXTextField" {
+                    NSLog("[LOG] WeChat element detected as editable")
+                    return true
+                }
             }
             
             // 对于StaticText，需要进一步检查是否可编辑
@@ -674,6 +891,15 @@ class AXController {
         }
         
         // 默认假设不可编辑
+        return false
+    }
+    
+    // 检查当前应用是否是微信
+    private func isWeChatApp() -> Bool {
+        if let frontmostApp = NSWorkspace.shared.frontmostApplication,
+           let bundleId = frontmostApp.bundleIdentifier {
+            return bundleId.contains("wechat") || bundleId.contains("WeChat")
+        }
         return false
     }
     
@@ -876,33 +1102,55 @@ class AXController {
     private var isMouseDragging: Bool = false
     private var lastMouseUpTime: Date = Date.distantPast
     private var mouseEventMonitor: Any?
+    private var keyboardEventMonitor: Any?
+    private var lastDoubleClickTime: Date = Date.distantPast
+    private var lastCtrlATime: Date = Date.distantPast
     
     // 监听鼠标事件
     private func startMouseEventMonitoring() {
-        // 只监听鼠标事件，绝对不影响键盘事件处理
-        // 使用NSEvent.addGlobalMonitorForEvents，这不会阻塞其他事件监听器
+        // 监听鼠标事件，包括双击
         mouseEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp, .leftMouseDragged]) { [weak self] event in
-            // 这个回调是异步的，不会阻塞主事件流
             DispatchQueue.main.async {
                 self?.handleMouseEvent(event)
             }
         }
         
-        print("[LOG] Mouse event monitoring started (completely non-blocking)")
+        // 监听键盘事件，检测 Ctrl+A
+        keyboardEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+            DispatchQueue.main.async {
+                self?.handleKeyboardEvent(event)
+            }
+        }
+        
+        print("[LOG] Mouse and keyboard event monitoring started")
     }
     
     private func handleMouseEvent(_ event: NSEvent) {
-        // 只处理鼠标拖拽相关的状态，不做任何可能影响键盘的操作
         switch event.type {
         case .leftMouseDown:
-            // 鼠标按下，重置拖拽状态
+            // 检测双击
+            let now = Date()
+            let timeSinceLastClick = now.timeIntervalSince(lastDoubleClickTime)
+            
+            if timeSinceLastClick < 0.5 && timeSinceLastClick > 0.1 {
+                // 双击检测
+                print("[LOG] Double click detected")
+                lastDoubleClickTime = now
+                // 延迟检查双击选择的文本
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    self.checkForTextSelectionAfterDoubleClick()
+                }
+            } else {
+                lastDoubleClickTime = now
+            }
+            
+            // 重置拖拽状态
             isMouseDragging = false
             
         case .leftMouseDragged:
             // 鼠标拖拽中，标记为拖拽状态
             if !isMouseDragging {
                 isMouseDragging = true
-                // 减少日志输出，避免影响性能
             }
             
         case .leftMouseUp:
@@ -918,6 +1166,19 @@ class AXController {
             
         default:
             break
+        }
+    }
+    
+    // 处理键盘事件
+    private func handleKeyboardEvent(_ event: NSEvent) {
+        // 检测 Ctrl+A (Cmd+A on Mac)
+        if event.modifierFlags.contains(.command) && event.keyCode == 0 { // keyCode 0 is 'A'
+            print("[LOG] Cmd+A detected")
+            lastCtrlATime = Date()
+            // 延迟检查 Cmd+A 选择的文本
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                self.checkForTextSelectionAfterCtrlA()
+            }
         }
     }
     
@@ -951,7 +1212,9 @@ class AXController {
         }
         lastSelectionCheckTime = now
         
-        checkSelectedTextAndShowMenu()
+        // 只在定时器检查时隐藏菜单，不显示菜单
+        // 菜单只能通过鼠标拖拽选择后显示
+        hideMenuIfNoSelection()
     }
     
     // 鼠标释放后的专门检查
@@ -960,7 +1223,28 @@ class AXController {
         
         // 等待一个更长的延迟，确保选择完全稳定
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            self.checkSelectedTextAndShowMenu()
+            // 只有在鼠标拖拽选择后才显示菜单
+            self.checkSelectedTextAndShowMenuAfterMouseSelection()
+        }
+    }
+    
+    // 双击后的文本选择检查
+    private func checkForTextSelectionAfterDoubleClick() {
+        print("[LOG] Checking text selection after double click")
+        
+        // 等待延迟，确保双击选择完全稳定
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            self.checkSelectedTextAndShowMenuAfterMouseSelection()
+        }
+    }
+    
+    // Cmd+A 后的文本选择检查
+    private func checkForTextSelectionAfterCtrlA() {
+        print("[LOG] Checking text selection after Cmd+A")
+        
+        // 等待延迟，确保全选完全稳定
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            self.checkSelectedTextAndShowMenuAfterKeyboardSelection()
         }
     }
     
@@ -998,8 +1282,39 @@ class AXController {
         return false
     }
 
-    // 统一的选中文本检查和菜单显示逻辑
-    private func checkSelectedTextAndShowMenu() {
+    // 只隐藏菜单，不显示菜单的逻辑
+    private func hideMenuIfNoSelection() {
+        guard let selection = getSelectedText() else {
+            // 如果没有选中文本，隐藏菜单并重置状态
+            if !lastSelectedText.isEmpty {
+                TranslationMenuWindow.shared.hideMenu()
+                lastSelectedText = ""
+                isMenuShowing = false
+            }
+            return
+        }
+        
+        // 如果选中文本发生变化，也隐藏菜单
+        let originalText = selection.text
+        if originalText != lastSelectedText && !lastSelectedText.isEmpty {
+            TranslationMenuWindow.shared.hideMenu()
+            lastSelectedText = ""
+            isMenuShowing = false
+        }
+    }
+    
+    // 鼠标选择后的菜单显示逻辑
+    private func checkSelectedTextAndShowMenuAfterMouseSelection() {
+        checkSelectedTextAndShowMenu(selectionType: "mouse")
+    }
+    
+    // 键盘选择后的菜单显示逻辑
+    private func checkSelectedTextAndShowMenuAfterKeyboardSelection() {
+        checkSelectedTextAndShowMenu(selectionType: "keyboard")
+    }
+    
+    // 统一的菜单显示逻辑
+    private func checkSelectedTextAndShowMenu(selectionType: String) {
         // 如果选中文本监听被暂停，不执行任何操作
         if isSelectionMonitoringPaused {
             return
@@ -1039,7 +1354,7 @@ class AXController {
             lastSelectedText = originalText
             isMenuShowing = true
             
-            print("[LOG] Selected text: '\(originalText)' (length: \(originalText.count))")
+            print("[LOG] Selected text after \(selectionType) selection: '\(originalText)' (length: \(originalText.count))")
             print("[LOG] Trimmed for check: '\(trimmedForCheck)' (length: \(trimmedForCheck.count))")
             
             // 获取选中文本的位置
@@ -1059,32 +1374,59 @@ class AXController {
     }
     
     // 使用剪贴板强力替换内容
-    private func forceReplaceWithClipboard(element: AXUIElement, text: String) {
+    private func forceReplaceWithClipboard(element: AXUIElement, text: String, completion: @escaping () -> Void) {
         print("[LOG] Using clipboard force replace method")
         
         // 保存当前剪贴板内容
         let pasteboard = NSPasteboard.general
         let originalContent = pasteboard.string(forType: .string)
+        print("[LOG] Original clipboard content: '\(originalContent ?? "nil")'")
         
         // 将新文本放入剪贴板
         pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
+        let setSuccess = pasteboard.setString(text, forType: .string)
+        print("[LOG] Set clipboard success: \(setSuccess), content: '\(text)'")
+        
+        // 验证剪贴板内容是否正确设置
+        let verifyContent = pasteboard.string(forType: .string)
+        print("[LOG] Verified clipboard content: '\(verifyContent ?? "nil")'")
+        
+        if verifyContent != text {
+            print("[LOG] ERROR: Clipboard content verification failed!")
+            completion()
+            return
+        }
         
         // 选择全部内容 (Cmd+A)
         simulateSelectAll()
         
         // 等待一小段时间确保选择完成
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            // 在粘贴前再次验证剪贴板内容
+            let prepasteContent = pasteboard.string(forType: .string)
+            print("[LOG] Pre-paste clipboard content: '\(prepasteContent ?? "nil")'")
+            
+            if prepasteContent != text {
+                print("[LOG] ERROR: Clipboard content changed before paste! Re-setting...")
+                pasteboard.clearContents()
+                pasteboard.setString(text, forType: .string)
+                
+                // 再次验证
+                let reVerifyContent = pasteboard.string(forType: .string)
+                print("[LOG] Re-verified clipboard content: '\(reVerifyContent ?? "nil")'")
+            }
+            
             // 粘贴新内容 (Cmd+V)
             self.simulatePaste()
             
-            // 恢复原始剪贴板内容
+            // 恢复原始剪贴板内容并调用完成回调
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 pasteboard.clearContents()
                 if let original = originalContent {
                     pasteboard.setString(original, forType: .string)
                 }
-                print("[LOG] Clipboard content restored")
+                print("[LOG] Clipboard content restored to: '\(originalContent ?? "nil")'")
+                completion()
             }
         }
     }
@@ -1093,6 +1435,7 @@ class AXController {
     private func simulateSelectAll() {
         // 添加延迟，确保与InputMonitor的事件处理分离
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            print("[LOG] Simulating Cmd+A select all")
             let source = CGEventSource(stateID: .hidSystemState)
             
             // Cmd+A
@@ -1114,6 +1457,8 @@ class AXController {
                 cmdUp.post(tap: .cghidEventTap)
                 
                 print("[LOG] Simulated Cmd+A select all (with timing separation)")
+            } else {
+                print("[LOG] Failed to create Cmd+A events")
             }
         }
     }
@@ -1122,6 +1467,7 @@ class AXController {
     private func simulatePaste() {
         // 添加延迟，确保与InputMonitor的事件处理分离
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            print("[LOG] Simulating Cmd+V paste")
             let source = CGEventSource(stateID: .hidSystemState)
             
             // Cmd+V
@@ -1143,6 +1489,8 @@ class AXController {
                 cmdUp.post(tap: .cghidEventTap)
                 
                 print("[LOG] Simulated Cmd+V paste (with timing separation)")
+            } else {
+                print("[LOG] Failed to create Cmd+V events")
             }
         }
     }
@@ -1321,6 +1669,12 @@ class AXController {
             NSEvent.removeMonitor(monitor)
             mouseEventMonitor = nil
             print("[LOG] Mouse event monitor removed")
+        }
+        
+        if let monitor = keyboardEventMonitor {
+            NSEvent.removeMonitor(monitor)
+            keyboardEventMonitor = nil
+            print("[LOG] Keyboard event monitor removed")
         }
     }
     

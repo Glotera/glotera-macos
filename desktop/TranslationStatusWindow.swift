@@ -47,7 +47,7 @@ class TranslationStatusWindow: NSWindow {
         }
         
         self.setFrameTopLeftPoint(statusPoint)
-        self.makeKeyAndOrderFront(nil)
+        self.orderFront(nil)  // 不抢夺焦点，避免取消选中状态
         
         print("[LOG] Translation status shown: translating")
     }
@@ -77,6 +77,15 @@ class TranslationStatusWindow: NSWindow {
     func hideStatus() {
         self.orderOut(nil)
         print("[LOG] Translation status hidden")
+    }
+    
+    // 防止状态窗口抢夺焦点
+    override var canBecomeKey: Bool {
+        return false
+    }
+    
+    override var canBecomeMain: Bool {
+        return false
     }
 }
 
