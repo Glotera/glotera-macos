@@ -2,6 +2,15 @@ import Cocoa
 import ApplicationServices
 import CoreFoundation
 
+struct AppInfo {
+    let bundleId: String
+    let appName: String
+    let isBrowser: Bool
+    let isWeChat: Bool
+    let isChrome: Bool
+    var javaScriptPermissionsEnabled: Bool
+}
+
 class AXController {
     static let shared = AXController()
     private var isInputDisabled = false
@@ -22,6 +31,8 @@ class AXController {
         "com.vivaldi.Vivaldi"
     ]
     
+    // MARK: - Public Info Getters
+    
     // 检查当前活跃应用是否为浏览器
     func getCurrentBrowserInfo() -> (bundleId: String, appName: String)? {
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
@@ -36,11 +47,54 @@ class AXController {
         return nil
     }
     
+    // 获取指定元素的应用信息
+    func getAppInfo(for element: AXUIElement) -> AppInfo {
+        let pid = getPid(for: element)
+        var appName = "Unknown"
+        var bundleId = ""
+        
+        if let app = NSRunningApplication(processIdentifier: pid) {
+            appName = app.localizedName ?? "Unknown"
+            bundleId = app.bundleIdentifier ?? ""
+        }
+        
+        let isBrowser = browserBundleIds.contains(bundleId)
+        let isWeChat = bundleId.contains("wechat") || bundleId.contains("WeChat")
+        let isChrome = bundleId == "com.google.Chrome"
+        
+        // 检查Chrome的JavaScript权限
+        var jsEnabled = false
+        if isChrome {
+            jsEnabled = checkChromeJavaScriptPermission()
+        }
+        
+        return AppInfo(
+            bundleId: bundleId,
+            appName: appName,
+            isBrowser: isBrowser,
+            isWeChat: isWeChat,
+            isChrome: isChrome,
+            javaScriptPermissionsEnabled: jsEnabled
+        )
+    }
+    
+    // 获取元素的PID
+    func getPid(for element: AXUIElement) -> pid_t {
+        var pid: pid_t = 0
+        let result = AXUIElementGetPid(element, &pid)
+        if result != .success {
+            print("[LOG] Failed to get PID for element")
+        }
+        return pid
+    }
+    
     // 检查是否在Web环境中
     func isWebEnvironment() -> Bool {
         return getCurrentBrowserInfo() != nil
     }
 
+    // MARK: - Trigger Detection
+    
     // 检测当前焦点输入框内容，提取触发标记和原文
     func detectTriggerAndExtract() -> (text: String, lang: String)? {
         print("[LOG] Starting trigger detection")
@@ -1586,7 +1640,7 @@ class AXController {
         guard let selection = getSelectedText() else {
             // 如果没有选中文本，隐藏菜单并重置状态
             if !lastSelectedText.isEmpty {
-                TranslationMenuWindow.shared.hideMenu()
+                TranslationMenuWindow.shared.hide()
                 lastSelectedText = ""
                 isMenuShowing = false
             }
@@ -1596,7 +1650,7 @@ class AXController {
         // 如果选中文本发生变化，也隐藏菜单
         let originalText = selection.text
         if originalText != lastSelectedText && !lastSelectedText.isEmpty {
-            TranslationMenuWindow.shared.hideMenu()
+            TranslationMenuWindow.shared.hide()
             lastSelectedText = ""
             isMenuShowing = false
         }
@@ -1622,7 +1676,7 @@ class AXController {
         guard let selection = getSelectedText() else {
             // 如果没有选中文本，隐藏菜单并重置状态
             if !lastSelectedText.isEmpty {
-                TranslationMenuWindow.shared.hideMenu()
+                TranslationMenuWindow.shared.hide()
                 lastSelectedText = ""
                 isMenuShowing = false
             }
@@ -1641,7 +1695,7 @@ class AXController {
         
         if trimmedForCheck.count < 3 {
             if !lastSelectedText.isEmpty {
-                TranslationMenuWindow.shared.hideMenu()
+                TranslationMenuWindow.shared.hide()
                 lastSelectedText = ""
                 isMenuShowing = false
             }
@@ -1656,19 +1710,24 @@ class AXController {
             print("[LOG] Selected text after \(selectionType) selection: '\(originalText)' (length: \(originalText.count))")
             print("[LOG] Trimmed for check: '\(trimmedForCheck)' (length: \(trimmedForCheck.count))")
             
-            // 获取选中文本的位置
+            // 获取选中文本的位置和应用信息
             let mouseLocation = NSEvent.mouseLocation
+            let appInfo = getAppInfo(for: selection.element)
             
-            // 显示翻译菜单，传递原始文本
-            TranslationMenuWindow.shared.showMenu(
+            // 显示翻译菜单，传递所需信息
+            TranslationMenuWindow.shared.show(
+                for: originalText,
+                from: selection.element,
                 at: mouseLocation,
-                with: originalText,
-                sourceElement: selection.element,
-                onMenuClosed: { [weak self] in
-                    self?.isMenuShowing = false
-                    self?.lastSelectedText = ""
-                }
+                browserInfo: appInfo.isBrowser ? appInfo : nil
             )
+            
+            // 设置关闭回调
+            TranslationMenuWindow.shared.onMenuClosed = { [weak self] in
+                self?.isMenuShowing = false
+                self?.lastSelectedText = ""
+                print("[LOG] Menu closed callback triggered")
+            }
         }
     }
     
@@ -1987,5 +2046,31 @@ class AXController {
     func resumeSelectionMonitoring() {
         isSelectionMonitoringPaused = false
         print("[LOG] Selection monitoring resumed")
+    }
+    
+    // 检查Chrome的AppleScript JavaScript权限
+    private func checkChromeJavaScriptPermission() -> Bool {
+        let scriptSource = """
+        tell application "System Events"
+            tell process "Google Chrome"
+                if exists (menu item "允许来自 Apple 事件的 JavaScript" of menu "开发者" of menu item "开发者" of menu "查看" of menu bar 1) then
+                    return true
+                else
+                    return false
+                end if
+            end tell
+        end tell
+        """
+        
+        if let script = NSAppleScript(source: scriptSource) {
+            var error: NSDictionary?
+            let result = script.executeAndReturnError(&error)
+            if error == nil {
+                return result.booleanValue
+            } else {
+                print("[LOG] Error checking Chrome permissions: \(error!)")
+            }
+        }
+        return false
     }
 } 

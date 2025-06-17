@@ -8,7 +8,10 @@ class TranslationMenuWindow: NSWindow {
     private var selectedText: String = ""
     private var sourceElement: AXUIElement?
     private var hostingView: NSHostingView<TranslationMenuView>?
-    private var onMenuClosed: (() -> Void)?
+    var onMenuClosed: (() -> Void)?
+    private var cachedBrowserInfo: AppInfo?
+    private var lastMousePosition: NSPoint = .zero
+    private var sourceElementPid: pid_t = 0
     
     private init() {
         super.init(
@@ -47,7 +50,7 @@ class TranslationMenuWindow: NSWindow {
                 self?.translateToLanguage(language)
             },
             onClose: { [weak self] in
-                self?.hideMenu()
+                self?.hide()
             }
         )
         
@@ -86,7 +89,7 @@ class TranslationMenuWindow: NSWindow {
                 
                 // 如果点击在窗口外部，隐藏菜单
                 if !windowFrame.contains(clickLocation) {
-                    window.hideMenu()
+                    window.hide()
                 }
             }
         }
@@ -96,7 +99,7 @@ class TranslationMenuWindow: NSWindow {
             if let window = self, window.isVisible {
                 // 在任何键盘输入时隐藏菜单
                 print("[LOG] Key pressed while menu visible, hiding menu")
-                window.hideMenu()
+                window.hide()
             }
         }
     }
@@ -105,45 +108,42 @@ class TranslationMenuWindow: NSWindow {
         // 延迟隐藏，给用户时间点击菜单
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             if !self.isKeyWindow {
-                self.hideMenu()
+                self.hide()
             }
         }
     }
     
-    func showMenu(at point: NSPoint, with text: String, sourceElement: AXUIElement?, onMenuClosed: @escaping () -> Void) {
+    func show(for text: String, from element: AXUIElement, at location: NSPoint, browserInfo: AppInfo?) {
         self.selectedText = text
-        self.sourceElement = sourceElement
-        self.onMenuClosed = onMenuClosed
+        self.sourceElement = element
+        self.lastMousePosition = location
+        self.cachedBrowserInfo = browserInfo
+        self.sourceElementPid = AXController.shared.getPid(for: element)
         
-        // 重新设置事件监听器（确保每次显示菜单时都有新的监听器）
         setupEventHandlers()
         
-        // 调整窗口位置，确保不超出屏幕边界
-        var menuPoint = point
+        // 调整窗口位置
+        var menuPoint = location
         let screenFrame = NSScreen.main?.visibleFrame ?? NSRect.zero
+        menuPoint.y += 25 // 在光标上方显示
         
-        // 水平位置调整
-        if menuPoint.x + self.frame.width > screenFrame.maxX {
-            menuPoint.x = screenFrame.maxX - self.frame.width - 10
+        if menuPoint.x + frame.width > screenFrame.maxX {
+            menuPoint.x = screenFrame.maxX - frame.width - 5
         }
         if menuPoint.x < screenFrame.minX {
-            menuPoint.x = screenFrame.minX + 10
+            menuPoint.x = screenFrame.minX + 5
         }
-        
-        // 垂直位置调整 - 显示在选中文本上方
-        menuPoint.y += 30
-        if menuPoint.y + self.frame.height > screenFrame.maxY {
-            menuPoint.y = point.y - self.frame.height - 10
+        if menuPoint.y + frame.height > screenFrame.maxY {
+            menuPoint.y = location.y - frame.height - 5
         }
         
         self.setFrameTopLeftPoint(menuPoint)
-        self.orderFront(nil)
-        // 不要调用 makeKey()，避免抢夺焦点影响选中状态
+        self.makeKeyAndOrderFront(nil)
         
         NSLog("[LOG] Translation menu shown at \(menuPoint) for text: '\(text)'")
     }
     
-    func hideMenu() {
+    func hide() {
         self.orderOut(nil)
         onMenuClosed?()
         onMenuClosed = nil
@@ -175,7 +175,7 @@ class TranslationMenuWindow: NSWindow {
         
         guard !selectedText.isEmpty else {
             NSLog("[LOG] No text selected for translation")
-            hideMenu()
+            hide()
             return
         }
         
@@ -185,7 +185,7 @@ class TranslationMenuWindow: NSWindow {
         NSLog("[LOG] Source element: \(sourceElement != nil ? "exists" : "nil")")
         
         // 隐藏菜单，显示翻译状态
-        hideMenu()
+        hide()
         TranslationStatusWindow.shared.showTranslating(near: sourceElement)
         
         // 开始翻译
@@ -223,384 +223,279 @@ class TranslationMenuWindow: NSWindow {
     private func replaceSelectedText(in element: AXUIElement, with text: String, completion: @escaping () -> Void) {
         NSLog("[LOG] Attempting to replace selected text with: '\(text)'")
         NSLog("[LOG] Original selected text was: '\(selectedText)'")
-        
+
         // 暂时禁用选中文本监听，防止我们的操作触发新的菜单
         AXController.shared.pauseSelectionMonitoring()
+
+        let appInfo = AXController.shared.getAppInfo(for: element)
+        let isBrowser = appInfo.isBrowser
+        let isWeChat = appInfo.isWeChat
         
-        // 尝试直接使用 AX API 设置文本
-        if tryDirectTextReplacement(in: element, with: text) {
-            NSLog("[LOG] Successfully replaced text using AX API")
-            // 重新启用选中文本监听
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                AXController.shared.resumeSelectionMonitoring()
-                completion() // 调用完成回调
+        var methodUsed: String?
+
+        if isBrowser, appInfo.isChrome {
+            // 对于Chrome浏览器，尝试使用JavaScript
+            if replaceViaJavaScript(text: text) {
+                methodUsed = "JavaScript"
             }
+        }
+
+        if methodUsed == nil {
+             // 默认或后备方案：使用剪贴板
+            replaceTextViaClipboard(with: text, isWeChat: isWeChat) {
+                completion()
+            }
+            methodUsed = "Clipboard"
         } else {
-            NSLog("[LOG] AX API failed, falling back to clipboard method")
-            // 使用剪贴板方法作为后备
+            // 如果使用了其他方法，直接完成
+            AXController.shared.resumeSelectionMonitoring()
+            completion()
+        }
+        
+        NSLog("[LOG] Text replacement method: \(methodUsed ?? "None")")
+    }
+
+    // 通过JavaScript替换文本（仅限Chrome）
+    private func replaceViaJavaScript(text: String) -> Bool {
+        guard let info = cachedBrowserInfo, info.isChrome, info.javaScriptPermissionsEnabled else {
+            return false
+        }
+        
+        // 使用Base64编码避免特殊字符问题
+        let encodedText = encodeForJavaScript(text)
+        
+        let script = """
+        try {
+            var activeElement = document.activeElement;
+            if (activeElement && (activeElement.isContentEditable || activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
+                var start = activeElement.selectionStart;
+                var end = activeElement.selectionEnd;
+                var originalText = activeElement.value || activeElement.textContent;
+                var newText = originalText.substring(0, start) + atob('\(encodedText)') + originalText.substring(end);
+                activeElement.value = newText;
+                activeElement.textContent = newText;
+
+                // 触发输入事件，让框架（如React）能够识别变化
+                var event = new Event('input', { bubbles: true, cancelable: true });
+                activeElement.dispatchEvent(event);
+            } else {
+                // 如果没有活动元素，尝试在选区上操作
+                var selection = window.getSelection();
+                if (selection.rangeCount > 0) {
+                    var range = selection.getRangeAt(0);
+                    range.deleteContents();
+                    range.insertNode(document.createTextNode(atob('\(encodedText)')));
+                }
+            }
+        } catch(e) {
+            // 错误处理
+        }
+        """
+        
+        let appleScript = """
+        tell application "Google Chrome"
+            execute javascript "\(script)" in active tab of first window
+        end tell
+        """
+        
+        var error: NSDictionary?
+        if let scriptObject = NSAppleScript(source: appleScript) {
+            if scriptObject.executeAndReturnError(&error).stringValue != nil {
+                NSLog("[LOG] Successfully executed JavaScript replacement")
+                return true
+            } else if let errorInfo = error {
+                NSLog("[LOG] AppleScript execution error: \(errorInfo)")
+            }
+        }
+        return false
+    }
+
+    // 通过剪贴板替换文本
+    private func replaceTextViaClipboard(with text: String, isWeChat: Bool, completion: @escaping () -> Void) {
+        if isWeChat {
+            // 微信有特殊处理
+            replaceTextInWeChat(with: text, completion: completion)
+        } else {
+            // 通用方法
             replaceTextViaSimpleClipboard(with: text, completion: completion)
         }
     }
     
-    // 尝试直接使用 AX API 替换文本
-    private func tryDirectTextReplacement(in element: AXUIElement, with text: String) -> Bool {
-        NSLog("[LOG] Trying AX API text replacement")
-        
-        // 方法1: 尝试直接设置选中文本
-        let setSelectedResult = AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFString)
-        if setSelectedResult == .success {
-            NSLog("[LOG] AX API reported success, but let's verify...")
-            
-            // 验证文本是否真的被设置了
-            var currentSelectedText: CFTypeRef?
-            let getResult = AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &currentSelectedText)
-            
-            if getResult == .success, 
-               let currentText = currentSelectedText as? String,
-               currentText == text {
-                NSLog("[LOG] Text replacement verified successful: '\(currentText)'")
-                // 设置光标到文本末尾
-                setCursorToEndOfText(in: element, textLength: text.count)
-                return true
-            } else {
-                NSLog("[LOG] Text replacement verification failed. Current text: '\(currentSelectedText as? String ?? "nil")'")
-            }
-        } else {
-            NSLog("[LOG] Failed to set selected text using AX API: \(setSelectedResult)")
-        }
-        
-        // 方法2: 尝试使用 kAXValueAttribute
-        let setValueResult = AXUIElementSetAttributeValue(element, kAXValueAttribute as CFString, text as CFString)
-        if setValueResult == .success {
-            NSLog("[LOG] Successfully set value using AX API")
-            
-            // 验证值是否真的被设置了
-            var currentValue: CFTypeRef?
-            let getValueResult = AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &currentValue)
-            
-            if getValueResult == .success,
-               let currentText = currentValue as? String,
-               currentText.contains(text) {
-                NSLog("[LOG] Value replacement verified successful")
-                // 设置光标到文本末尾
-                setCursorToEndOfText(in: element, textLength: currentText.count)
-                return true
-            } else {
-                NSLog("[LOG] Value replacement verification failed")
-            }
-        } else {
-            NSLog("[LOG] Failed to set value using AX API: \(setValueResult)")
-        }
-        
-        NSLog("[LOG] All AX API methods failed, falling back to clipboard")
-        return false
-    }
-    
-    // 设置光标到文本末尾
-    private func setCursorToEndOfText(in element: AXUIElement, textLength: Int) {
-        NSLog("[LOG] Setting cursor to end of text (length: \(textLength))")
-        
-        // 方法1: 尝试设置选中范围到文本末尾（选中长度为0，即光标位置）
-        let endPosition = textLength
-        var selectionRange = CFRangeMake(endPosition, 0)
-        
-        // 创建 AXValue 来表示选中范围
-        let rangeValue = AXValueCreate(AXValueType.cfRange, &selectionRange)
-        if let rangeValue = rangeValue {
-            let setRangeResult = AXUIElementSetAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, rangeValue)
-            if setRangeResult == .success {
-                NSLog("[LOG] Successfully set cursor to end using selection range")
-                return
-            } else {
-                NSLog("[LOG] Failed to set cursor using selection range: \(setRangeResult)")
-            }
-        }
-        
-        // 方法2: 尝试设置插入点位置
-        let insertionPointValue = AXValueCreate(AXValueType.cfRange, &selectionRange)
-        if let insertionPointValue = insertionPointValue {
-            let setInsertionResult = AXUIElementSetAttributeValue(element, kAXInsertionPointLineNumberAttribute as CFString, insertionPointValue)
-            if setInsertionResult == .success {
-                NSLog("[LOG] Successfully set cursor using insertion point")
-                return
-            } else {
-                NSLog("[LOG] Failed to set cursor using insertion point: \(setInsertionResult)")
-            }
-        }
-        
-        // 方法3: 使用键盘快捷键移动光标到末尾
-        NSLog("[LOG] Using keyboard shortcut to move cursor to end")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            // 发送 Cmd+Right 或 End 键来移动光标到行尾
-            self.sendEndKeyCommand()
-        }
-    }
-    
-    // 发送 End 键命令
-    private func sendEndKeyCommand() {
-        let source = CGEventSource(stateID: .hidSystemState)
-        
-        // 尝试 Cmd+Right Arrow (在 macOS 中通常用于移动到行尾)
-        let cmdRightDown = CGEvent(keyboardEventSource: source, virtualKey: 0x7C, keyDown: true) // Right Arrow
-        cmdRightDown?.flags = .maskCommand
-        cmdRightDown?.post(tap: .cghidEventTap)
-        
-        let cmdRightUp = CGEvent(keyboardEventSource: source, virtualKey: 0x7C, keyDown: false)
-        cmdRightUp?.flags = .maskCommand
-        cmdRightUp?.post(tap: .cghidEventTap)
-        
-        NSLog("[LOG] Sent Cmd+Right to move cursor to end")
-    }
-    
-    // 最简化的剪贴板替换方法
+    // 最简化的剪贴板替换方法 - 已重构为更稳健的流程
     private func replaceTextViaSimpleClipboard(with text: String, completion: @escaping () -> Void) {
-        NSLog("[LOG] Using simple clipboard replacement method")
+        NSLog("[LOG] Using enhanced clipboard replacement method for '\(text)'")
         
-        // 保存当前剪贴板内容
         let pasteboard = NSPasteboard.general
         let originalClipboard = pasteboard.string(forType: .string)
-        NSLog("[LOG] Saved original clipboard: '\(originalClipboard ?? "nil")'")
         
-        // 将新文本放入剪贴板
         pasteboard.clearContents()
-        let success = pasteboard.setString(text, forType: .string)
-        
-        if !success {
+        guard pasteboard.setString(text, forType: .string) else {
             NSLog("[LOG] Failed to set clipboard content")
-            completion() // 即使失败也调用完成回调
-            return
-        }
-        
-        // 验证剪贴板内容是否正确设置
-        let verifyContent = pasteboard.string(forType: .string)
-        NSLog("[LOG] Set clipboard to: '\(text)', verified: '\(verifyContent ?? "nil")'")
-        
-        if verifyContent != text {
-            NSLog("[LOG] ERROR: Clipboard content verification failed!")
+            restoreClipboard(originalClipboard)
             completion()
             return
         }
         
-        // 直接粘贴，不要点击元素（避免取消选中状态）
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            // 在粘贴前再次验证剪贴板内容
-            let prepasteContent = pasteboard.string(forType: .string)
-            NSLog("[LOG] Pre-paste clipboard content: '\(prepasteContent ?? "nil")'")
-            
-            if prepasteContent != text {
-                NSLog("[LOG] ERROR: Clipboard content changed before paste! Re-setting...")
-                pasteboard.clearContents()
-                pasteboard.setString(text, forType: .string)
-                
-                // 再次验证
-                let reVerifyContent = pasteboard.string(forType: .string)
-                NSLog("[LOG] Re-verified clipboard content: '\(reVerifyContent ?? "nil")'")
-            }
-            
-            self.sendPasteCommand()
-            
-            // 粘贴完成后，将光标移动到文本末尾
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                self.sendEndKeyCommand()
-                
-                // 调用完成回调
-                completion()
-                
-                // 延迟恢复剪贴板
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+        guard pasteboard.string(forType: .string) == text else {
+            NSLog("[LOG] ERROR: Clipboard content verification failed!")
+            restoreClipboard(originalClipboard)
+            completion()
+            return
+        }
+        
+        DispatchQueue.main.async {
+            self.ensureOriginalAppFocus { focused in
+                if focused {
+                    self.ensureTextIsSelected(originalText: self.selectedText) { selected in
+                        self.sendImmediatePasteCommand()
+                        
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            self.restoreClipboard(originalClipboard)
+                            completion()
+                        }
+                    }
+                } else {
+                    NSLog("[LOG] Could not focus original app. Aborting replacement.")
                     self.restoreClipboard(originalClipboard)
+                    completion()
                 }
             }
         }
     }
     
-    // 激活原应用并粘贴
-    private func activateOriginalAppAndPaste(originalClipboard: String?) {
-        // 获取当前前台应用并激活
-        if let frontmostApp = NSWorkspace.shared.frontmostApplication {
-            print("[LOG] Current frontmost app: \(frontmostApp.localizedName ?? "Unknown")")
-        }
-        
-        // 尝试点击原来的元素来重新获得焦点
-        if let element = sourceElement {
-            // 获取元素的位置并点击
-            var position: CFTypeRef?
-            let result = AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &position)
-            
-            if result == .success, 
-               let positionValue = position,
-               let point = getPointFromAXValue(positionValue) {
-                
-                print("[LOG] Clicking at element position: \(point)")
-                
-                // 模拟鼠标点击以重新获得焦点
-                let clickEvent = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left)
-                clickEvent?.post(tap: .cghidEventTap)
-                
-                let releaseEvent = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)
-                releaseEvent?.post(tap: .cghidEventTap)
-                
-                // 等待点击完成，然后重新选中原始文本并粘贴
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    self.reselectOriginalTextAndPaste(originalClipboard: originalClipboard)
-                }
-            } else {
-                print("[LOG] Failed to get element position, trying direct reselect and paste")
-                self.reselectOriginalTextAndPaste(originalClipboard: originalClipboard)
-            }
-        } else {
-            print("[LOG] No source element, trying direct paste")
-            self.sendPasteCommand()
-            
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                self.restoreClipboard(originalClipboard)
-            }
-        }
-    }
-    
-    // 重新选中原始文本并粘贴
-    private func reselectOriginalTextAndPaste(originalClipboard: String?) {
-        print("[LOG] Attempting to reselect original text: '\(selectedText)'")
-        
-        // 检查是否在微信等特殊应用中
-        if let frontmostApp = NSWorkspace.shared.frontmostApplication,
-           let bundleId = frontmostApp.bundleIdentifier {
-            
-            if bundleId.contains("wechat") || bundleId.contains("WeChat") {
-                print("[LOG] Detected WeChat, using special replacement method")
-                self.replaceTextInWeChat(originalClipboard: originalClipboard)
+    // 确保原应用获得焦点
+    private func ensureOriginalAppFocus(completion: @escaping (Bool) -> Void) {
+        if sourceElementPid != 0 {
+             if let app = NSRunningApplication(processIdentifier: sourceElementPid) {
+                app.activate(options: .activateIgnoringOtherApps)
+                NSLog("[LOG] Activating app with pid: \(sourceElementPid)")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { completion(true) }
                 return
             }
         }
-        
-        // 对于其他应用，尝试重新选中原始文本
-        if tryReselectOriginalText() {
-            print("[LOG] Successfully reselected original text, now pasting")
-            // 等待选择完成后粘贴
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                self.sendPasteCommand()
-                
-                // 延迟恢复剪贴板
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                    self.restoreClipboard(originalClipboard)
-                }
-            }
-        } else {
-            print("[LOG] Failed to reselect original text, using fallback method")
-            // 如果无法重新选中，使用全选+粘贴的方法
-            self.sendSelectAllCommand()
-            
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                self.sendPasteCommand()
-                
-                // 延迟恢复剪贴板
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                    self.restoreClipboard(originalClipboard)
-                }
-            }
-        }
-    }
-    
-    // 尝试重新选中原始文本
-    private func tryReselectOriginalText() -> Bool {
-        guard sourceElement != nil else { return false }
-        
-        // 检查是否在微信等特殊应用中
-        if let frontmostApp = NSWorkspace.shared.frontmostApplication,
-           let bundleId = frontmostApp.bundleIdentifier {
-            
-            if bundleId.contains("wechat") || bundleId.contains("WeChat") {
-                print("[LOG] Detected WeChat, using special text selection method")
-                return reselectTextInWeChat()
-            }
+
+        guard let info = cachedBrowserInfo,
+              let app = NSRunningApplication.runningApplications(withBundleIdentifier: info.bundleId).first else {
+            NSLog("[LOG] Cannot get original app info to focus.")
+            completion(false)
+            return
         }
         
-        // 对于其他应用，尝试通过查找文本来重新选中
-        return reselectTextBySearching()
-    }
-    
-    // 在微信中重新选中文本的特殊方法
-    private func reselectTextInWeChat() -> Bool {
-        // 在微信中，我们使用 Cmd+A 全选，然后通过查找来定位文本
-        // 但由于微信的特殊性，我们直接使用全选方法
-        sendSelectAllCommand()
-        return true
-    }
-    
-    // 通过搜索来重新选中文本
-    private func reselectTextBySearching() -> Bool {
-        // 使用 Cmd+F 打开查找，然后搜索原始文本
-        print("[LOG] Trying to reselect text by searching")
+        app.activate(options: .activateIgnoringOtherApps)
+        NSLog("[LOG] Activating app: \(info.appName)")
         
-        // 发送 Cmd+F 打开查找
-        sendFindCommand()
-        
-        // 等待查找框打开
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            // 输入要查找的文本
-            self.typeText(self.selectedText)
-            
-            // 等待输入完成后按回车
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                self.sendEnterCommand()
-                
-                // 关闭查找框
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    self.sendEscapeCommand()
-                }
-            }
+            completion(true)
+        }
+    }
+
+    // 确保文本被选中
+    private func ensureTextIsSelected(originalText: String, completion: @escaping (Bool) -> Void) {
+        guard let element = sourceElement, let currentText = AXController.shared.getValue(of: element) else {
+            completion(false)
+            return
+        }
+
+        if currentText == originalText {
+            NSLog("[LOG] Content matches original selected text. Using Cmd+A to select all.")
+            sendSelectAllCommand()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { completion(true) }
+            return
         }
         
-        return true
+        if originalText.count <= 50 {
+             NSLog("[LOG] Short text detected. Attempting to double-click to re-select.")
+            doubleClickToSelectText(at: lastMousePosition)
+        } else {
+            NSLog("[LOG] Long text detected. Using Cmd+A to select all.")
+            sendSelectAllCommand()
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            completion(true)
+        }
+    }
+
+    // 在指定位置双击
+    private func doubleClickToSelectText(at position: NSPoint) {
+        let source = CGEventSource(stateID: .hidSystemState)
+        let downEvent = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: position, mouseButton: .left)
+        let upEvent = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: position, mouseButton: .left)
+        
+        downEvent?.setIntegerValueField(.mouseEventClickState, value: 2)
+        upEvent?.setIntegerValueField(.mouseEventClickState, value: 2)
+
+        downEvent?.post(tap: .cghidEventTap)
+        upEvent?.post(tap: .cghidEventTap)
+        NSLog("[LOG] Sent double-click event at \(position)")
     }
     
-    // 从AXValue中提取CGPoint
-    private func getPointFromAXValue(_ axValue: CFTypeRef) -> CGPoint? {
-        var point = CGPoint.zero
-        let success = AXValueGetValue(axValue as! AXValue, .cgPoint, &point)
-        return success ? point : nil
+    // 立即发送粘贴命令（无延迟）
+    private func sendImmediatePasteCommand() {
+        let source = CGEventSource(stateID: .hidSystemState)
+        guard let cmdVDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: true),
+              let cmdVUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: false) else {
+            NSLog("[LOG] Failed to create paste events")
+            return
+        }
+        
+        cmdVDown.flags = .maskCommand
+        cmdVUp.flags = .maskCommand
+        
+        cmdVDown.post(tap: .cghidEventTap)
+        usleep(50000) // 50ms
+        cmdVUp.post(tap: .cghidEventTap)
+        NSLog("[LOG] Sent immediate paste command.")
     }
-    
-    // 发送Cmd+V粘贴命令
-    private func sendPasteCommand() {
-        // 添加延迟，确保InputMonitor完成当前事件处理
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            let source = CGEventSource(stateID: .hidSystemState)
-            
-            // 创建Cmd+V事件
-            guard let cmdVDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: true),
-                  let cmdVUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: false) else {
-                print("[LOG] Failed to create Cmd+V events")
+
+    // 微信特殊文本替换方法
+    private func replaceTextInWeChat(with text: String, completion: @escaping () -> Void) {
+        NSLog("[LOG] Using enhanced WeChat-specific text replacement")
+        
+        let pasteboard = NSPasteboard.general
+        let originalClipboard = pasteboard.string(forType: .string)
+
+        pasteboard.clearContents()
+        guard pasteboard.setString(text, forType: .string) else {
+            NSLog("[LOG] WeChat: Failed to set clipboard")
+            restoreClipboard(originalClipboard)
+            completion()
+            return
+        }
+
+        // 核心流程：激活微信 -> 全选 -> 粘贴
+        ensureOriginalAppFocus { focused in
+            guard focused else {
+                NSLog("[LOG] WeChat: Failed to focus app.")
+                self.restoreClipboard(originalClipboard)
+                completion()
                 return
             }
             
-            // 设置Command键标志
-            cmdVDown.flags = CGEventFlags.maskCommand
-            cmdVUp.flags = CGEventFlags.maskCommand
-            
-            // 恢复使用原始tap位置，但通过时序避免冲突
-            cmdVDown.post(tap: CGEventTapLocation.cghidEventTap)
-            usleep(50000) // 50ms delay
-            cmdVUp.post(tap: CGEventTapLocation.cghidEventTap)
-            
-            print("[LOG] Sent Cmd+V paste command (with timing separation)")
+            // 等待焦点稳定
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                NSLog("[LOG] WeChat: Sending Cmd+A to select text.")
+                self.sendSelectAllCommand()
+                
+                // 等待全选完成
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    NSLog("[LOG] WeChat: Sending paste command.")
+                    self.sendImmediatePasteCommand()
+                    
+                    // 延迟恢复剪贴板，确保粘贴完成
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        self.restoreClipboard(originalClipboard)
+                        completion()
+                    }
+                }
+            }
         }
     }
     
     // 显示翻译结果浮窗
     private func showTranslationResult(original: String, translated: String) {
-        print("[LOG] Creating translation result popup")
-        
-        // 创建翻译结果窗口
         let resultWindow = TranslationResultWindow(original: original, translated: translated)
-        
-        // 获取当前鼠标位置
-        let mouseLocation = NSEvent.mouseLocation
-        
-        // 显示窗口在鼠标附近
-        resultWindow.showAt(point: mouseLocation)
-        
-        // 不再自动隐藏，改为手动关闭
+        resultWindow.show()
     }
 
     // 恢复剪贴板内容
@@ -609,131 +504,120 @@ class TranslationMenuWindow: NSWindow {
         if let original = originalClipboard {
             pasteboard.clearContents()
             pasteboard.setString(original, forType: .string)
-            print("[LOG] Restored original clipboard content")
+            NSLog("[LOG] Restored original clipboard content: '\(original)'")
         } else {
             pasteboard.clearContents()
-            print("[LOG] Cleared clipboard as no original content")
+            NSLog("[LOG] Cleared clipboard as there was no original content.")
         }
         
-        // 重新启用选中文本监听
         AXController.shared.resumeSelectionMonitoring()
-        print("[LOG] Resumed selection monitoring")
+        NSLog("[LOG] Resumed selection monitoring")
     }
     
-    // 微信特殊文本替换方法
-    private func replaceTextInWeChat(originalClipboard: String?) {
-        print("[LOG] Using WeChat-specific text replacement")
-        // 在微信中，直接粘贴通常会正确替换选中的文本
-        sendPasteCommand()
+    // #@指令场景的剪贴板替换方法
+    func replaceTextViaClipboardForTrigger(with text: String, completion: @escaping () -> Void) {
+        NSLog("[LOG] Using clipboard replacement for #@ trigger")
         
-        // 延迟恢复剪贴板
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            self.restoreClipboard(originalClipboard)
+        let pasteboard = NSPasteboard.general
+        let originalClipboard = pasteboard.string(forType: .string)
+
+        pasteboard.clearContents()
+        guard pasteboard.setString(text, forType: .string) else {
+            NSLog("[LOG] Failed to set clipboard for trigger")
+            completion()
+            return
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            NSLog("[LOG] Sending Cmd+A to select all content before paste")
+            self.sendSelectAllCommand()
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                NSLog("[LOG] Sending paste command to replace selected content")
+                self.sendImmediatePasteCommand()
+                
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        self.restoreClipboard(originalClipboard)
+                        completion()
+                    }
+                }
+            }
         }
     }
     
-    // 发送Cmd+A全选命令
+    // 发送Cmd+A命令
     private func sendSelectAllCommand() {
         let source = CGEventSource(stateID: .hidSystemState)
+        let cmdADown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_A), keyDown: true)
+        cmdADown?.flags = .maskCommand
+        cmdADown?.post(tap: .cghidEventTap)
         
-        guard let cmdADown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_A), keyDown: true),
-              let cmdAUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_A), keyDown: false) else {
-            print("[LOG] Failed to create Cmd+A events")
-            return
-        }
+        let cmdAUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_A), keyDown: false)
+        cmdAUp?.flags = .maskCommand
+        cmdAUp?.post(tap: .cghidEventTap)
         
-        cmdADown.flags = CGEventFlags.maskCommand
-        cmdAUp.flags = CGEventFlags.maskCommand
-        
-        cmdADown.post(tap: .cghidEventTap)
-        usleep(50000)
-        cmdAUp.post(tap: .cghidEventTap)
-        
-        print("[LOG] Sent Cmd+A select all command")
-    }
-    
-    // 发送Cmd+F查找命令
-    private func sendFindCommand() {
-        let source = CGEventSource(stateID: .hidSystemState)
-        
-        guard let cmdFDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_F), keyDown: true),
-              let cmdFUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_F), keyDown: false) else {
-            print("[LOG] Failed to create Cmd+F events")
-            return
-        }
-        
-        cmdFDown.flags = CGEventFlags.maskCommand
-        cmdFUp.flags = CGEventFlags.maskCommand
-        
-        cmdFDown.post(tap: .cghidEventTap)
-        usleep(50000)
-        cmdFUp.post(tap: .cghidEventTap)
-        
-        print("[LOG] Sent Cmd+F find command")
+        NSLog("[LOG] Sent Cmd+A select all command")
     }
     
     // 输入文本
     private func typeText(_ text: String) {
-        for char in text {
-            if let keyCode = getKeyCodeForCharacter(char) {
-                let source = CGEventSource(stateID: .hidSystemState)
+        for char in text.unicodeScalars {
+            if let event = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true) {
+                var unichar = UniChar(char.value)
+                event.keyboardSetUnicodeString(stringLength: 1, unicodeString: &unichar)
+                event.post(tap: .cghidEventTap)
                 
-                if let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
-                   let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) {
-                    
-                    keyDown.post(tap: .cghidEventTap)
-                    usleep(30000) // 30ms delay between keys
-                    keyUp.post(tap: .cghidEventTap)
+                if let keyUpEvent = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) {
+                     keyUpEvent.keyboardSetUnicodeString(stringLength: 1, unicodeString: &unichar)
+                     keyUpEvent.post(tap: .cghidEventTap)
                 }
             }
         }
-        print("[LOG] Typed text: '\(text)'")
+        NSLog("[LOG] Typed text: '\(text)'")
     }
     
-    // 获取字符对应的键码
-    private func getKeyCodeForCharacter(_ char: Character) -> CGKeyCode? {
-        // 简化版本，只处理基本字符
-        switch char {
-        case "a": return CGKeyCode(kVK_ANSI_A)
-        case "b": return CGKeyCode(kVK_ANSI_B)
-        case "c": return CGKeyCode(kVK_ANSI_C)
-        // ... 可以扩展更多字符
-        default: return nil
+    // 使用Base64编码来安全传递文本到JavaScript，避免转义问题
+    private func encodeForJavaScript(_ text: String) -> String {
+        guard let data = text.data(using: .utf8) else {
+            return ""
         }
+        return data.base64EncodedString()
     }
     
-    // 发送回车命令
-    private func sendEnterCommand() {
-        let source = CGEventSource(stateID: .hidSystemState)
-        
-        guard let enterDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Return), keyDown: true),
-              let enterUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Return), keyDown: false) else {
-            print("[LOG] Failed to create Enter events")
-            return
+    // 显示Chrome JavaScript权限设置提示
+    private func showChromeJavaScriptPermissionAlert() {
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = "Chrome JavaScript权限设置"
+            alert.informativeText = """
+            为了在浏览器中实现精确的文本替换，需要启用Chrome的JavaScript权限。
+            
+            请按以下步骤设置：
+            1. 在Chrome浏览器中，点击菜单栏的"查看"
+            2. 选择 "开发者" -> "允许来自Apple事件的JavaScript"
+            
+            如果找不到该选项，请确保Chrome已更新到最新版本。
+            
+            设置完成后，此功能将自动启用。如果选择不设置，将继续使用剪贴板进行替换。
+            """
+            alert.alertStyle = .informational
+            
+            alert.addButton(withTitle: "好的")
+            alert.addButton(withTitle: "复制设置路径")
+            
+            let response = alert.runModal()
+            if response == .alertSecondButtonReturn {
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.setString("查看 > 开发者 > 允许来自Apple事件的JavaScript", forType: .string)
+                
+                let confirmationAlert = NSAlert()
+                confirmationAlert.messageText = "路径已复制"
+                confirmationAlert.informativeText = "设置路径已复制到剪贴板。"
+                confirmationAlert.runModal()
+            }
         }
-        
-        enterDown.post(tap: .cghidEventTap)
-        usleep(50000)
-        enterUp.post(tap: .cghidEventTap)
-        
-        print("[LOG] Sent Enter command")
-    }
-    
-    // 发送Escape命令
-    private func sendEscapeCommand() {
-        let source = CGEventSource(stateID: .hidSystemState)
-        
-        guard let escDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Escape), keyDown: true),
-              let escUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Escape), keyDown: false) else {
-            print("[LOG] Failed to create Escape events")
-            return
-        }
-        
-        escDown.post(tap: .cghidEventTap)
-        usleep(50000)
-        escUp.post(tap: .cghidEventTap)
-        
-        print("[LOG] Sent Escape command")
     }
 }
 

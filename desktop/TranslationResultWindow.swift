@@ -98,6 +98,22 @@ class TranslationResultWindow: NSWindow {
         }
     }
     
+    func show() {
+        // 将窗口居中显示在主屏幕上
+        if let mainScreen = NSScreen.main {
+            let screenFrame = mainScreen.visibleFrame
+            let windowFrame = self.frame
+            let x = screenFrame.origin.x + (screenFrame.width - windowFrame.width) / 2
+            let y = screenFrame.origin.y + (screenFrame.height - windowFrame.height) / 2
+            self.setFrameOrigin(NSPoint(x: x, y: y))
+        }
+        
+        self.orderFront(nil)
+        self.makeKey()
+        
+        print("[LOG] Translation result window shown at screen center")
+    }
+    
     func showAt(point: NSPoint) {
         // 获取鼠标所在的屏幕
         let mouseScreen = NSScreen.screens.first { screen in
