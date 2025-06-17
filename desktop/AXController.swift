@@ -600,38 +600,96 @@ class AXController {
                     try
                         tell active tab of front window
                             set jsResult to execute javascript "
-                                console.log('Starting text replacement...');
+                                console.log('Starting precise text replacement...');
                                 var activeElement = document.activeElement;
                                 console.log('Active element:', activeElement);
                                 
                                 if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
                                     console.log('Found INPUT/TEXTAREA element');
-                                    var oldValue = activeElement.value;
-                                    activeElement.value = '\(escapedText)';
-                                    activeElement.focus();
+                                    var currentValue = activeElement.value;
+                                    console.log('Current value:', currentValue);
                                     
-                                    // 触发input事件，确保页面知道内容已更改
-                                    var inputEvent = new Event('input', { bubbles: true });
-                                    activeElement.dispatchEvent(inputEvent);
+                                    // 查找触发器模式并精确替换
+                                    var patterns = [
+                                        /(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i,
+                                        /^(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i,
+                                        /(.*?)\\s+[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i
+                                    ];
                                     
-                                    // 触发change事件
-                                    var changeEvent = new Event('change', { bubbles: true });
-                                    activeElement.dispatchEvent(changeEvent);
+                                    var replaced = false;
+                                    for (var i = 0; i < patterns.length; i++) {
+                                        var match = currentValue.match(patterns[i]);
+                                        if (match) {
+                                            console.log('Pattern matched:', match);
+                                            var originalText = match[1].trim();
+                                            console.log('Original text to replace:', originalText);
+                                            console.log('Replacement text:', '\(escapedText)');
+                                            
+                                            // 精确替换：只替换触发器部分
+                                            var newValue = currentValue.replace(patterns[i], '\(escapedText)');
+                                            activeElement.value = newValue;
+                                            
+                                            // 设置光标位置到文本末尾
+                                            var cursorPos = '\(escapedText)'.length;
+                                            activeElement.setSelectionRange(cursorPos, cursorPos);
+                                            activeElement.focus();
+                                            
+                                            // 触发事件
+                                            var inputEvent = new Event('input', { bubbles: true });
+                                            activeElement.dispatchEvent(inputEvent);
+                                            var changeEvent = new Event('change', { bubbles: true });
+                                            activeElement.dispatchEvent(changeEvent);
+                                            
+                                            console.log('Text precisely replaced from:', currentValue, 'to:', newValue);
+                                            replaced = true;
+                                            break;
+                                        }
+                                    }
                                     
-                                    console.log('Text replaced from:', oldValue, 'to:', activeElement.value);
-                                    return 'success';
+                                    return replaced ? 'success' : 'no_pattern_match';
+                                    
                                 } else if (activeElement && activeElement.contentEditable === 'true') {
                                     console.log('Found contentEditable element');
-                                    var oldContent = activeElement.textContent;
-                                    activeElement.textContent = '\(escapedText)';
-                                    activeElement.focus();
+                                    var currentContent = activeElement.textContent || activeElement.innerText || '';
+                                    console.log('Current content:', currentContent);
                                     
-                                    // 触发input事件
-                                    var inputEvent = new Event('input', { bubbles: true });
-                                    activeElement.dispatchEvent(inputEvent);
+                                    // 对于contentEditable，使用更复杂的替换逻辑
+                                    var patterns = [
+                                        /(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i,
+                                        /^(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i,
+                                        /(.*?)\\s+[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i
+                                    ];
                                     
-                                    console.log('Content replaced from:', oldContent, 'to:', activeElement.textContent);
-                                    return 'success';
+                                    var replaced = false;
+                                    for (var i = 0; i < patterns.length; i++) {
+                                        var match = currentContent.match(patterns[i]);
+                                        if (match) {
+                                            console.log('ContentEditable pattern matched:', match);
+                                            
+                                            // 清空内容并设置新内容
+                                            activeElement.textContent = '\(escapedText)';
+                                            
+                                            // 设置光标到末尾
+                                            var range = document.createRange();
+                                            var sel = window.getSelection();
+                                            range.selectNodeContents(activeElement);
+                                            range.collapse(false);
+                                            sel.removeAllRanges();
+                                            sel.addRange(range);
+                                            
+                                            activeElement.focus();
+                                            
+                                            // 触发事件
+                                            var inputEvent = new Event('input', { bubbles: true });
+                                            activeElement.dispatchEvent(inputEvent);
+                                            
+                                            console.log('ContentEditable text replaced to:', '\(escapedText)');
+                                            replaced = true;
+                                            break;
+                                        }
+                                    }
+                                    
+                                    return replaced ? 'success' : 'no_pattern_match';
                                 } else {
                                     console.log('No suitable active input element found');
                                     return 'no_active_input';
@@ -650,38 +708,96 @@ class AXController {
                     try
                         tell front document
                             set jsResult to do JavaScript "
-                                console.log('Starting text replacement...');
+                                console.log('Starting precise text replacement...');
                                 var activeElement = document.activeElement;
                                 console.log('Active element:', activeElement);
                                 
                                 if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
                                     console.log('Found INPUT/TEXTAREA element');
-                                    var oldValue = activeElement.value;
-                                    activeElement.value = '\(escapedText)';
-                                    activeElement.focus();
+                                    var currentValue = activeElement.value;
+                                    console.log('Current value:', currentValue);
                                     
-                                    // 触发input事件，确保页面知道内容已更改
-                                    var inputEvent = new Event('input', { bubbles: true });
-                                    activeElement.dispatchEvent(inputEvent);
+                                    // 查找触发器模式并精确替换
+                                    var patterns = [
+                                        /(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i,
+                                        /^(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i,
+                                        /(.*?)\\s+[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i
+                                    ];
                                     
-                                    // 触发change事件
-                                    var changeEvent = new Event('change', { bubbles: true });
-                                    activeElement.dispatchEvent(changeEvent);
+                                    var replaced = false;
+                                    for (var i = 0; i < patterns.length; i++) {
+                                        var match = currentValue.match(patterns[i]);
+                                        if (match) {
+                                            console.log('Pattern matched:', match);
+                                            var originalText = match[1].trim();
+                                            console.log('Original text to replace:', originalText);
+                                            console.log('Replacement text:', '\(escapedText)');
+                                            
+                                            // 精确替换：只替换触发器部分
+                                            var newValue = currentValue.replace(patterns[i], '\(escapedText)');
+                                            activeElement.value = newValue;
+                                            
+                                            // 设置光标位置到文本末尾
+                                            var cursorPos = '\(escapedText)'.length;
+                                            activeElement.setSelectionRange(cursorPos, cursorPos);
+                                            activeElement.focus();
+                                            
+                                            // 触发事件
+                                            var inputEvent = new Event('input', { bubbles: true });
+                                            activeElement.dispatchEvent(inputEvent);
+                                            var changeEvent = new Event('change', { bubbles: true });
+                                            activeElement.dispatchEvent(changeEvent);
+                                            
+                                            console.log('Text precisely replaced from:', currentValue, 'to:', newValue);
+                                            replaced = true;
+                                            break;
+                                        }
+                                    }
                                     
-                                    console.log('Text replaced from:', oldValue, 'to:', activeElement.value);
-                                    return 'success';
+                                    return replaced ? 'success' : 'no_pattern_match';
+                                    
                                 } else if (activeElement && activeElement.contentEditable === 'true') {
                                     console.log('Found contentEditable element');
-                                    var oldContent = activeElement.textContent;
-                                    activeElement.textContent = '\(escapedText)';
-                                    activeElement.focus();
+                                    var currentContent = activeElement.textContent || activeElement.innerText || '';
+                                    console.log('Current content:', currentContent);
                                     
-                                    // 触发input事件
-                                    var inputEvent = new Event('input', { bubbles: true });
-                                    activeElement.dispatchEvent(inputEvent);
+                                    // 对于contentEditable，使用更复杂的替换逻辑
+                                    var patterns = [
+                                        /(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i,
+                                        /^(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i,
+                                        /(.*?)\\s+[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i
+                                    ];
                                     
-                                    console.log('Content replaced from:', oldContent, 'to:', activeElement.textContent);
-                                    return 'success';
+                                    var replaced = false;
+                                    for (var i = 0; i < patterns.length; i++) {
+                                        var match = currentContent.match(patterns[i]);
+                                        if (match) {
+                                            console.log('ContentEditable pattern matched:', match);
+                                            
+                                            // 清空内容并设置新内容
+                                            activeElement.textContent = '\(escapedText)';
+                                            
+                                            // 设置光标到末尾
+                                            var range = document.createRange();
+                                            var sel = window.getSelection();
+                                            range.selectNodeContents(activeElement);
+                                            range.collapse(false);
+                                            sel.removeAllRanges();
+                                            sel.addRange(range);
+                                            
+                                            activeElement.focus();
+                                            
+                                            // 触发事件
+                                            var inputEvent = new Event('input', { bubbles: true });
+                                            activeElement.dispatchEvent(inputEvent);
+                                            
+                                            console.log('ContentEditable text replaced to:', '\(escapedText)');
+                                            replaced = true;
+                                            break;
+                                        }
+                                    }
+                                    
+                                    return replaced ? 'success' : 'no_pattern_match';
                                 } else {
                                     console.log('No suitable active input element found');
                                     return 'no_active_input';
@@ -729,99 +845,282 @@ class AXController {
     private func replaceWebViaClipboardWithRetry(element: AXUIElement, text: String, completion: @escaping () -> Void) {
         print("[LOG] Using Web clipboard replacement with retry")
         
+        // 首先尝试获取当前内容，确定需要替换的部分
+        guard let currentValue = getValue(of: element) else {
+            print("[LOG] Cannot get current value for precise replacement")
+            completion()
+            return
+        }
+        
+        print("[LOG] Current input value: '\(currentValue)'")
+        
+        // 检查是否包含触发器模式
+        let patterns = [
+            #"(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\s*$"#,
+            #"^(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\s*$"#,
+            #"(.*?)\s+[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\s*$"#
+        ]
+        
+        var triggerFound = false
+        for pattern in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) {
+                let nsValue = currentValue as NSString
+                let results = regex.matches(in: currentValue, options: [], range: NSRange(location: 0, length: nsValue.length))
+                
+                if let match = results.first, match.numberOfRanges >= 3 {
+                    triggerFound = true
+                    print("[LOG] Trigger pattern found, proceeding with precise replacement")
+                    break
+                }
+            }
+        }
+        
+        if !triggerFound {
+            print("[LOG] No trigger pattern found, skipping replacement")
+            completion()
+            return
+        }
+        
         // 保存原始剪贴板内容
         let pasteboard = NSPasteboard.general
         let originalContent = pasteboard.string(forType: .string)
+        print("[LOG] Saved original clipboard: '\(originalContent ?? "nil")'")
         
         // 设置新文本到剪贴板
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
+        print("[LOG] Set clipboard to translation text: '\(text)'")
         
-        // 尝试多种选择和粘贴策略
-        attemptWebReplace(attempt: 1) { [weak self] success in
+        // 验证剪贴板设置成功
+        let verifyContent = pasteboard.string(forType: .string)
+        if verifyContent != text {
+            print("[LOG] ERROR: Failed to set clipboard content correctly")
+            completion()
+            return
+        }
+        
+        // 使用精确选择和替换策略
+        attemptPreciseWebReplace(element: element, originalValue: currentValue, translatedText: text, attempt: 1) { [weak self] success in
             if !success {
                 // 如果第一次失败，等待后重试
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                    self?.attemptWebReplace(attempt: 2) { _ in
-                        // 无论成功失败，都恢复剪贴板
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            pasteboard.clearContents()
-                            if let original = originalContent {
-                                pasteboard.setString(original, forType: .string)
-                            }
-                            print("[LOG] Clipboard content restored")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    // 重新设置剪贴板内容（可能被其他操作改变）
+                    pasteboard.clearContents()
+                    pasteboard.setString(text, forType: .string)
+                    print("[LOG] Re-set clipboard for retry")
+                    
+                    self?.attemptPreciseWebReplace(element: element, originalValue: currentValue, translatedText: text, attempt: 2) { _ in
+                        // 延长恢复时间，确保Chrome完全处理完粘贴操作
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                            self?.restoreClipboardSafely(originalContent: originalContent)
                             completion()
                         }
                     }
                 }
             } else {
-                // 成功时立即恢复剪贴板
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    pasteboard.clearContents()
-                    if let original = originalContent {
-                        pasteboard.setString(original, forType: .string)
-                    }
-                    print("[LOG] Clipboard content restored")
+                // 成功时也要延长恢复时间
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                    self?.restoreClipboardSafely(originalContent: originalContent)
                     completion()
                 }
             }
         }
     }
     
-    // 尝试Web替换的具体实现
-    private func attemptWebReplace(attempt: Int, completion: @escaping (Bool) -> Void) {
-        print("[LOG] Web replace attempt \(attempt)")
+    // 精确的Web替换尝试
+    private func attemptPreciseWebReplace(element: AXUIElement, originalValue: String, translatedText: String, attempt: Int, completion: @escaping (Bool) -> Void) {
+        print("[LOG] Precise Web replace attempt \(attempt)")
         
-        // 策略1: 全选 + 粘贴
-        simulateSelectAll()
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            self.simulatePaste()
+        // 策略：使用JavaScript选择触发器部分，然后粘贴
+        if selectTriggerTextViaJS(originalValue: originalValue) {
+            print("[LOG] Successfully selected trigger text via JavaScript")
             
-            // 策略2: 如果是第二次尝试，添加额外的焦点确认
-            if attempt == 2 {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    // 额外的Tab+Shift+Tab来确保焦点
-                    self.simulateTabFocus()
-                    
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        self.simulateSelectAll()
-                        
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            self.simulatePaste()
-                            completion(true)
-                        }
-                    }
-                }
-            } else {
+            // 等待选择完成，然后粘贴
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                self.simulatePaste()
+                completion(true)
+            }
+        } else {
+            print("[LOG] JavaScript selection failed, falling back to traditional method")
+            
+            // 回退到传统的全选+粘贴方法
+            simulateSelectAll()
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                self.simulatePaste()
                 completion(true)
             }
         }
     }
     
-    // 模拟Tab焦点切换来确保输入框活跃
-    private func simulateTabFocus() {
-        let source = CGEventSource(stateID: .hidSystemState)
+    // 使用JavaScript精确选择触发器文本
+    private func selectTriggerTextViaJS(originalValue: String) -> Bool {
+        guard let browserInfo = getCurrentBrowserInfo() else { 
+            print("[LOG] No browser info for JS selection")
+            return false 
+        }
         
-        // Tab键
-        if let tabDown = CGEvent(keyboardEventSource: source, virtualKey: 48, keyDown: true),
-           let tabUp = CGEvent(keyboardEventSource: source, virtualKey: 48, keyDown: false) {
+        // 转义JavaScript字符串
+        let escapedValue = originalValue
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+        
+        var script = ""
+        
+        switch browserInfo.bundleId {
+        case "com.google.Chrome":
+            script = """
+                tell application "Google Chrome"
+                    try
+                        tell active tab of front window
+                            set jsResult to execute javascript "
+                                console.log('Selecting trigger text for precise replacement...');
+                                var activeElement = document.activeElement;
+                                
+                                if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
+                                    var currentValue = activeElement.value;
+                                    console.log('Current value for selection:', currentValue);
+                                    
+                                    // 查找触发器模式
+                                    var patterns = [
+                                        /(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i,
+                                        /^(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i,
+                                        /(.*?)\\s+[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i
+                                    ];
+                                    
+                                    for (var i = 0; i < patterns.length; i++) {
+                                        var match = currentValue.match(patterns[i]);
+                                        if (match) {
+                                            console.log('Pattern matched for selection:', match);
+                                            
+                                            // 计算选择范围：从触发器开始到结尾
+                                            var fullMatch = match[0];
+                                            var startPos = currentValue.indexOf(fullMatch);
+                                            var endPos = startPos + fullMatch.length;
+                                            
+                                            console.log('Selection range:', startPos, 'to', endPos);
+                                            
+                                            // 选择触发器部分
+                                            activeElement.setSelectionRange(startPos, endPos);
+                                            activeElement.focus();
+                                            
+                                            console.log('Trigger text selected successfully');
+                                            return 'success';
+                                        }
+                                    }
+                                    
+                                    console.log('No trigger pattern found for selection');
+                                    return 'no_pattern';
+                                } else {
+                                    console.log('No suitable input element for selection');
+                                    return 'no_input';
+                                }
+                            "
+                            return jsResult
+                        end tell
+                    on error errMsg
+                        return "error: " & errMsg
+                    end try
+                end tell
+            """
+        case "com.apple.Safari":
+            script = """
+                tell application "Safari"
+                    try
+                        tell front document
+                            set jsResult to do JavaScript "
+                                console.log('Selecting trigger text for precise replacement...');
+                                var activeElement = document.activeElement;
+                                
+                                if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
+                                    var currentValue = activeElement.value;
+                                    console.log('Current value for selection:', currentValue);
+                                    
+                                    // 查找触发器模式
+                                    var patterns = [
+                                        /(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i,
+                                        /^(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i,
+                                        /(.*?)\\s+[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i
+                                    ];
+                                    
+                                    for (var i = 0; i < patterns.length; i++) {
+                                        var match = currentValue.match(patterns[i]);
+                                        if (match) {
+                                            console.log('Pattern matched for selection:', match);
+                                            
+                                            // 计算选择范围：从触发器开始到结尾
+                                            var fullMatch = match[0];
+                                            var startPos = currentValue.indexOf(fullMatch);
+                                            var endPos = startPos + fullMatch.length;
+                                            
+                                            console.log('Selection range:', startPos, 'to', endPos);
+                                            
+                                            // 选择触发器部分
+                                            activeElement.setSelectionRange(startPos, endPos);
+                                            activeElement.focus();
+                                            
+                                            console.log('Trigger text selected successfully');
+                                            return 'success';
+                                        }
+                                    }
+                                    
+                                    console.log('No trigger pattern found for selection');
+                                    return 'no_pattern';
+                                } else {
+                                    console.log('No suitable input element for selection');
+                                    return 'no_input';
+                                }
+                            "
+                            return jsResult
+                        end tell
+                    on error errMsg
+                        return "error: " & errMsg
+                    end try
+                end tell
+            """
+        default:
+            print("[LOG] Unsupported browser for JS selection: \(browserInfo.bundleId)")
+            return false
+        }
+        
+        print("[LOG] Executing selection AppleScript...")
+        if let appleScript = NSAppleScript(source: script) {
+            var error: NSDictionary?
+            let result = appleScript.executeAndReturnError(&error)
             
-            tabDown.post(tap: .cghidEventTap)
-            tabUp.post(tap: .cghidEventTap)
-            
-            // Shift+Tab返回
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                if let shiftTabDown = CGEvent(keyboardEventSource: source, virtualKey: 48, keyDown: true),
-                   let shiftTabUp = CGEvent(keyboardEventSource: source, virtualKey: 48, keyDown: false) {
-                    
-                    shiftTabDown.flags = .maskShift
-                    shiftTabUp.flags = .maskShift
-                    
-                    shiftTabDown.post(tap: .cghidEventTap)
-                    shiftTabUp.post(tap: .cghidEventTap)
-                }
+            if let error = error {
+                print("[LOG] AppleScript selection error: \(error)")
+                return false
             }
+            
+            let resultString = result.stringValue ?? ""
+            print("[LOG] AppleScript selection result: '\(resultString)'")
+            
+            return resultString == "success"
+        } else {
+            print("[LOG] Failed to create selection AppleScript object")
+            return false
+        }
+    }
+    
+    // 安全地恢复剪贴板内容
+    private func restoreClipboardSafely(originalContent: String?) {
+        let pasteboard = NSPasteboard.general
+        
+        // 检查当前剪贴板内容
+        let currentContent = pasteboard.string(forType: .string)
+        print("[LOG] Current clipboard before restore: '\(currentContent ?? "nil")'")
+        
+        // 恢复原始剪贴板内容
+        pasteboard.clearContents()
+        if let original = originalContent {
+            pasteboard.setString(original, forType: .string)
+            print("[LOG] Restored original clipboard content: '\(original)'")
+        } else {
+            print("[LOG] Cleared clipboard as no original content")
         }
     }
     
