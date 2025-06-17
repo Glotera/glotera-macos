@@ -593,9 +593,19 @@ class AXController {
                 completion?()
             }
         } else {
-            // 使用原有的桌面应用替换方法
-            forceReplaceWithClipboard(element: focused, text: text) {
-                completion?()
+            // 检查是否是微信应用
+            let isWeChat = isWeChatApp()
+            if isWeChat {
+                // 使用微信专用的替换方法
+                print("[LOG] Using WeChat-specific replacement method")
+                replaceTextInWeChat(with: text) {
+                    completion?()
+                }
+            } else {
+                // 使用原有的桌面应用替换方法
+                forceReplaceWithClipboard(element: focused, text: text) {
+                    completion?()
+                }
             }
         }
         
@@ -1254,6 +1264,106 @@ class AXController {
             return bundleId.contains("wechat") || bundleId.contains("WeChat")
         }
         return false
+    }
+    
+    // 微信特殊文本替换方法
+    private func replaceTextInWeChat(with text: String, completion: @escaping () -> Void) {
+        print("[LOG] Using enhanced WeChat-specific text replacement")
+        
+        let pasteboard = NSPasteboard.general
+        let originalClipboard = pasteboard.string(forType: .string)
+
+        pasteboard.clearContents()
+        guard pasteboard.setString(text, forType: .string) else {
+            print("[LOG] WeChat: Failed to set clipboard")
+            restoreClipboardContent(originalClipboard)
+            completion()
+            return
+        }
+
+        // 核心流程：激活微信 -> 全选 -> 粘贴
+        ensureWeChatAppFocus { focused in
+            guard focused else {
+                print("[LOG] WeChat: Failed to focus app.")
+                self.restoreClipboardContent(originalClipboard)
+                completion()
+                return
+            }
+            
+            // 等待焦点稳定
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                print("[LOG] WeChat: Sending Cmd+A to select text.")
+                self.sendWeChatSelectAllCommand()
+                
+                // 等待全选完成
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    print("[LOG] WeChat: Sending paste command.")
+                    self.sendWeChatPasteCommand()
+                    
+                    // 延迟恢复剪贴板，确保粘贴完成
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        self.restoreClipboardContent(originalClipboard)
+                        completion()
+                    }
+                }
+            }
+        }
+    }
+    
+    // 确保微信应用获得焦点
+    private func ensureWeChatAppFocus(completion: @escaping (Bool) -> Void) {
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+              let bundleId = frontmostApp.bundleIdentifier,
+              bundleId.contains("wechat") || bundleId.contains("WeChat") else {
+            print("[LOG] WeChat: Not currently focused")
+            completion(false)
+            return
+        }
+        
+        // 微信已经是前台应用
+        print("[LOG] WeChat: App is already focused")
+        completion(true)
+    }
+    
+    // 发送微信专用的Cmd+A命令
+    private func sendWeChatSelectAllCommand() {
+        let source = CGEventSource(stateID: .hidSystemState)
+        let cmdADown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(0), keyDown: true) // A key
+        cmdADown?.flags = CGEventFlags.maskCommand
+        cmdADown?.post(tap: CGEventTapLocation.cghidEventTap)
+        
+        let cmdAUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(0), keyDown: false) // A key
+        cmdAUp?.flags = CGEventFlags.maskCommand
+        cmdAUp?.post(tap: CGEventTapLocation.cghidEventTap)
+        
+        print("[LOG] WeChat: Sent Cmd+A select all command")
+    }
+    
+    // 发送微信专用的粘贴命令
+    private func sendWeChatPasteCommand() {
+        let source = CGEventSource(stateID: .hidSystemState)
+        let cmdVDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(9), keyDown: true) // V key
+        cmdVDown?.flags = CGEventFlags.maskCommand
+        cmdVDown?.post(tap: CGEventTapLocation.cghidEventTap)
+        
+        let cmdVUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(9), keyDown: false) // V key
+        cmdVUp?.flags = CGEventFlags.maskCommand
+        cmdVUp?.post(tap: CGEventTapLocation.cghidEventTap)
+        
+        print("[LOG] WeChat: Sent Cmd+V paste command")
+    }
+    
+    // 恢复剪贴板内容
+    private func restoreClipboardContent(_ originalClipboard: String?) {
+        let pasteboard = NSPasteboard.general
+        if let original = originalClipboard {
+            pasteboard.clearContents()
+            pasteboard.setString(original, forType: .string)
+            print("[LOG] WeChat: Restored original clipboard content: '\(original)'")
+        } else {
+            pasteboard.clearContents()
+            print("[LOG] WeChat: Cleared clipboard as there was no original content.")
+        }
     }
     
     // 检查Web元素是否可编辑

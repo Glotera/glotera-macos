@@ -184,20 +184,21 @@ class TranslationMenuWindow: NSWindow {
         NSLog("[LOG] Source element editable: \(isEditable)")
         NSLog("[LOG] Source element: \(sourceElement != nil ? "exists" : "nil")")
         
-        // 隐藏菜单，显示翻译状态
+        // 隐藏菜单
         hide()
-        TranslationStatusWindow.shared.showTranslating(near: sourceElement)
         
-        // 开始翻译
-        TranslatorClient.shared.translate(text: selectedText, to: language) { [weak self] translated in
-            DispatchQueue.main.async {
-                if let translated = translated, !translated.isEmpty {
-                    NSLog("[LOG] Translation result: \(translated)")
-                    // 翻译成功后立即隐藏状态窗口，然后开始回填
-                    TranslationStatusWindow.shared.hideStatus()
-                    NSLog("[LOG] Status window hidden before text replacement")
-                    
-                    if isEditable {
+        if isEditable {
+            // 可编辑元素：使用传统翻译 + 文本替换
+            TranslationStatusWindow.shared.showTranslating(near: sourceElement)
+            
+            TranslatorClient.shared.translate(text: selectedText, to: language) { [weak self] translated in
+                DispatchQueue.main.async {
+                    if let translated = translated, !translated.isEmpty {
+                        NSLog("[LOG] Translation result: \(translated)")
+                        // 翻译成功后立即隐藏状态窗口，然后开始回填
+                        TranslationStatusWindow.shared.hideStatus()
+                        NSLog("[LOG] Status window hidden before text replacement")
+                        
                         // 可编辑元素：替换选中的文本
                         NSLog("[LOG] Replacing text in editable element")
                         if let element = self?.sourceElement {
@@ -208,15 +209,15 @@ class TranslationMenuWindow: NSWindow {
                             NSLog("[LOG] No source element available for text replacement")
                         }
                     } else {
-                        // 不可编辑元素：显示翻译结果浮窗
-                        NSLog("[LOG] Showing translation result in popup")
-                        self?.showTranslationResult(original: self?.selectedText ?? "", translated: translated)
+                        NSLog("[LOG] Translation failed or empty result")
+                        TranslationStatusWindow.shared.showFailure()
                     }
-                } else {
-                    NSLog("[LOG] Translation failed or empty result")
-                    TranslationStatusWindow.shared.showFailure()
                 }
             }
+        } else {
+            // 不可编辑元素：使用流式翻译显示结果浮窗
+            NSLog("[LOG] Using stream translation for non-editable element")
+            showStreamTranslationResult(original: selectedText, targetLanguage: language)
         }
     }
     
@@ -492,10 +493,16 @@ class TranslationMenuWindow: NSWindow {
         }
     }
     
-    // 显示翻译结果浮窗
+    // 显示翻译结果浮窗 - 一次性翻译
     private func showTranslationResult(original: String, translated: String) {
         let resultWindow = TranslationResultWindow(original: original, translated: translated)
-        resultWindow.show()
+        resultWindow.showAt(point: lastMousePosition)
+    }
+    
+    // 显示流式翻译结果浮窗 - 新增
+    private func showStreamTranslationResult(original: String, targetLanguage: String) {
+        let streamWindow = TranslationResultWindow(originalText: original, targetLanguage: targetLanguage)
+        streamWindow.showAt(point: lastMousePosition)
     }
 
     // 恢复剪贴板内容

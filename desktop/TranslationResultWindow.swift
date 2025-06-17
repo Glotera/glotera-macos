@@ -4,6 +4,7 @@ import SwiftUI
 class TranslationResultWindow: NSWindow {
     private var hostingView: NSHostingView<TranslationResultView>?
     private var clickMonitor: Any?
+    private var resultView: TranslationResultView?
     
     init(original: String, translated: String) {
         // 动态计算窗口大小以适应内容
@@ -26,49 +27,32 @@ class TranslationResultWindow: NSWindow {
         setupClickOutsideMonitor()
     }
     
-    // 计算窗口大小以适应内容
-    private static func calculateWindowSize(original: String, translated: String) -> NSSize {
-        let maxWidth: CGFloat = 450 // 从500减少到450
-        let minWidth: CGFloat = 300 // 从350减少到300
-        let padding: CGFloat = 24 // 从32减少到24
-        let verticalSpacing: CGFloat = 80 // 从120减少到80
+    init(originalText: String, targetLanguage: String) {
+        // 初始窗口大小，会根据内容动态调整
+        let initialSize = NSSize(width: 450, height: 200)
         
-        // 计算文本所需的高度
-        let font = NSFont.systemFont(ofSize: 13)
-        let textWidth = maxWidth - padding - 16 // 减去文本框内部padding
+        super.init(
+            contentRect: NSRect(x: 0, y: 0, width: initialSize.width, height: initialSize.height),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
         
-        let originalHeight = original.boundingRect(
-            with: NSSize(width: textWidth, height: CGFloat.greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: [.font: font]
-        ).height
+        self.level = .floating
+        self.isOpaque = false
+        self.backgroundColor = NSColor.clear
+        self.hasShadow = true
+        self.isMovableByWindowBackground = true
         
-        let translatedHeight = translated.boundingRect(
-            with: NSSize(width: textWidth, height: CGFloat.greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: [.font: font]
-        ).height
-        
-        // 确保每个文本框至少有合适的高度，并为ScrollView预留空间
-        let minTextHeight: CGFloat = 25 // 从30减少到25
-        let maxTextHeight: CGFloat = 120 // 从150减少到120
-        let finalOriginalHeight = min(max(originalHeight + 15, minTextHeight), maxTextHeight) // 从20减少到15
-        let finalTranslatedHeight = min(max(translatedHeight + 15, minTextHeight), maxTextHeight)
-        
-        // 计算总高度：固定元素 + 两个文本框的高度 + 额外间距
-        let totalHeight = verticalSpacing + finalOriginalHeight + finalTranslatedHeight + 30 // 从50减少到30
-        
-        // 限制最大高度，但提供更多空间
-        let maxHeight: CGFloat = 500 // 从600减少到500
-        let finalHeight = min(totalHeight, maxHeight)
-        
-        return NSSize(width: maxWidth, height: max(finalHeight, 150)) // 从200减少到150
+        setupStreamContent(original: originalText, targetLanguage: targetLanguage)
+        setupClickOutsideMonitor()
     }
     
-    private func setupContent(original: String, translated: String) {
-        let resultView = TranslationResultView(
+    private func setupStreamContent(original: String, targetLanguage: String) {
+        resultView = TranslationResultView(
             original: original,
-            translated: translated,
+            translated: "...", // 初始占位文本
+            isStreaming: true,
             onCopy: { [weak self] text in
                 self?.copyToClipboard(text)
             },
@@ -77,8 +61,119 @@ class TranslationResultWindow: NSWindow {
             }
         )
         
-        hostingView = NSHostingView(rootView: resultView)
+        hostingView = NSHostingView(rootView: resultView!)
         self.contentView = hostingView
+        
+        // 开始流式翻译
+        startStreamTranslation(original: original, to: targetLanguage)
+    }
+    
+    private func startStreamTranslation(original: String, to: String) {
+        NSLog("[LOG] Starting stream translation for: '\(original)' to: \(to)")
+        
+        // 添加超时机制，防止状态卡住
+        var isCompleted = false
+        var lastContent = ""
+        let timeoutTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: false) { [weak self] _ in
+            if !isCompleted {
+                NSLog("[LOG] Stream translation timeout detected")
+                // 如果有内容，使用最后的内容；否则显示超时信息
+                if !lastContent.isEmpty {
+                    NSLog("[LOG] Using last received content as final result: '\(lastContent)'")
+                    self?.completeStreamTranslation(lastContent)
+                } else {
+                    NSLog("[LOG] No content received, showing timeout message")
+                    self?.completeStreamTranslation("Translation timeout")
+                }
+            }
+        }
+        
+        TranslatorClient.shared.translateStream(
+            text: original,
+            to: to,
+            onChunk: { [weak self] chunk, fullContent in
+                // 实时更新翻译内容
+                lastContent = fullContent
+                NSLog("[LOG] Stream chunk received: '\(chunk)', full: '\(fullContent)'")
+                DispatchQueue.main.async {
+                    self?.updateStreamContent(fullContent)
+                }
+            },
+            onComplete: { [weak self] finalResult in
+                // 翻译完成
+                isCompleted = true
+                timeoutTimer.invalidate()
+                
+                let result = finalResult ?? lastContent
+                NSLog("[LOG] Stream translation completed: '\(result)'")
+                DispatchQueue.main.async {
+                    self?.completeStreamTranslation(result)
+                }
+            },
+            onError: { [weak self] errorMessage in
+                // 翻译出错
+                isCompleted = true
+                timeoutTimer.invalidate()
+                
+                NSLog("[LOG] Stream translation error: '\(errorMessage)'")
+                DispatchQueue.main.async {
+                    self?.handleStreamError(errorMessage)
+                }
+            }
+        )
+    }
+    
+    private func updateStreamContent(_ content: String) {
+        guard let resultView = self.resultView else {
+            NSLog("[LOG] Warning: resultView is nil in updateStreamContent")
+            return
+        }
+        
+        // 确保在主线程更新UI
+        if Thread.isMainThread {
+            resultView.viewModel.updateTranslation(content, isStreaming: true)
+            
+            // 根据内容动态调整窗口大小
+            let newSize = Self.calculateWindowSize(original: resultView.original, translated: content)
+            let currentFrame = self.frame
+            let newFrame = NSRect(
+                x: currentFrame.origin.x,
+                y: currentFrame.origin.y + currentFrame.height - newSize.height, // 保持顶部位置
+                width: newSize.width,
+                height: newSize.height
+            )
+            self.setFrame(newFrame, display: true, animate: true)
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.updateStreamContent(content)
+            }
+        }
+    }
+    
+    private func completeStreamTranslation(_ finalResult: String) {
+        guard let resultView = self.resultView else {
+            NSLog("[LOG] Warning: resultView is nil in completeStreamTranslation")
+            return
+        }
+        
+        // 确保在主线程更新UI
+        if Thread.isMainThread {
+            NSLog("[LOG] Completing stream translation with result: '\(finalResult)'")
+            resultView.viewModel.updateTranslation(finalResult, isStreaming: false)
+            NSLog("[LOG] Stream translation completed in window, isStreaming set to false")
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.completeStreamTranslation(finalResult)
+            }
+        }
+    }
+    
+    private func handleStreamError(_ errorMessage: String) {
+        DispatchQueue.main.async { [weak self] in
+            let errorText = "Translation failed: \(errorMessage)"
+            self?.resultView?.viewModel.updateTranslation(errorText, isStreaming: false)
+            NSLog("[LOG] Stream translation error in window: \(errorMessage)")
+        }
     }
     
     // 设置点击外部区域监听
@@ -220,15 +315,103 @@ class TranslationResultWindow: NSWindow {
         // 不调用super，防止窗口在失去焦点时被自动隐藏
         // 用户需要通过点击关闭按钮或点击外部区域来关闭
     }
+    
+    // 计算窗口大小以适应内容
+    private static func calculateWindowSize(original: String, translated: String) -> NSSize {
+        let maxWidth: CGFloat = 450 // 从500减少到450
+        let minWidth: CGFloat = 300 // 从350减少到300
+        let padding: CGFloat = 24 // 从32减少到24
+        let verticalSpacing: CGFloat = 80 // 从120减少到80
+        
+        // 计算文本所需的高度
+        let font = NSFont.systemFont(ofSize: 13)
+        let textWidth = maxWidth - padding - 16 // 减去文本框内部padding
+        
+        let originalHeight = original.boundingRect(
+            with: NSSize(width: textWidth, height: CGFloat.greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font]
+        ).height
+        
+        let translatedHeight = translated.boundingRect(
+            with: NSSize(width: textWidth, height: CGFloat.greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font]
+        ).height
+        
+        // 确保每个文本框至少有合适的高度，并为ScrollView预留空间
+        let minTextHeight: CGFloat = 25 // 从30减少到25
+        let maxTextHeight: CGFloat = 120 // 从150减少到120
+        let finalOriginalHeight = min(max(originalHeight + 15, minTextHeight), maxTextHeight) // 从20减少到15
+        let finalTranslatedHeight = min(max(translatedHeight + 15, minTextHeight), maxTextHeight)
+        
+        // 计算总高度：固定元素 + 两个文本框的高度 + 额外间距
+        let totalHeight = verticalSpacing + finalOriginalHeight + finalTranslatedHeight + 30 // 从50减少到30
+        
+        // 限制最大高度，但提供更多空间
+        let maxHeight: CGFloat = 500 // 从600减少到500
+        let finalHeight = min(totalHeight, maxHeight)
+        
+        return NSSize(width: maxWidth, height: max(finalHeight, 150)) // 从200减少到150
+    }
+    
+    private func setupContent(original: String, translated: String) {
+        let resultView = TranslationResultView(
+            original: original,
+            translated: translated,
+            isStreaming: false,
+            onCopy: { [weak self] text in
+                self?.copyToClipboard(text)
+            },
+            onClose: { [weak self] in
+                self?.hide()
+            }
+        )
+        
+        hostingView = NSHostingView(rootView: resultView)
+        self.contentView = hostingView
+    }
+}
+
+class TranslationResultViewModel: ObservableObject {
+    @Published var translated: String
+    @Published var isStreaming: Bool
+    
+    init(translated: String, isStreaming: Bool) {
+        self.translated = translated
+        self.isStreaming = isStreaming
+        NSLog("[LOG] TranslationResultViewModel initialized with isStreaming: \(isStreaming)")
+    }
+    
+    func updateTranslation(_ newTranslation: String, isStreaming: Bool) {
+        NSLog("[LOG] Updating translation - isStreaming: \(self.isStreaming) -> \(isStreaming), text: '\(newTranslation.prefix(50))...'")
+        
+        // 确保在主线程更新
+        if Thread.isMainThread {
+            self.translated = newTranslation
+            self.isStreaming = isStreaming
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.updateTranslation(newTranslation, isStreaming: isStreaming)
+            }
+        }
+    }
 }
 
 struct TranslationResultView: View {
     let original: String
-    let translated: String
+    @ObservedObject var viewModel: TranslationResultViewModel
     let onCopy: (String) -> Void
     let onClose: () -> Void
     
     @State private var showingCopySuccess = false
+    
+    init(original: String, translated: String, isStreaming: Bool, onCopy: @escaping (String) -> Void, onClose: @escaping () -> Void) {
+        self.original = original
+        self.viewModel = TranslationResultViewModel(translated: translated, isStreaming: isStreaming)
+        self.onCopy = onCopy
+        self.onClose = onClose
+    }
     
     var body: some View {
         VStack(spacing: 8) {
@@ -247,7 +430,7 @@ struct TranslationResultView: View {
                 
                 // 复制按钮
                 Button(action: {
-                    onCopy(translated)
+                    onCopy(viewModel.translated)
                     showCopyFeedback()
                 }) {
                     Image(systemName: "doc.on.doc")
@@ -313,17 +496,42 @@ struct TranslationResultView: View {
             // 译文 - 去掉背景框
             VStack(alignment: .leading, spacing: 4) {
                 ScrollView {
-                    Text(translated)
-                        .font(.system(size: 14))
-                        .foregroundColor(.primary)
-                        .lineSpacing(4)
-                        .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-                        .padding(.horizontal, 4)
+                    HStack {
+                        Text(viewModel.translated)
+                            .font(.system(size: 14))
+                            .foregroundColor(.primary)
+                            .lineSpacing(4)
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                            .padding(.horizontal, 4)
+                        
+                        // 流式翻译指示器
+                        if viewModel.isStreaming {
+                            Text("|")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.blue)
+                                .opacity(0.8)
+                                .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: viewModel.isStreaming)
+                        }
+                    }
                 }
                 .frame(minHeight: 30, maxHeight: 120)
+                
+                // 流式状态指示
+                if viewModel.isStreaming {
+                    HStack {
+                        ProgressView()
+                            .scaleEffect(0.6)
+                        Text("Translating...")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 4)
+                    .padding(.top, 2)
+                }
             }
         }
         .padding(12)
@@ -363,4 +571,5 @@ struct TranslationResultView: View {
             showingCopySuccess = false
         }
     }
+
 } 
