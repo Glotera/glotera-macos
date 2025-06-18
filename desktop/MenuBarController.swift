@@ -2,6 +2,7 @@ import Cocoa
 
 class MenuBarController {
     let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private var languageConfigWindow: LanguageConfigWindow?
 
     init() {
         print("[LOG] MenuBarController initialized")
@@ -14,50 +15,97 @@ class MenuBarController {
     func constructMenu() {
         let menu = NSMenu()
         
-        // 主要功能菜单
-        menu.addItem(NSMenuItem(title: "设置", action: #selector(openSettings), keyEquivalent: ","))
+        // Main function menu
+        let settingsItem = NSMenuItem(title: "Settings", action: #selector(openSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
         
-        // 调试菜单
+        // Debug menu
         menu.addItem(NSMenuItem.separator())
-        let debugMenu = NSMenuItem(title: "调试", action: nil, keyEquivalent: "")
+        let debugMenu = NSMenuItem(title: "Debug", action: nil, keyEquivalent: "")
         let debugSubMenu = NSMenu()
         
-        debugSubMenu.addItem(NSMenuItem(title: "测试触发器", action: #selector(testTrigger), keyEquivalent: ""))
-        debugSubMenu.addItem(NSMenuItem(title: "测试Discord触发器", action: #selector(testDiscordTrigger), keyEquivalent: ""))
-        debugSubMenu.addItem(NSMenuItem(title: "测试空格键捕获", action: #selector(testSpaceKeyCapture), keyEquivalent: ""))
-        debugSubMenu.addItem(NSMenuItem(title: "显示状态", action: #selector(showStatus), keyEquivalent: ""))
-        debugSubMenu.addItem(NSMenuItem(title: "重启事件监听", action: #selector(restartEventMonitoring), keyEquivalent: ""))
+        let testTriggerItem = NSMenuItem(title: "Test Trigger", action: #selector(testTrigger), keyEquivalent: "")
+        testTriggerItem.target = self
+        debugSubMenu.addItem(testTriggerItem)
+        
+        let testDiscordTriggerItem = NSMenuItem(title: "Test Discord Trigger", action: #selector(testDiscordTrigger), keyEquivalent: "")
+        testDiscordTriggerItem.target = self
+        debugSubMenu.addItem(testDiscordTriggerItem)
+        
+        let testSpaceKeyItem = NSMenuItem(title: "Test Space Key Capture", action: #selector(testSpaceKeyCapture), keyEquivalent: "")
+        testSpaceKeyItem.target = self
+        debugSubMenu.addItem(testSpaceKeyItem)
+        
+        let showStatusItem = NSMenuItem(title: "Show Status", action: #selector(showStatus), keyEquivalent: "")
+        showStatusItem.target = self
+        debugSubMenu.addItem(showStatusItem)
+        
+        let restartEventItem = NSMenuItem(title: "Restart Event Monitoring", action: #selector(restartEventMonitoring), keyEquivalent: "")
+        restartEventItem.target = self
+        debugSubMenu.addItem(restartEventItem)
+        
         debugSubMenu.addItem(NSMenuItem.separator())
-        debugSubMenu.addItem(NSMenuItem(title: "重置计数器", action: #selector(resetCounters), keyEquivalent: ""))
-        debugSubMenu.addItem(NSMenuItem(title: "强制健康检查", action: #selector(forceHealthCheck), keyEquivalent: ""))
+        
+        let resetCountersItem = NSMenuItem(title: "Reset Counters", action: #selector(resetCounters), keyEquivalent: "")
+        resetCountersItem.target = self
+        debugSubMenu.addItem(resetCountersItem)
+        
+        let forceHealthCheckItem = NSMenuItem(title: "Force Health Check", action: #selector(forceHealthCheck), keyEquivalent: "")
+        forceHealthCheckItem.target = self
+        debugSubMenu.addItem(forceHealthCheckItem)
+        
         debugSubMenu.addItem(NSMenuItem.separator())
-        debugSubMenu.addItem(NSMenuItem(title: "打开控制台", action: #selector(openConsole), keyEquivalent: ""))
+        
+        let openConsoleItem = NSMenuItem(title: "Open Console", action: #selector(openConsole), keyEquivalent: "")
+        openConsoleItem.target = self
+        debugSubMenu.addItem(openConsoleItem)
         
         debugMenu.submenu = debugSubMenu
         menu.addItem(debugMenu)
         
-        // 退出菜单
+        // Exit menu
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "退出", action: #selector(quit), keyEquivalent: "q"))
+        let quitItem = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
+        quitItem.target = self
+        menu.addItem(quitItem)
         
         statusItem.menu = menu
     }
 
     @objc func openSettings() {
-        // 打开设置窗口
         print("[LOG] Settings menu clicked")
+        
+        // 如果窗口已存在，直接显示
+        if let existingWindow = languageConfigWindow {
+            existingWindow.show()
+            return
+        }
+        
+        // 创建新的语言配置窗口
+        languageConfigWindow = LanguageConfigWindow()
+        languageConfigWindow?.show()
+        
+        // 监听窗口关闭事件，释放引用
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: languageConfigWindow,
+            queue: .main
+        ) { [weak self] _ in
+            self?.languageConfigWindow = nil
+        }
     }
     
     @objc func testTrigger() {
         print("[LOG] Manual trigger test requested")
         InputMonitor.shared.manualTriggerTest()
         
-        // 显示测试完成的通知
+        // Show test completion notification
         let alert = NSAlert()
-        alert.messageText = "触发器测试完成"
-        alert.informativeText = "请查看控制台输出以获取详细信息"
+        alert.messageText = "Trigger Test Completed"
+        alert.informativeText = "Please check console output for detailed information"
         alert.alertStyle = .informational
-        alert.addButton(withTitle: "确定")
+        alert.addButton(withTitle: "OK")
         alert.runModal()
     }
     
@@ -65,12 +113,12 @@ class MenuBarController {
         print("[LOG] Discord trigger test requested")
         InputMonitor.shared.testDiscordTrigger()
         
-        // 显示测试完成的通知
+        // Show test completion notification
         let alert = NSAlert()
-        alert.messageText = "Discord触发器测试完成"
-        alert.informativeText = "请查看控制台输出以获取详细信息。\n建议在Discord输入框中输入测试内容（如 'hello #@en'）后再运行此测试。"
+        alert.messageText = "Discord Trigger Test Completed"
+        alert.informativeText = "Please check console output for detailed information.\nRecommend entering test content (like 'hello #@en') in Discord input box before running this test."
         alert.alertStyle = .informational
-        alert.addButton(withTitle: "确定")
+        alert.addButton(withTitle: "OK")
         alert.runModal()
     }
     
@@ -84,11 +132,11 @@ class MenuBarController {
         let statusInfo = InputMonitor.shared.getStatusInfo()
         
         let alert = NSAlert()
-        alert.messageText = "系统状态"
+        alert.messageText = "System Status"
         alert.informativeText = statusInfo
         alert.alertStyle = .informational
-        alert.addButton(withTitle: "确定")
-        alert.addButton(withTitle: "复制到剪贴板")
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Copy to Clipboard")
         
         let response = alert.runModal()
         if response == .alertSecondButtonReturn {
@@ -101,16 +149,16 @@ class MenuBarController {
     @objc func restartEventMonitoring() {
         print("[LOG] Event monitoring restart requested")
         
-        // 通知AppDelegate重启事件监听
+        // Notify AppDelegate to restart event monitoring
         if let appDelegate = NSApp.delegate as? AppDelegate {
             appDelegate.restartEventMonitoring()
         }
         
         let alert = NSAlert()
-        alert.messageText = "重启完成"
-        alert.informativeText = "事件监听已重新启动"
+        alert.messageText = "Restart Completed"
+        alert.informativeText = "Event monitoring has been restarted"
         alert.alertStyle = .informational
-        alert.addButton(withTitle: "确定")
+        alert.addButton(withTitle: "OK")
         alert.runModal()
     }
     
@@ -128,10 +176,10 @@ class MenuBarController {
         InputMonitor.shared.resetEventCounters()
         
         let alert = NSAlert()
-        alert.messageText = "计数器已重置"
-        alert.informativeText = "事件计数器已重置为零"
+        alert.messageText = "Counters Reset"
+        alert.informativeText = "Event counters have been reset to zero"
         alert.alertStyle = .informational
-        alert.addButton(withTitle: "确定")
+        alert.addButton(withTitle: "OK")
         alert.runModal()
     }
     
@@ -140,10 +188,10 @@ class MenuBarController {
         InputMonitor.shared.forceHealthCheck()
         
         let alert = NSAlert()
-        alert.messageText = "健康检查完成"
-        alert.informativeText = "请查看控制台输出以获取详细信息"
+        alert.messageText = "Health Check Completed"
+        alert.informativeText = "Please check console output for detailed information"
         alert.alertStyle = .informational
-        alert.addButton(withTitle: "确定")
+        alert.addButton(withTitle: "OK")
         alert.runModal()
     }
 } 

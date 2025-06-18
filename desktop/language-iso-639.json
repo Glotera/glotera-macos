@@ -1,0 +1,818 @@
+{
+  "af": {
+    "name": "Afrikaans",
+    "popular": 3,
+    "triggers": [
+      "@af",
+      "#af"
+    ]
+  },
+  "am": {
+    "name": "Amharic",
+    "popular": 3,
+    "triggers": [
+      "@am",
+      "#am"
+    ]
+  },
+  "ar": {
+    "name": "Arabic",
+    "popular": 1,
+    "triggers": [
+      "@ar",
+      "#ar"
+    ]
+  },
+  "az": {
+    "name": "Azerbaijani",
+    "popular": 3,
+    "triggers": [
+      "@az",
+      "#az"
+    ]
+  },
+  "be": {
+    "name": "Belarusian",
+    "popular": 3,
+    "triggers": [
+      "@be",
+      "#be"
+    ]
+  },
+  "bg": {
+    "name": "Bulgarian",
+    "popular": 3,
+    "triggers": [
+      "@bg",
+      "#bg"
+    ]
+  },
+  "bn": {
+    "name": "Bengali",
+    "popular": 1,
+    "triggers": [
+      "@bn",
+      "#bn"
+    ]
+  },
+  "bo": {
+    "name": "Tibetan",
+    "popular": 3,
+    "triggers": [
+      "@bo",
+      "#bo"
+    ]
+  },
+  "bs": {
+    "name": "Bosnian",
+    "popular": 3,
+    "triggers": [
+      "@bs",
+      "#bs"
+    ]
+  },
+  "ca": {
+    "name": "Catalan",
+    "popular": 3,
+    "triggers": [
+      "@ca",
+      "#ca"
+    ]
+  },
+  "ceb": {
+    "name": "Cebuano",
+    "popular": 3,
+    "triggers": [
+      "@ceb",
+      "#ceb"
+    ]
+  },
+  "cs": {
+    "name": "Czech",
+    "popular": 3,
+    "triggers": [
+      "@cs",
+      "#cs"
+    ]
+  },
+  "cy": {
+    "name": "Welsh",
+    "popular": 3,
+    "triggers": [
+      "@cy",
+      "#cy"
+    ]
+  },
+  "da": {
+    "name": "Danish",
+    "popular": 3,
+    "triggers": [
+      "@da",
+      "#da"
+    ]
+  },
+  "de": {
+    "name": "German",
+    "popular": 1,
+    "triggers": [
+      "@de",
+      "#de"
+    ]
+  },
+  "el": {
+    "name": "Greek",
+    "popular": 3,
+    "triggers": [
+      "@el",
+      "#el"
+    ]
+  },
+  "en": {
+    "name": "English",
+    "popular": 1,
+    "triggers": [
+      "@en",
+      "#en"
+    ]
+  },
+  "eo": {
+    "name": "Esperanto",
+    "popular": 3,
+    "triggers": [
+      "@eo",
+      "#eo"
+    ]
+  },
+  "es": {
+    "name": "Spanish",
+    "popular": 1,
+    "triggers": [
+      "@es",
+      "#es"
+    ]
+  },
+  "et": {
+    "name": "Estonian",
+    "popular": 3,
+    "triggers": [
+      "@et",
+      "#et"
+    ]
+  },
+  "eu": {
+    "name": "Basque",
+    "popular": 3,
+    "triggers": [
+      "@eu",
+      "#eu"
+    ]
+  },
+  "fa": {
+    "name": "Persian",
+    "popular": 2,
+    "triggers": [
+      "@fa",
+      "#fa"
+    ]
+  },
+  "fi": {
+    "name": "Finnish",
+    "popular": 3,
+    "triggers": [
+      "@fi",
+      "#fi"
+    ]
+  },
+  "fil": {
+    "name": "Filipino",
+    "popular": 3,
+    "triggers": [
+      "@fil",
+      "#fil"
+    ]
+  },
+  "fr": {
+    "name": "French",
+    "popular": 1,
+    "triggers": [
+      "@fr",
+      "#fr"
+    ]
+  },
+  "ga": {
+    "name": "Irish",
+    "popular": 3,
+    "triggers": [
+      "@ga",
+      "#ga"
+    ]
+  },
+  "gl": {
+    "name": "Galician",
+    "popular": 3,
+    "triggers": [
+      "@gl",
+      "#gl"
+    ]
+  },
+  "gu": {
+    "name": "Gujarati",
+    "popular": 3,
+    "triggers": [
+      "@gu",
+      "#gu"
+    ]
+  },
+  "he": {
+    "name": "Hebrew",
+    "popular": 3,
+    "triggers": [
+      "@he",
+      "#he"
+    ]
+  },
+  "hi": {
+    "name": "Hindi",
+    "popular": 1,
+    "triggers": [
+      "@hi",
+      "#hi"
+    ]
+  },
+  "hmn": {
+    "name": "Hmong",
+    "popular": 3,
+    "triggers": [
+      "@hmn",
+      "#hmn"
+    ]
+  },
+  "hr": {
+    "name": "Croatian",
+    "popular": 3,
+    "triggers": [
+      "@hr",
+      "#hr"
+    ]
+  },
+  "ht": {
+    "name": "Haitian Creole",
+    "popular": 3,
+    "triggers": [
+      "@ht",
+      "#ht"
+    ]
+  },
+  "hu": {
+    "name": "Hungarian",
+    "popular": 3,
+    "triggers": [
+      "@hu",
+      "#hu"
+    ]
+  },
+  "hy": {
+    "name": "Armenian",
+    "popular": 3,
+    "triggers": [
+      "@hy",
+      "#hy"
+    ]
+  },
+  "id": {
+    "name": "Indonesian",
+    "popular": 1,
+    "triggers": [
+      "@id",
+      "#id"
+    ]
+  },
+  "is": {
+    "name": "Icelandic",
+    "popular": 3,
+    "triggers": [
+      "@is",
+      "#is"
+    ]
+  },
+  "it": {
+    "name": "Italian",
+    "popular": 2,
+    "triggers": [
+      "@it",
+      "#it"
+    ]
+  },
+  "ja": {
+    "name": "Japanese",
+    "popular": 1,
+    "triggers": [
+      "@ja",
+      "#ja"
+    ]
+  },
+  "jv": {
+    "name": "Javanese",
+    "popular": 3,
+    "triggers": [
+      "@jv",
+      "#jv"
+    ]
+  },
+  "ka": {
+    "name": "Georgian",
+    "popular": 3,
+    "triggers": [
+      "@ka",
+      "#ka"
+    ]
+  },
+  "kk": {
+    "name": "Kazakh",
+    "popular": 3,
+    "triggers": [
+      "@kk",
+      "#kk"
+    ]
+  },
+  "km": {
+    "name": "Khmer",
+    "popular": 3,
+    "triggers": [
+      "@km",
+      "#km"
+    ]
+  },
+  "kn": {
+    "name": "Kannada",
+    "popular": 3,
+    "triggers": [
+      "@kn",
+      "#kn"
+    ]
+  },
+  "ko": {
+    "name": "Korean",
+    "popular": 2,
+    "triggers": [
+      "@ko",
+      "#ko"
+    ]
+  },
+  "ku": {
+    "name": "Kurdish",
+    "popular": 3,
+    "triggers": [
+      "@ku",
+      "#ku"
+    ]
+  },
+  "ky": {
+    "name": "Kyrgyz",
+    "popular": 3,
+    "triggers": [
+      "@ky",
+      "#ky"
+    ]
+  },
+  "la": {
+    "name": "Latin",
+    "popular": 3,
+    "triggers": [
+      "@la",
+      "#la"
+    ]
+  },
+  "lo": {
+    "name": "Lao",
+    "popular": 3,
+    "triggers": [
+      "@lo",
+      "#lo"
+    ]
+  },
+  "lt": {
+    "name": "Lithuanian",
+    "popular": 3,
+    "triggers": [
+      "@lt",
+      "#lt"
+    ]
+  },
+  "lv": {
+    "name": "Latvian",
+    "popular": 3,
+    "triggers": [
+      "@lv",
+      "#lv"
+    ]
+  },
+  "mg": {
+    "name": "Malagasy",
+    "popular": 3,
+    "triggers": [
+      "@mg",
+      "#mg"
+    ]
+  },
+  "mi": {
+    "name": "Maori",
+    "popular": 3,
+    "triggers": [
+      "@mi",
+      "#mi"
+    ]
+  },
+  "mk": {
+    "name": "Macedonian",
+    "popular": 3,
+    "triggers": [
+      "@mk",
+      "#mk"
+    ]
+  },
+  "ml": {
+    "name": "Malayalam",
+    "popular": 3,
+    "triggers": [
+      "@ml",
+      "#ml"
+    ]
+  },
+  "mn": {
+    "name": "Mongolian",
+    "popular": 3,
+    "triggers": [
+      "@mn",
+      "#mn"
+    ]
+  },
+  "mr": {
+    "name": "Marathi",
+    "popular": 3,
+    "triggers": [
+      "@mr",
+      "#mr"
+    ]
+  },
+  "ms": {
+    "name": "Malay",
+    "popular": 2,
+    "triggers": [
+      "@ms",
+      "#ms"
+    ]
+  },
+  "mt": {
+    "name": "Maltese",
+    "popular": 3,
+    "triggers": [
+      "@mt",
+      "#mt"
+    ]
+  },
+  "my": {
+    "name": "Burmese",
+    "popular": 3,
+    "triggers": [
+      "@my",
+      "#my"
+    ]
+  },
+  "ne": {
+    "name": "Nepali",
+    "popular": 3,
+    "triggers": [
+      "@ne",
+      "#ne"
+    ]
+  },
+  "nl": {
+    "name": "Dutch",
+    "popular": 2,
+    "triggers": [
+      "@nl",
+      "#nl"
+    ]
+  },
+  "no": {
+    "name": "Norwegian",
+    "popular": 3,
+    "triggers": [
+      "@no",
+      "#no"
+    ]
+  },
+  "ny": {
+    "name": "Chichewa",
+    "popular": 3,
+    "triggers": [
+      "@ny",
+      "#ny"
+    ]
+  },
+  "pa": {
+    "name": "Punjabi",
+    "popular": 3,
+    "triggers": [
+      "@pa",
+      "#pa"
+    ]
+  },
+  "pl": {
+    "name": "Polish",
+    "popular": 2,
+    "triggers": [
+      "@pl",
+      "#pl"
+    ]
+  },
+  "ps": {
+    "name": "Pashto",
+    "popular": 3,
+    "triggers": [
+      "@ps",
+      "#ps"
+    ]
+  },
+  "pt": {
+    "name": "Portuguese",
+    "popular": 1,
+    "triggers": [
+      "@pt",
+      "#pt"
+    ]
+  },
+  "ro": {
+    "name": "Romanian",
+    "popular": 2,
+    "triggers": [
+      "@ro",
+      "#ro"
+    ]
+  },
+  "ru": {
+    "name": "Russian",
+    "popular": 1,
+    "triggers": [
+      "@ru",
+      "#ru"
+    ]
+  },
+  "rw": {
+    "name": "Kinyarwanda",
+    "popular": 3,
+    "triggers": [
+      "@rw",
+      "#rw"
+    ]
+  },
+  "sd": {
+    "name": "Sindhi",
+    "popular": 3,
+    "triggers": [
+      "@sd",
+      "#sd"
+    ]
+  },
+  "si": {
+    "name": "Sinhala",
+    "popular": 3,
+    "triggers": [
+      "@si",
+      "#si"
+    ]
+  },
+  "sk": {
+    "name": "Slovak",
+    "popular": 3,
+    "triggers": [
+      "@sk",
+      "#sk"
+    ]
+  },
+  "sl": {
+    "name": "Slovenian",
+    "popular": 3,
+    "triggers": [
+      "@sl",
+      "#sl"
+    ]
+  },
+  "sm": {
+    "name": "Samoan",
+    "popular": 3,
+    "triggers": [
+      "@sm",
+      "#sm"
+    ]
+  },
+  "sn": {
+    "name": "Shona",
+    "popular": 3,
+    "triggers": [
+      "@sn",
+      "#sn"
+    ]
+  },
+  "so": {
+    "name": "Somali",
+    "popular": 3,
+    "triggers": [
+      "@so",
+      "#so"
+    ]
+  },
+  "sq": {
+    "name": "Albanian",
+    "popular": 3,
+    "triggers": [
+      "@sq",
+      "#sq"
+    ]
+  },
+  "sr": {
+    "name": "Serbian",
+    "popular": 3,
+    "triggers": [
+      "@sr",
+      "#sr"
+    ]
+  },
+  "st": {
+    "name": "Sesotho",
+    "popular": 3,
+    "triggers": [
+      "@st",
+      "#st"
+    ]
+  },
+  "su": {
+    "name": "Sundanese",
+    "popular": 3,
+    "triggers": [
+      "@su",
+      "#su"
+    ]
+  },
+  "sv": {
+    "name": "Swedish",
+    "popular": 3,
+    "triggers": [
+      "@sv",
+      "#sv"
+    ]
+  },
+  "sw": {
+    "name": "Swahili",
+    "popular": 3,
+    "triggers": [
+      "@sw",
+      "#sw"
+    ]
+  },
+  "ta": {
+    "name": "Tamil",
+    "popular": 2,
+    "triggers": [
+      "@ta",
+      "#ta"
+    ]
+  },
+  "te": {
+    "name": "Telugu",
+    "popular": 3,
+    "triggers": [
+      "@te",
+      "#te"
+    ]
+  },
+  "tg": {
+    "name": "Tajik",
+    "popular": 3,
+    "triggers": [
+      "@tg",
+      "#tg"
+    ]
+  },
+  "th": {
+    "name": "Thai",
+    "popular": 2,
+    "triggers": [
+      "@th",
+      "#th"
+    ]
+  },
+  "tk": {
+    "name": "Turkmen",
+    "popular": 3,
+    "triggers": [
+      "@tk",
+      "#tk"
+    ]
+  },
+  "tl": {
+    "name": "Tagalog",
+    "popular": 3,
+    "triggers": [
+      "@tl",
+      "#tl"
+    ]
+  },
+  "tr": {
+    "name": "Turkish",
+    "popular": 2,
+    "triggers": [
+      "@tr",
+      "#tr"
+    ]
+  },
+  "tt": {
+    "name": "Tatar",
+    "popular": 3,
+    "triggers": [
+      "@tt",
+      "#tt"
+    ]
+  },
+  "uk": {
+    "name": "Ukrainian",
+    "popular": 2,
+    "triggers": [
+      "@uk",
+      "#uk"
+    ]
+  },
+  "ur": {
+    "name": "Urdu",
+    "popular": 2,
+    "triggers": [
+      "@ur",
+      "#ur"
+    ]
+  },
+  "uz": {
+    "name": "Uzbek",
+    "popular": 3,
+    "triggers": [
+      "@uz",
+      "#uz"
+    ]
+  },
+  "vi": {
+    "name": "Vietnamese",
+    "popular": 2,
+    "triggers": [
+      "@vi",
+      "#vi"
+    ]
+  },
+  "xh": {
+    "name": "Xhosa",
+    "popular": 3,
+    "triggers": [
+      "@xh",
+      "#xh"
+    ]
+  },
+  "yi": {
+    "name": "Yiddish",
+    "popular": 3,
+    "triggers": [
+      "@yi",
+      "#yi"
+    ]
+  },
+  "yo": {
+    "name": "Yoruba",
+    "popular": 3,
+    "triggers": [
+      "@yo",
+      "#yo"
+    ]
+  },
+  "zh": {
+    "name": "Chinese (Simplified)",
+    "popular": 1,
+    "triggers": [
+      "@zh",
+      "#zh"
+    ]
+  },
+  "zh-TW": {
+    "name": "Chinese (Traditional)",
+    "popular": 3,
+    "triggers": [
+      "@zh-TW",
+      "#zh-TW"
+    ]
+  },
+  "zu": {
+    "name": "Zulu",
+    "popular": 3,
+    "triggers": [
+      "@zu",
+      "#zu"
+    ]
+  }
+}

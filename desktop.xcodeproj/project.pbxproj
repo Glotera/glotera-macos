@@ -22,6 +22,9 @@
 		9BE4ED882E012FF1002AC2AE /* TranslatorClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BE4ED7B2E012FF1002AC2AE /* TranslatorClient.swift */; };
 		9BE4ED892E012FF1002AC2AE /* Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 9BE4ED7C2E012FF1002AC2AE /* Info.plist */; };
 		9BE4ED8A2E012FF1002AC2AE /* TranslateAgent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BE4ED7D2E012FF1002AC2AE /* TranslateAgent.swift */; };
+		52E75974376A4A2C80038B26 /* LanguageConfigManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F60848B2C5C4E76B8A270AB /* LanguageConfigManager.swift */; };
+		3D153861DB83474CB7A5CE30 /* LanguageConfigWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15B044BD9B2D441BAF66FA8D /* LanguageConfigWindow.swift */; };
+		55ACA3925B5740A49F528A02 /* language-iso-639.json in Resources */ = {isa = PBXBuildFile; fileRef = ADA243CF57A742A49C392A18 /* language-iso-639.json */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -61,6 +64,9 @@
 		9BE4ED7B2E012FF1002AC2AE /* TranslatorClient.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TranslatorClient.swift; sourceTree = "<group>"; };
 		9BE4ED7C2E012FF1002AC2AE /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		9BE4ED7D2E012FF1002AC2AE /* TranslateAgent.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TranslateAgent.swift; sourceTree = "<group>"; };
+		3F60848B2C5C4E76B8A270AB /* LanguageConfigManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LanguageConfigManager.swift; sourceTree = "<group>"; };
+		15B044BD9B2D441BAF66FA8D /* LanguageConfigWindow.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LanguageConfigWindow.swift; sourceTree = "<group>"; };
+		ADA243CF57A742A49C392A18 /* language-iso-639.json */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.json; path = "language-iso-639.json"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -134,6 +140,9 @@
 				9BE4ED792E012FF1002AC2AE /* desktop.entitlements */,
 				9BE4ED7C2E012FF1002AC2AE /* Info.plist */,
 				9BE4ED732E012FF1002AC2AE /* InputMonitor.swift */,
+				3F60848B2C5C4E76B8A270AB /* LanguageConfigManager.swift */,
+				15B044BD9B2D441BAF66FA8D /* LanguageConfigWindow.swift */,
+				ADA243CF57A742A49C392A18 /* language-iso-639.json */,
 				9BE4ED722E012FF1002AC2AE /* MenuBarController.swift */,
 				9BE4ED712E012FF1002AC2AE /* SettingsView.swift */,
 				9BE4ED7D2E012FF1002AC2AE /* TranslateAgent.swift */,
@@ -251,6 +260,7 @@
 			files = (
 				9BE4ED892E012FF1002AC2AE /* Info.plist in Resources */,
 				9BE4ED842E012FF1002AC2AE /* Assets.xcassets in Resources */,
+				55ACA3925B5740A49F528A02 /* language-iso-639.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -276,6 +286,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				9BE4ED872E012FF1002AC2AE /* AppDelegate.swift in Sources */,
+				52E75974376A4A2C80038B26 /* LanguageConfigManager.swift in Sources */,
+				3D153861DB83474CB7A5CE30 /* LanguageConfigWindow.swift in Sources */,
 				9BE4ED802E012FF1002AC2AE /* MenuBarController.swift in Sources */,
 				9BE4ED7F2E012FF1002AC2AE /* SettingsView.swift in Sources */,
 				9BE4ED852E012FF1002AC2AE /* TranslationResultWindow.swift in Sources */,

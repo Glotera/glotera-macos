@@ -94,7 +94,7 @@ class AXController {
     }
 
     // MARK: - Trigger Detection
-    
+
     // 检测当前焦点输入框内容，提取触发标记和原文
     func detectTriggerAndExtract() -> (text: String, lang: String)? {
         print("[LOG] Starting trigger detection")
@@ -145,57 +145,416 @@ class AXController {
             print("[LOG] Cleaned content length: \(cleanedValue.count) characters")
         }
         
-        // 检查多种触发模式，支持多行文本
-        let patterns = [
-            #"(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\s*$"#,      // 标准模式（最常用，Discord场景）
-            #"^(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\s*$"#,     // 严格开头模式
-            #"(.*?)\s+[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\s*$"#,   // 空格分隔
-            #"(?s)(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\s*$"#   // 多行支持
-        ]
+        // 使用配置管理器获取所有触发器
+        let allTriggers = getAllConfiguredTriggers()
+        if allTriggers.isEmpty {
+            print("[LOG] No configured triggers found, falling back to default patterns")
+            return processContentWithDefaultTriggers(cleanedValue)
+        }
         
-        for (index, pattern) in patterns.enumerated() {
-            // 添加 dotMatchesLineSeparators 选项以支持多行文本
-            if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) {
-                let nsValue = cleanedValue as NSString
-                let results = regex.matches(in: cleanedValue, options: [], range: NSRange(location: 0, length: nsValue.length))
-                
-                if let match = results.first, match.numberOfRanges >= 3 {
-                    let textRange = match.range(at: 1)
-                    let langRange = match.range(at: 2)
-                    
-                    if textRange.location != NSNotFound && langRange.location != NSNotFound {
-                        // 提取文本，保留内部换行符，只去掉首尾空白
-                        let rawText = nsValue.substring(with: textRange)
-                        let text = rawText.trimmingCharacters(in: .whitespaces) // 只去掉空格和制表符，保留换行符
-                        var lang = nsValue.substring(with: langRange).lowercased()
-                        
-                        // 转换 jp 为 ja
-                        if lang == "jp" { lang = "ja" }
-                        
-                        if !text.isEmpty {
-                            print("[LOG] Trigger found using pattern \(index + 1): text='\(text)', lang='\(lang)'")
-                            print("[LOG] Full text content (with potential newlines): '\(text)'")
-                            // 显示换行符位置以便调试
-                            let textLineBreaks = text.enumerated().compactMap { $0.element == "\n" ? $0.offset : nil }
-                            if !textLineBreaks.isEmpty {
-                                print("[LOG] Extracted text newlines at positions: \(textLineBreaks)")
-                            }
-                            return (text: text, lang: lang)
-                        }
-                    }
-                }
+        // 动态生成正则表达式模式
+        let patterns = generateTriggerPatterns(triggers: allTriggers)
+        
+        // 检查每个触发器
+        for trigger in allTriggers {
+            if let result = checkForTrigger(trigger, in: cleanedValue) {
+                print("[LOG] Trigger found: '\(trigger)' -> text='\(result.text)', lang='\(result.lang)'")
+                return result
             }
         }
         
         print("[LOG] No trigger pattern matched")
         
         // 添加详细的调试信息
-        print("[LOG] Debug - checking for common trigger patterns in content:")
-        let commonTriggers = ["@en", "#en", "@zh", "#zh", "@id", "#id", "@ja", "#ja", "@ko", "#ko"]
-        for trigger in commonTriggers {
-            if cleanedValue.lowercased().contains(trigger) {
+        print("[LOG] Debug - checking for configured triggers in content:")
+        for trigger in allTriggers {
+            if cleanedValue.lowercased().contains(trigger.lowercased()) {
                 print("[LOG] Debug - Found '\(trigger)' in content but pattern didn't match")
                 print("[LOG] Debug - Content around trigger: '\(getContextAroundTrigger(cleanedValue, trigger: trigger))'")
+            }
+        }
+        
+        return nil
+    }
+    
+    // 获取所有配置的触发器
+    private func getAllConfiguredTriggers() -> [String] {
+        let configs = LanguageConfigManager.shared.loadLanguageConfigs()
+        var allTriggers: [String] = []
+        
+        for config in configs {
+            allTriggers.append(contentsOf: config.triggers)
+        }
+        
+        print("[LOG] Loaded \(allTriggers.count) configured triggers from \(configs.count) languages")
+        return allTriggers
+    }
+    
+    // 检查特定触发器是否匹配
+    private func checkForTrigger(_ trigger: String, in content: String) -> (text: String, lang: String)? {
+        // 转义特殊字符
+        let escapedTrigger = NSRegularExpression.escapedPattern(for: trigger)
+        
+        // 生成多种匹配模式
+        let patterns = [
+            #"(.*?)"# + escapedTrigger + #"\s*$"#,      // 标准模式
+            #"^(.*?)"# + escapedTrigger + #"\s*$"#,     // 严格开头模式
+            #"(.*?)\s+"# + escapedTrigger + #"\s*$"#,   // 空格分隔
+            #"(?s)(.*?)"# + escapedTrigger + #"\s*$"#   // 多行支持
+        ]
+        
+        for pattern in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) {
+                let nsContent = content as NSString
+                let results = regex.matches(in: content, options: [], range: NSRange(location: 0, length: nsContent.length))
+                
+                if let match = results.first, match.numberOfRanges >= 2 {
+                    let textRange = match.range(at: 1)
+                    
+                    if textRange.location != NSNotFound {
+                        let rawText = nsContent.substring(with: textRange)
+                        let text = rawText.trimmingCharacters(in: .whitespaces)
+                        
+                        if !text.isEmpty {
+                            // 根据触发器查找对应的语言代码
+                            if let languageCode = LanguageConfigManager.shared.findLanguageCode(for: trigger) {
+                                return (text: text, lang: languageCode)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        return nil
+    }
+    
+    // 生成触发器模式（保留用于兼容性，但现在不使用）
+    private func generateTriggerPatterns(triggers: [String]) -> [String] {
+        // 这个方法现在不再使用，但保留以防需要
+        return []
+    }
+    
+    // 为JavaScript生成触发器模式
+    private func generateJavaScriptPatterns(for triggers: [String]) -> [String] {
+        guard !triggers.isEmpty else {
+            // 如果没有配置的触发器，返回默认模式
+            return [
+                "(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$",
+                "^(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$",
+                "(.*?)\\s+[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$"
+            ]
+        }
+        
+        var patterns: [String] = []
+        
+        // 为每个触发器生成模式
+        for trigger in triggers {
+            // 转义JavaScript正则表达式中的特殊字符
+            let escapedTrigger = trigger
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: ".", with: "\\.")
+                .replacingOccurrences(of: "*", with: "\\*")
+                .replacingOccurrences(of: "+", with: "\\+")
+                .replacingOccurrences(of: "?", with: "\\?")
+                .replacingOccurrences(of: "^", with: "\\^")
+                .replacingOccurrences(of: "$", with: "\\$")
+                .replacingOccurrences(of: "{", with: "\\{")
+                .replacingOccurrences(of: "}", with: "\\}")
+                .replacingOccurrences(of: "[", with: "\\[")
+                .replacingOccurrences(of: "]", with: "\\]")
+                .replacingOccurrences(of: "(", with: "\\(")
+                .replacingOccurrences(of: ")", with: "\\)")
+                .replacingOccurrences(of: "|", with: "\\|")
+                // 注意：@ 和 # 在JavaScript正则表达式中不是特殊字符，不需要转义
+            
+            // 生成不同的匹配模式（注意：这里只需要一个反斜杠，因为是在Swift字符串中）
+            patterns.append("(.*?)" + escapedTrigger + "\\s*$")      // 标准模式
+            patterns.append("^(.*?)" + escapedTrigger + "\\s*$")     // 严格开头模式
+            patterns.append("(.*?)\\s+" + escapedTrigger + "\\s*$")  // 空格分隔
+        }
+        
+        return patterns
+    }
+    
+    // 生成JavaScript代码用于动态模式匹配
+    private func generateJavaScriptPatternCode(for triggers: [String]) -> String {
+        let jsPatterns = generateJavaScriptPatterns(for: triggers)
+        let patternsArray = jsPatterns.map { "'\($0)'" }.joined(separator: ", ")
+        
+        return """
+            // 使用动态生成的触发器模式
+            var patternStrings = [\(patternsArray)];
+            var patterns = patternStrings.map(function(p) {
+                return new RegExp(p, 'i'); // 直接使用模式字符串创建正则表达式
+            });
+        """
+    }
+    
+    // 生成Chrome浏览器的AppleScript
+    private func generateChromeScript(escapedText: String, jsPatternCode: String) -> String {
+        return """
+            tell application "Google Chrome"
+                try
+                    tell active tab of front window
+                        set jsResult to execute javascript "
+                            console.log('Starting precise text replacement...');
+                            var activeElement = document.activeElement;
+                            console.log('Active element:', activeElement);
+                            
+                            if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
+                                console.log('Found INPUT/TEXTAREA element');
+                                var currentValue = activeElement.value;
+                                console.log('Current value:', currentValue);
+                                
+                                \(jsPatternCode)
+                                
+                                var replaced = false;
+                                for (var i = 0; i < patterns.length; i++) {
+                                    var match = currentValue.match(patterns[i]);
+                                    if (match) {
+                                        console.log('Pattern matched:', match);
+                                        var originalText = match[1].trim();
+                                        console.log('Original text to replace:', originalText);
+                                        console.log('Replacement text:', '\(escapedText)');
+                                        
+                                        // 精确替换：只替换触发器部分
+                                        var newValue = currentValue.replace(patterns[i], '\(escapedText)');
+                                        activeElement.value = newValue;
+                                        
+                                        // 设置光标位置到文本末尾
+                                        var cursorPos = '\(escapedText)'.length;
+                                        activeElement.setSelectionRange(cursorPos, cursorPos);
+                                        activeElement.focus();
+                                        
+                                        // 触发事件
+                                        var inputEvent = new Event('input', { bubbles: true });
+                                        activeElement.dispatchEvent(inputEvent);
+                                        var changeEvent = new Event('change', { bubbles: true });
+                                        activeElement.dispatchEvent(changeEvent);
+                                        
+                                        console.log('Text precisely replaced from:', currentValue, 'to:', newValue);
+                                        replaced = true;
+                                        break;
+                                    }
+                                }
+                                
+                                return replaced ? 'success' : 'no_pattern_match';
+                                
+                            } else if (activeElement && activeElement.contentEditable === 'true') {
+                                console.log('Found contentEditable element');
+                                var currentContent = activeElement.textContent || activeElement.innerText || '';
+                                console.log('Current content:', currentContent);
+                                
+                                \(jsPatternCode)
+                                
+                                var replaced = false;
+                                for (var i = 0; i < patterns.length; i++) {
+                                    var match = currentContent.match(patterns[i]);
+                                    if (match) {
+                                        console.log('ContentEditable pattern matched:', match);
+                                        
+                                        // 清空内容并设置新内容
+                                        activeElement.textContent = '\(escapedText)';
+                                        
+                                        // 设置光标到末尾
+                                        var range = document.createRange();
+                                        var sel = window.getSelection();
+                                        range.selectNodeContents(activeElement);
+                                        range.collapse(false);
+                                        sel.removeAllRanges();
+                                        sel.addRange(range);
+                                        
+                                        activeElement.focus();
+                                        
+                                        // 触发事件
+                                        var inputEvent = new Event('input', { bubbles: true });
+                                        activeElement.dispatchEvent(inputEvent);
+                                        
+                                        console.log('ContentEditable text replaced to:', '\(escapedText)');
+                                        replaced = true;
+                                        break;
+                                    }
+                                }
+                                
+                                return replaced ? 'success' : 'no_pattern_match';
+                            } else {
+                                console.log('No suitable active input element found');
+                                return 'no_active_input';
+                            }
+                        "
+                        return jsResult
+                    end tell
+                on error errMsg
+                    return "error: " & errMsg
+                end try
+            end tell
+        """
+    }
+    
+    // 为Swift生成触发器模式
+    private func generateSwiftPatterns(for triggers: [String]) -> [String] {
+        guard !triggers.isEmpty else {
+            // 如果没有配置的触发器，返回默认模式
+            return [
+                #"(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\s*$"#,
+                #"^(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\s*$"#,
+                #"(.*?)\s+[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\s*$"#
+            ]
+        }
+        
+        var patterns: [String] = []
+        
+        // 为每个触发器生成模式
+        for trigger in triggers {
+            // 转义Swift正则表达式中的特殊字符
+            let escapedTrigger = NSRegularExpression.escapedPattern(for: trigger)
+            
+            // 生成不同的匹配模式
+            patterns.append("(.*?)" + escapedTrigger + "\\s*$")      // 标准模式
+            patterns.append("^(.*?)" + escapedTrigger + "\\s*$")     // 严格开头模式
+            patterns.append("(.*?)\\s+" + escapedTrigger + "\\s*$")  // 空格分隔
+        }
+        
+        return patterns
+    }
+    
+    // 生成Safari浏览器的AppleScript
+    private func generateSafariScript(escapedText: String, jsPatternCode: String) -> String {
+        return """
+            tell application "Safari"
+                try
+                    tell front document
+                        set jsResult to do JavaScript "
+                            console.log('Starting precise text replacement...');
+                            var activeElement = document.activeElement;
+                            console.log('Active element:', activeElement);
+                            
+                            if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
+                                console.log('Found INPUT/TEXTAREA element');
+                                var currentValue = activeElement.value;
+                                console.log('Current value:', currentValue);
+                                
+                                \(jsPatternCode)
+                                
+                                var replaced = false;
+                                for (var i = 0; i < patterns.length; i++) {
+                                    var match = currentValue.match(patterns[i]);
+                                    if (match) {
+                                        console.log('Pattern matched:', match);
+                                        var originalText = match[1].trim();
+                                        console.log('Original text to replace:', originalText);
+                                        console.log('Replacement text:', '\(escapedText)');
+                                        
+                                        // 精确替换：只替换触发器部分
+                                        var newValue = currentValue.replace(patterns[i], '\(escapedText)');
+                                        activeElement.value = newValue;
+                                        
+                                        // 设置光标位置到文本末尾
+                                        var cursorPos = '\(escapedText)'.length;
+                                        activeElement.setSelectionRange(cursorPos, cursorPos);
+                                        activeElement.focus();
+                                        
+                                        // 触发事件
+                                        var inputEvent = new Event('input', { bubbles: true });
+                                        activeElement.dispatchEvent(inputEvent);
+                                        var changeEvent = new Event('change', { bubbles: true });
+                                        activeElement.dispatchEvent(changeEvent);
+                                        
+                                        console.log('Text precisely replaced from:', currentValue, 'to:', newValue);
+                                        replaced = true;
+                                        break;
+                                    }
+                                }
+                                
+                                return replaced ? 'success' : 'no_pattern_match';
+                                
+                            } else if (activeElement && activeElement.contentEditable === 'true') {
+                                console.log('Found contentEditable element');
+                                var currentContent = activeElement.textContent || activeElement.innerText || '';
+                                console.log('Current content:', currentContent);
+                                
+                                \(jsPatternCode)
+                                
+                                var replaced = false;
+                                for (var i = 0; i < patterns.length; i++) {
+                                    var match = currentContent.match(patterns[i]);
+                                    if (match) {
+                                        console.log('ContentEditable pattern matched:', match);
+                                        
+                                        // 清空内容并设置新内容
+                                        activeElement.textContent = '\(escapedText)';
+                                        
+                                        // 设置光标到末尾
+                                        var range = document.createRange();
+                                        var sel = window.getSelection();
+                                        range.selectNodeContents(activeElement);
+                                        range.collapse(false);
+                                        sel.removeAllRanges();
+                                        sel.addRange(range);
+                                        
+                                        activeElement.focus();
+                                        
+                                        // 触发事件
+                                        var inputEvent = new Event('input', { bubbles: true });
+                                        activeElement.dispatchEvent(inputEvent);
+                                        
+                                        console.log('ContentEditable text replaced to:', '\(escapedText)');
+                                        replaced = true;
+                                        break;
+                                    }
+                                }
+                                
+                                return replaced ? 'success' : 'no_pattern_match';
+                            } else {
+                                console.log('No suitable active input element found');
+                                return 'no_active_input';
+                            }
+                        "
+                        return jsResult
+                    end tell
+                on error errMsg
+                    return "error: " & errMsg
+                end try
+            end tell
+        """
+    }
+    
+    // 使用默认触发器的后备方法
+    private func processContentWithDefaultTriggers(_ content: String) -> (text: String, lang: String)? {
+        print("[LOG] Using fallback default trigger processing")
+        
+        // 默认触发器模式
+        let patterns = [
+            #"(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\s*$"#,      // 标准模式
+            #"^(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\s*$"#,     // 严格开头模式
+            #"(.*?)\s+[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\s*$"#,   // 空格分隔
+            #"(?s)(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\s*$"#   // 多行支持
+        ]
+        
+        for (index, pattern) in patterns.enumerated() {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) {
+                let nsValue = content as NSString
+                let results = regex.matches(in: content, options: [], range: NSRange(location: 0, length: nsValue.length))
+                
+                if let match = results.first, match.numberOfRanges >= 3 {
+                    let textRange = match.range(at: 1)
+                    let langRange = match.range(at: 2)
+                    
+                    if textRange.location != NSNotFound && langRange.location != NSNotFound {
+                        let rawText = nsValue.substring(with: textRange)
+                        let text = rawText.trimmingCharacters(in: .whitespaces)
+                        var lang = nsValue.substring(with: langRange).lowercased()
+                        
+                        // 转换 jp 为 ja
+                        if lang == "jp" { lang = "ja" }
+                        
+                        if !text.isEmpty {
+                            print("[LOG] Default trigger found using pattern \(index + 1): text='\(text)', lang='\(lang)'")
+                            return (text: text, lang: lang)
+                        }
+                    }
+                }
             }
         }
         
@@ -599,12 +958,12 @@ class AXController {
                 // 使用微信专用的替换方法
                 print("[LOG] Using WeChat-specific replacement method")
                 replaceTextInWeChat(with: text) {
-                    completion?()
-                }
-            } else {
-                // 使用原有的桌面应用替换方法
-                forceReplaceWithClipboard(element: focused, text: text) {
-                    completion?()
+                completion?()
+            }
+        } else {
+            // 使用原有的桌面应用替换方法
+            forceReplaceWithClipboard(element: focused, text: text) {
+                completion?()
                 }
             }
         }
@@ -655,225 +1014,20 @@ class AXController {
         
         print("[LOG] Escaped text for JavaScript: '\(escapedText)'")
         
+        // 获取所有配置的触发器并生成JavaScript模式
+        let allTriggers = getAllConfiguredTriggers()
+        let jsPatternCode = generateJavaScriptPatternCode(for: allTriggers)
+        print("[LOG] Generated JavaScript pattern code for \(allTriggers.count) triggers")
+        print("[LOG] All triggers: \(allTriggers)")
+        print("[LOG] JS Pattern Code: \(jsPatternCode)")
+        
         var script = ""
         
         switch browserInfo.bundleId {
         case "com.google.Chrome":
-            script = """
-                tell application "Google Chrome"
-                    try
-                        tell active tab of front window
-                            set jsResult to execute javascript "
-                                console.log('Starting precise text replacement...');
-                                var activeElement = document.activeElement;
-                                console.log('Active element:', activeElement);
-                                
-                                if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
-                                    console.log('Found INPUT/TEXTAREA element');
-                                    var currentValue = activeElement.value;
-                                    console.log('Current value:', currentValue);
-                                    
-                                    // 查找触发器模式并精确替换
-                                    var patterns = [
-                                        /(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i,
-                                        /^(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i,
-                                        /(.*?)\\s+[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i
-                                    ];
-                                    
-                                    var replaced = false;
-                                    for (var i = 0; i < patterns.length; i++) {
-                                        var match = currentValue.match(patterns[i]);
-                                        if (match) {
-                                            console.log('Pattern matched:', match);
-                                            var originalText = match[1].trim();
-                                            console.log('Original text to replace:', originalText);
-                                            console.log('Replacement text:', '\(escapedText)');
-                                            
-                                            // 精确替换：只替换触发器部分
-                                            var newValue = currentValue.replace(patterns[i], '\(escapedText)');
-                                            activeElement.value = newValue;
-                                            
-                                            // 设置光标位置到文本末尾
-                                            var cursorPos = '\(escapedText)'.length;
-                                            activeElement.setSelectionRange(cursorPos, cursorPos);
-                                            activeElement.focus();
-                                            
-                                            // 触发事件
-                                            var inputEvent = new Event('input', { bubbles: true });
-                                            activeElement.dispatchEvent(inputEvent);
-                                            var changeEvent = new Event('change', { bubbles: true });
-                                            activeElement.dispatchEvent(changeEvent);
-                                            
-                                            console.log('Text precisely replaced from:', currentValue, 'to:', newValue);
-                                            replaced = true;
-                                            break;
-                                        }
-                                    }
-                                    
-                                    return replaced ? 'success' : 'no_pattern_match';
-                                    
-                                } else if (activeElement && activeElement.contentEditable === 'true') {
-                                    console.log('Found contentEditable element');
-                                    var currentContent = activeElement.textContent || activeElement.innerText || '';
-                                    console.log('Current content:', currentContent);
-                                    
-                                    // 对于contentEditable，使用更复杂的替换逻辑
-                                    var patterns = [
-                                        /(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i,
-                                        /^(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i,
-                                        /(.*?)\\s+[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i
-                                    ];
-                                    
-                                    var replaced = false;
-                                    for (var i = 0; i < patterns.length; i++) {
-                                        var match = currentContent.match(patterns[i]);
-                                        if (match) {
-                                            console.log('ContentEditable pattern matched:', match);
-                                            
-                                            // 清空内容并设置新内容
-                                            activeElement.textContent = '\(escapedText)';
-                                            
-                                            // 设置光标到末尾
-                                            var range = document.createRange();
-                                            var sel = window.getSelection();
-                                            range.selectNodeContents(activeElement);
-                                            range.collapse(false);
-                                            sel.removeAllRanges();
-                                            sel.addRange(range);
-                                            
-                                            activeElement.focus();
-                                            
-                                            // 触发事件
-                                            var inputEvent = new Event('input', { bubbles: true });
-                                            activeElement.dispatchEvent(inputEvent);
-                                            
-                                            console.log('ContentEditable text replaced to:', '\(escapedText)');
-                                            replaced = true;
-                                            break;
-                                        }
-                                    }
-                                    
-                                    return replaced ? 'success' : 'no_pattern_match';
-                                } else {
-                                    console.log('No suitable active input element found');
-                                    return 'no_active_input';
-                                }
-                            "
-                            return jsResult
-                        end tell
-                    on error errMsg
-                        return "error: " & errMsg
-                    end try
-                end tell
-            """
+            script = generateChromeScript(escapedText: escapedText, jsPatternCode: jsPatternCode)
         case "com.apple.Safari":
-            script = """
-                tell application "Safari"
-                    try
-                        tell front document
-                            set jsResult to do JavaScript "
-                                console.log('Starting precise text replacement...');
-                                var activeElement = document.activeElement;
-                                console.log('Active element:', activeElement);
-                                
-                                if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
-                                    console.log('Found INPUT/TEXTAREA element');
-                                    var currentValue = activeElement.value;
-                                    console.log('Current value:', currentValue);
-                                    
-                                    // 查找触发器模式并精确替换
-                                    var patterns = [
-                                        /(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i,
-                                        /^(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i,
-                                        /(.*?)\\s+[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i
-                                    ];
-                                    
-                                    var replaced = false;
-                                    for (var i = 0; i < patterns.length; i++) {
-                                        var match = currentValue.match(patterns[i]);
-                                        if (match) {
-                                            console.log('Pattern matched:', match);
-                                            var originalText = match[1].trim();
-                                            console.log('Original text to replace:', originalText);
-                                            console.log('Replacement text:', '\(escapedText)');
-                                            
-                                            // 精确替换：只替换触发器部分
-                                            var newValue = currentValue.replace(patterns[i], '\(escapedText)');
-                                            activeElement.value = newValue;
-                                            
-                                            // 设置光标位置到文本末尾
-                                            var cursorPos = '\(escapedText)'.length;
-                                            activeElement.setSelectionRange(cursorPos, cursorPos);
-                                            activeElement.focus();
-                                            
-                                            // 触发事件
-                                            var inputEvent = new Event('input', { bubbles: true });
-                                            activeElement.dispatchEvent(inputEvent);
-                                            var changeEvent = new Event('change', { bubbles: true });
-                                            activeElement.dispatchEvent(changeEvent);
-                                            
-                                            console.log('Text precisely replaced from:', currentValue, 'to:', newValue);
-                                            replaced = true;
-                                            break;
-                                        }
-                                    }
-                                    
-                                    return replaced ? 'success' : 'no_pattern_match';
-                                    
-                                } else if (activeElement && activeElement.contentEditable === 'true') {
-                                    console.log('Found contentEditable element');
-                                    var currentContent = activeElement.textContent || activeElement.innerText || '';
-                                    console.log('Current content:', currentContent);
-                                    
-                                    // 对于contentEditable，使用更复杂的替换逻辑
-                                    var patterns = [
-                                        /(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i,
-                                        /^(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i,
-                                        /(.*?)\\s+[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i
-                                    ];
-                                    
-                                    var replaced = false;
-                                    for (var i = 0; i < patterns.length; i++) {
-                                        var match = currentContent.match(patterns[i]);
-                                        if (match) {
-                                            console.log('ContentEditable pattern matched:', match);
-                                            
-                                            // 清空内容并设置新内容
-                                            activeElement.textContent = '\(escapedText)';
-                                            
-                                            // 设置光标到末尾
-                                            var range = document.createRange();
-                                            var sel = window.getSelection();
-                                            range.selectNodeContents(activeElement);
-                                            range.collapse(false);
-                                            sel.removeAllRanges();
-                                            sel.addRange(range);
-                                            
-                                            activeElement.focus();
-                                            
-                                            // 触发事件
-                                            var inputEvent = new Event('input', { bubbles: true });
-                                            activeElement.dispatchEvent(inputEvent);
-                                            
-                                            console.log('ContentEditable text replaced to:', '\(escapedText)');
-                                            replaced = true;
-                                            break;
-                                        }
-                                    }
-                                    
-                                    return replaced ? 'success' : 'no_pattern_match';
-                                } else {
-                                    console.log('No suitable active input element found');
-                                    return 'no_active_input';
-                                }
-                            "
-                            return jsResult
-                        end tell
-                    on error errMsg
-                        return "error: " & errMsg
-                    end try
-                end tell
-            """
+            script = generateSafariScript(escapedText: escapedText, jsPatternCode: jsPatternCode)
         default:
             print("[LOG] Unsupported browser: \(browserInfo.bundleId)")
             return false
@@ -918,12 +1072,9 @@ class AXController {
         
         print("[LOG] Current input value: '\(currentValue)'")
         
-        // 检查是否包含触发器模式
-        let patterns = [
-            #"(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\s*$"#,
-            #"^(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\s*$"#,
-            #"(.*?)\s+[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\s*$"#
-        ]
+        // 使用动态生成的触发器模式检查
+        let allTriggers = getAllConfiguredTriggers()
+        let patterns = generateSwiftPatterns(for: allTriggers)
         
         var triggerFound = false
         for pattern in patterns {
@@ -1024,13 +1175,10 @@ class AXController {
             return false 
         }
         
-        // 转义JavaScript字符串
-        let escapedValue = originalValue
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "'", with: "\\'")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "\\n")
-            .replacingOccurrences(of: "\r", with: "\\r")
+        // 获取所有配置的触发器并生成JavaScript模式
+        let allTriggers = getAllConfiguredTriggers()
+        let jsPatternCode = generateJavaScriptPatternCode(for: allTriggers)
+        print("[LOG] Generated JS pattern code for selection: \(jsPatternCode)")
         
         var script = ""
         
@@ -1048,12 +1196,7 @@ class AXController {
                                     var currentValue = activeElement.value;
                                     console.log('Current value for selection:', currentValue);
                                     
-                                    // 查找触发器模式
-                                    var patterns = [
-                                        /(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i,
-                                        /^(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i,
-                                        /(.*?)\\s+[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i
-                                    ];
+                                    \(jsPatternCode)
                                     
                                     for (var i = 0; i < patterns.length; i++) {
                                         var match = currentValue.match(patterns[i]);
@@ -1103,12 +1246,7 @@ class AXController {
                                     var currentValue = activeElement.value;
                                     console.log('Current value for selection:', currentValue);
                                     
-                                    // 查找触发器模式
-                                    var patterns = [
-                                        /(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i,
-                                        /^(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i,
-                                        /(.*?)\\s+[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$/i
-                                    ];
+                                    \(jsPatternCode)
                                     
                                     for (var i = 0; i < patterns.length; i++) {
                                         var match = currentValue.match(patterns[i]);
@@ -1834,10 +1972,10 @@ class AXController {
             
             // 设置关闭回调
             TranslationMenuWindow.shared.onMenuClosed = { [weak self] in
-                self?.isMenuShowing = false
-                self?.lastSelectedText = ""
+                    self?.isMenuShowing = false
+                    self?.lastSelectedText = ""
                 print("[LOG] Menu closed callback triggered")
-            }
+                }
         }
     }
     
