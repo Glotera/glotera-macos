@@ -6,7 +6,25 @@
 	objectVersion = 56;
 	objects = {
 
+/* Begin PBXAggregateTarget section */
+		9BE7A4DD2E04661500AF7361 /* deployToLocal */ = {
+			isa = PBXAggregateTarget;
+			buildConfigurationList = 9BE7A4DE2E04661500AF7361 /* Build configuration list for PBXAggregateTarget "deployToLocal" */;
+			buildPhases = (
+				9BE7A4E32E04668100AF7361 /* ShellScript */,
+			);
+			dependencies = (
+				9BE7A4E22E04662100AF7361 /* PBXTargetDependency */,
+			);
+			name = deployToLocal;
+			productName = deployToLocal;
+		};
+/* End PBXAggregateTarget section */
+
 /* Begin PBXBuildFile section */
+		3D153861DB83474CB7A5CE30 /* LanguageConfigWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15B044BD9B2D441BAF66FA8D /* LanguageConfigWindow.swift */; };
+		52E75974376A4A2C80038B26 /* LanguageConfigManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F60848B2C5C4E76B8A270AB /* LanguageConfigManager.swift */; };
+		55ACA3925B5740A49F528A02 /* language-iso-639.json in Resources */ = {isa = PBXBuildFile; fileRef = ADA243CF57A742A49C392A18 /* language-iso-639.json */; };
 		9BE4ED582E012FC5002AC2AE /* desktopTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BE4ED572E012FC5002AC2AE /* desktopTests.swift */; };
 		9BE4ED622E012FC5002AC2AE /* desktopUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BE4ED612E012FC5002AC2AE /* desktopUITests.swift */; };
 		9BE4ED642E012FC5002AC2AE /* desktopUITestsLaunchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BE4ED632E012FC5002AC2AE /* desktopUITestsLaunchTests.swift */; };
@@ -22,9 +40,6 @@
 		9BE4ED882E012FF1002AC2AE /* TranslatorClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BE4ED7B2E012FF1002AC2AE /* TranslatorClient.swift */; };
 		9BE4ED892E012FF1002AC2AE /* Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 9BE4ED7C2E012FF1002AC2AE /* Info.plist */; };
 		9BE4ED8A2E012FF1002AC2AE /* TranslateAgent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BE4ED7D2E012FF1002AC2AE /* TranslateAgent.swift */; };
-		52E75974376A4A2C80038B26 /* LanguageConfigManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F60848B2C5C4E76B8A270AB /* LanguageConfigManager.swift */; };
-		3D153861DB83474CB7A5CE30 /* LanguageConfigWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15B044BD9B2D441BAF66FA8D /* LanguageConfigWindow.swift */; };
-		55ACA3925B5740A49F528A02 /* language-iso-639.json in Resources */ = {isa = PBXBuildFile; fileRef = ADA243CF57A742A49C392A18 /* language-iso-639.json */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -42,10 +57,19 @@
 			remoteGlobalIDString = 9BE4ED412E012FC2002AC2AE;
 			remoteInfo = desktop;
 		};
+		9BE7A4E12E04662100AF7361 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 9BE4ED3A2E012FC2002AC2AE /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 9BE4ED412E012FC2002AC2AE;
+			remoteInfo = desktop;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		9BE4ED422E012FC2002AC2AE /* desktop.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = desktop.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		15B044BD9B2D441BAF66FA8D /* LanguageConfigWindow.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LanguageConfigWindow.swift; sourceTree = "<group>"; };
+		3F60848B2C5C4E76B8A270AB /* LanguageConfigManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LanguageConfigManager.swift; sourceTree = "<group>"; };
+		9BE4ED422E012FC2002AC2AE /* Glotera.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Glotera.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		9BE4ED532E012FC5002AC2AE /* desktopTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = desktopTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		9BE4ED572E012FC5002AC2AE /* desktopTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = desktopTests.swift; sourceTree = "<group>"; };
 		9BE4ED5D2E012FC5002AC2AE /* desktopUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = desktopUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -64,8 +88,6 @@
 		9BE4ED7B2E012FF1002AC2AE /* TranslatorClient.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TranslatorClient.swift; sourceTree = "<group>"; };
 		9BE4ED7C2E012FF1002AC2AE /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		9BE4ED7D2E012FF1002AC2AE /* TranslateAgent.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TranslateAgent.swift; sourceTree = "<group>"; };
-		3F60848B2C5C4E76B8A270AB /* LanguageConfigManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LanguageConfigManager.swift; sourceTree = "<group>"; };
-		15B044BD9B2D441BAF66FA8D /* LanguageConfigWindow.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LanguageConfigWindow.swift; sourceTree = "<group>"; };
 		ADA243CF57A742A49C392A18 /* language-iso-639.json */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.json; path = "language-iso-639.json"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -107,7 +129,7 @@
 		9BE4ED432E012FC2002AC2AE /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				9BE4ED422E012FC2002AC2AE /* desktop.app */,
+				9BE4ED422E012FC2002AC2AE /* Glotera.app */,
 				9BE4ED532E012FC5002AC2AE /* desktopTests.xctest */,
 				9BE4ED5D2E012FC5002AC2AE /* desktopUITests.xctest */,
 			);
@@ -171,7 +193,7 @@
 			);
 			name = desktop;
 			productName = desktop;
-			productReference = 9BE4ED422E012FC2002AC2AE /* desktop.app */;
+			productReference = 9BE4ED422E012FC2002AC2AE /* Glotera.app */;
 			productType = "com.apple.product-type.application";
 		};
 		9BE4ED522E012FC5002AC2AE /* desktopTests */ = {
@@ -231,6 +253,9 @@
 						CreatedOnToolsVersion = 15.2;
 						TestTargetID = 9BE4ED412E012FC2002AC2AE;
 					};
+					9BE7A4DD2E04661500AF7361 = {
+						CreatedOnToolsVersion = 15.2;
+					};
 				};
 			};
 			buildConfigurationList = 9BE4ED3D2E012FC2002AC2AE /* Build configuration list for PBXProject "desktop" */;
@@ -249,6 +274,7 @@
 				9BE4ED412E012FC2002AC2AE /* desktop */,
 				9BE4ED522E012FC5002AC2AE /* desktopTests */,
 				9BE4ED5C2E012FC5002AC2AE /* desktopUITests */,
+				9BE7A4DD2E04661500AF7361 /* deployToLocal */,
 			);
 		};
 /* End PBXProject section */
@@ -279,6 +305,26 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		9BE7A4E32E04668100AF7361 /* ShellScript */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\nDEMO_NAME=Glotera\n\n\nLOCAL_DIR=/Applications/\n\n\nCONFIGURATION_BUILD_Demo=${CONFIGURATION_BUILD_DIR}/${DEMO_NAME}.app\n\necho \"rm -rf ${LOCAL_DIR}/${DEMO_NAME}.app\"\nrm -rf ${LOCAL_DIR}/${DEMO_NAME}.app\n\necho \"cp -R  ${CONFIGURATION_BUILD_Demo} ${LOCAL_DIR}\"\ncp -R  ${CONFIGURATION_BUILD_Demo} ${LOCAL_DIR}\n\n\n\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		9BE4ED3E2E012FC2002AC2AE /* Sources */ = {
@@ -330,6 +376,11 @@
 			target = 9BE4ED412E012FC2002AC2AE /* desktop */;
 			targetProxy = 9BE4ED5E2E012FC5002AC2AE /* PBXContainerItemProxy */;
 		};
+		9BE7A4E22E04662100AF7361 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 9BE4ED412E012FC2002AC2AE /* desktop */;
+			targetProxy = 9BE7A4E12E04662100AF7361 /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
@@ -370,7 +421,7 @@
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -433,7 +484,7 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -457,10 +508,11 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = desktop/desktop.entitlements;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = UGTSP534S3;
+				DEVELOPMENT_TEAM = R3F7G5M76J;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -473,7 +525,7 @@
 				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = glotera.ai.desktop;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = Glotera;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -485,10 +537,11 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = desktop/desktop.entitlements;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = UGTSP534S3;
+				DEVELOPMENT_TEAM = R3F7G5M76J;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -501,7 +554,7 @@
 				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = glotera.ai.desktop;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = Glotera;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -579,6 +632,24 @@
 			};
 			name = Release;
 		};
+		9BE7A4DF2E04661500AF7361 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = R3F7G5M76J;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Debug;
+		};
+		9BE7A4E02E04661500AF7361 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = R3F7G5M76J;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -614,6 +685,15 @@
 			buildConfigurations = (
 				9BE4ED6E2E012FC5002AC2AE /* Debug */,
 				9BE4ED6F2E012FC5002AC2AE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		9BE7A4DE2E04661500AF7361 /* Build configuration list for PBXAggregateTarget "deployToLocal" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9BE7A4DF2E04661500AF7361 /* Debug */,
+				9BE7A4E02E04661500AF7361 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
