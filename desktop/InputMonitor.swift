@@ -2,7 +2,7 @@ import Cocoa
 import Carbon
 
 class InputMonitor {
-    private var eventTap: CFMachPort?
+    // 移除独立的 eventTap 管理，改为依赖 AppDelegate
     private let triggerPattern = #"(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\s*$"#
     private let regex: NSRegularExpression
     
@@ -10,12 +10,16 @@ class InputMonitor {
     private var lastEventTime: Date = Date()
     private var lastSpaceKeyTime: Date = Date.distantPast
     private var healthCheckTimer: Timer?
-    private var eventTapEnabled = false
     private var spaceKeyEventCount = 0
     private var totalKeyEventCount = 0
+    
+    // 添加 AppDelegate 引用以便统一管理
+    private weak var appDelegate: AppDelegate?
 
     init() {
         regex = try! NSRegularExpression(pattern: triggerPattern, options: .caseInsensitive)
+        // 获取 AppDelegate 引用
+        appDelegate = NSApp.delegate as? AppDelegate
         startHealthCheck()
     }
     
@@ -35,8 +39,8 @@ class InputMonitor {
         let hasPermissions = checkAccessibilityPermissions()
         // print("[LOG] Health check - Accessibility permissions: \(hasPermissions)")
         
-        // 检查事件监听器状态
-        let eventTapValid = eventTap != nil && CFMachPortIsValid(eventTap!)
+        // 通过 AppDelegate 检查事件监听器状态
+        let eventTapValid = appDelegate?.isEventTapValid() ?? false
         // print("[LOG] Health check - Event tap valid: \(eventTapValid)")
         
         // 检查最近是否有事件活动
@@ -54,16 +58,16 @@ class InputMonitor {
             print("[LOG] Health check - Total events: \(totalKeyEventCount), Space events: \(spaceKeyEventCount)")
         }
         
-        // 如果权限丢失或事件监听器失效，尝试重新启动
+        // 如果权限丢失或事件监听器失效，通知 AppDelegate 重新启动
         if !hasPermissions || !eventTapValid {
-            print("[LOG] Health check failed - attempting to restart event monitoring")
-            restartEventMonitoring()
+            print("[LOG] Health check failed - requesting AppDelegate to restart event monitoring")
+            requestEventMonitoringRestart()
         }
         
         // 如果空格键长时间没有被捕获但其他键有，可能是事件过滤问题
         if !spaceKeyWorking && totalKeyEventCount > 50 {
-            print("[LOG] Health check - Space key capture issue detected, restarting event monitoring")
-            restartEventMonitoring()
+            print("[LOG] Health check - Space key capture issue detected, requesting restart")
+            requestEventMonitoringRestart()
         }
         
         // 测试焦点元素获取
@@ -79,92 +83,46 @@ class InputMonitor {
         }
     }
     
-    // 重启事件监听
-    private func restartEventMonitoring() {
-        print("[LOG] Restarting event monitoring...")
-        
-        // 清理旧的事件监听器
-        if let eventTap = eventTap {
-            CGEvent.tapEnable(tap: eventTap, enable: false)
-            CFMachPortInvalidate(eventTap)
-            self.eventTap = nil
-            eventTapEnabled = false
-        }
-        
-        // 重新创建事件监听器
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            let newEventTap = self.startMonitoringAndReturnEventTap()
-            if newEventTap != nil {
-                print("[LOG] Event monitoring restarted successfully")
-            } else {
-                print("[LOG] Failed to restart event monitoring")
-            }
-        }
+    // 请求 AppDelegate 重启事件监听
+    private func requestEventMonitoringRestart() {
+        print("[LOG] Requesting AppDelegate to restart event monitoring...")
+        appDelegate?.restartEventMonitoring()
     }
 
-    func startMonitoringAndReturnEventTap() -> CFMachPort? {
-        print("[LOG] InputMonitor startMonitoring called")
-        
-        // Check accessibility permissions first
-        if !checkAccessibilityPermissions() {
-            print("[LOG] Accessibility permissions not granted")
-            requestAccessibilityPermissions()
-            return nil
-        }
-        
-        let eventMask = (1 << CGEventType.keyDown.rawValue)
-        eventTap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,
-            eventsOfInterest: CGEventMask(eventMask),
-            callback: { (proxy, type, event, refcon) -> Unmanaged<CGEvent>? in
-                // 更新最后事件时间
-                InputMonitor.shared.lastEventTime = Date()
-                InputMonitor.shared.totalKeyEventCount += 1
+    // 创建事件监听器的回调函数（供 AppDelegate 调用）
+    func createEventTapCallback() -> CGEventTapCallBack {
+        return { (proxy, type, event, refcon) -> Unmanaged<CGEvent>? in
+            // 更新最后事件时间
+            InputMonitor.shared.lastEventTime = Date()
+            InputMonitor.shared.totalKeyEventCount += 1
+            
+            if type == .keyDown {
+                let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
                 
-                if type == .keyDown {
-                    let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-                    
-                    if keyCode == kVK_Space { // 空格键
-                        InputMonitor.shared.lastSpaceKeyTime = Date()
-                        InputMonitor.shared.spaceKeyEventCount += 1
-                        print("[LOG] Space key event detected (count: \(InputMonitor.shared.spaceKeyEventCount))")
+                if keyCode == kVK_Space { // 空格键
+                    InputMonitor.shared.lastSpaceKeyTime = Date()
+                    InputMonitor.shared.spaceKeyEventCount += 1
+                    print("[LOG] Space key event detected (count: \(InputMonitor.shared.spaceKeyEventCount))")
+                    DispatchQueue.main.async {
+                        InputMonitor.shared.handleSpaceKey()
+                    }
+                } else if keyCode == kVK_Return || keyCode == kVK_ANSI_KeypadEnter { // 回车键
+                    // 检查是否需要翻译，如果需要则阻止回车事件
+                    if InputMonitor.shared.shouldInterceptEnter() {
+                        print("[LOG] Intercepting Enter key for translation")
                         DispatchQueue.main.async {
-                            InputMonitor.shared.handleSpaceKey()
+                            InputMonitor.shared.handleInterceptedEnter()
                         }
-                    } else if keyCode == kVK_Return || keyCode == kVK_ANSI_KeypadEnter { // 回车键
-                        // 检查是否需要翻译，如果需要则阻止回车事件
-                        if InputMonitor.shared.shouldInterceptEnter() {
-                            print("[LOG] Intercepting Enter key for translation")
-                            DispatchQueue.main.async {
-                                InputMonitor.shared.handleInterceptedEnter()
-                            }
-                            return nil // 阻止回车事件
-                        }
-                    } else if keyCode == kVK_Tab { // Tab键
-                        DispatchQueue.main.async {
-                            InputMonitor.shared.handleTabKey()
-                        }
+                        return nil // 阻止回车事件
+                    }
+                } else if keyCode == kVK_Tab { // Tab键
+                    DispatchQueue.main.async {
+                        InputMonitor.shared.handleTabKey()
                     }
                 }
-                return Unmanaged.passUnretained(event)
-            },
-            userInfo: nil
-        )
-        
-        if eventTap == nil {
-            print("[LOG] Failed to create event tap - this usually indicates:")
-            print("[LOG] 1. Accessibility permissions not granted")
-            print("[LOG] 2. App Sandbox restrictions")
-            print("[LOG] 3. System security settings blocking access")
-            eventTapEnabled = false
-        } else {
-            eventTapEnabled = true
-            // print("[LOG] Event tap created successfully")
+            }
+            return Unmanaged.passUnretained(event)
         }
-        
-        return eventTap
     }
     
     private func checkAccessibilityPermissions() -> Bool {
@@ -413,9 +371,8 @@ class InputMonitor {
         print("[LOG] Test - Accessibility permissions: \(hasPermissions)")
         
         // 检查事件监听器
-        let eventTapValid = eventTap != nil && CFMachPortIsValid(eventTap!)
+        let eventTapValid = appDelegate?.isEventTapValid() ?? false
         print("[LOG] Test - Event tap valid: \(eventTapValid)")
-        print("[LOG] Test - Event tap enabled: \(eventTapEnabled)")
         
         // 检查焦点元素
         if let focused = AXController.shared.getFocusedElement() {
@@ -454,8 +411,7 @@ class InputMonitor {
     func getStatusInfo() -> String {
         var status = "InputMonitor Status:\n"
         status += "- Accessibility Permissions: \(checkAccessibilityPermissions())\n"
-        status += "- Event Tap Valid: \(eventTap != nil && CFMachPortIsValid(eventTap!))\n"
-        status += "- Event Tap Enabled: \(eventTapEnabled)\n"
+        status += "- Event Tap Valid: \(appDelegate?.isEventTapValid() ?? false)\n"
         status += "- Last Event Time: \(lastEventTime)\n"
         status += "- Time Since Last Event: \(Date().timeIntervalSince(lastEventTime))s\n"
         status += "- Last Space Key Time: \(lastSpaceKeyTime)\n"
@@ -499,7 +455,7 @@ class InputMonitor {
         let hasPermissions = checkAccessibilityPermissions()
         print("[LOG] Discord Test - Accessibility permissions: \(hasPermissions)")
         
-        let eventTapValid = eventTap != nil && CFMachPortIsValid(eventTap!)
+        let eventTapValid = appDelegate?.isEventTapValid() ?? false
         print("[LOG] Discord Test - Event tap valid: \(eventTapValid)")
         
         // 检查焦点元素
@@ -550,8 +506,7 @@ class InputMonitor {
         
         print("[LOG] Space Key Test - Initial space key count: \(initialSpaceCount)")
         print("[LOG] Space Key Test - Initial total key count: \(initialTotalCount)")
-        print("[LOG] Space Key Test - Event tap valid: \(eventTap != nil && CFMachPortIsValid(eventTap!))")
-        print("[LOG] Space Key Test - Event tap enabled: \(eventTapEnabled)")
+        print("[LOG] Space Key Test - Event tap valid: \(appDelegate?.isEventTapValid() ?? false)")
         
         // 提示用户按空格键
         let alert = NSAlert()

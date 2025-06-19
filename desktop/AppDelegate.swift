@@ -6,6 +6,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var runLoopSource: CFRunLoopSource?
     var retryTimer: Timer?
     var eventTap: CFMachPort?
+    
+    // 添加状态跟踪
+    private var isEventMonitoringActive = false
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         print("[LOG] AppDelegate did finish launching")
@@ -32,6 +35,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // 添加应用生命周期监听
         setupApplicationLifecycleMonitoring()
+    }
+    
+    // 添加 Event Tap 状态检查方法
+    func isEventTapValid() -> Bool {
+        guard let eventTap = eventTap else {
+            return false
+        }
+        return CFMachPortIsValid(eventTap) && isEventMonitoringActive
+    }
+    
+    // 添加获取事件监听状态的方法
+    func getEventMonitoringStatus() -> (isActive: Bool, isValid: Bool, hasRunLoopSource: Bool) {
+        let isValid = eventTap != nil && CFMachPortIsValid(eventTap!)
+        let hasRunLoopSource = runLoopSource != nil
+        return (isEventMonitoringActive, isValid, hasRunLoopSource)
     }
     
     private func setupApplicationLifecycleMonitoring() {
@@ -82,16 +100,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func verifyEventMonitoring() {
-        if let eventTap = eventTap {
-            let isValid = CFMachPortIsValid(eventTap)
-            print("[LOG] Event tap validity check: \(isValid)")
-            if !isValid {
-                print("[LOG] Event tap is invalid, restarting...")
-                restartEventMonitoringInternal()
-            }
+        let status = getEventMonitoringStatus()
+        print("[LOG] Event monitoring status - Active: \(status.isActive), Valid: \(status.isValid), HasRunLoopSource: \(status.hasRunLoopSource)")
+        
+        if !status.isValid || !status.hasRunLoopSource || !status.isActive {
+            print("[LOG] Event monitoring verification failed, restarting...")
+            restartEventMonitoringInternal()
         } else {
-            print("[LOG] No event tap found, setting up...")
-            setupEventMonitoring()
+            print("[LOG] Event monitoring verification passed")
         }
     }
     
@@ -113,29 +129,71 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func cleanupEventMonitoring() {
+        print("[LOG] Cleaning up event monitoring...")
+        
+        // 标记为非活跃状态
+        isEventMonitoringActive = false
+        
+        // 清理 RunLoop Source
         if let runLoopSource = runLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
             self.runLoopSource = nil
+            print("[LOG] RunLoop source removed")
         }
         
+        // 清理 Event Tap
         if let eventTap = eventTap {
             CGEvent.tapEnable(tap: eventTap, enable: false)
             CFMachPortInvalidate(eventTap)
             self.eventTap = nil
+            print("[LOG] Event tap invalidated")
         }
         
         print("[LOG] Event monitoring cleanup complete")
     }
     
     private func setupEventMonitoring() {
-        let eventTap = inputMonitor.startMonitoringAndReturnEventTap()
+        print("[LOG] Setting up event monitoring...")
+        
+        // Check accessibility permissions first
+        if !AXIsProcessTrusted() {
+            print("[LOG] Accessibility permissions not granted")
+            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
+            let result = AXIsProcessTrustedWithOptions(options as CFDictionary)
+            print("[LOG] Permission request result: \(result)")
+            return
+        }
+        
+        // 创建事件监听器
+        let eventMask = (1 << CGEventType.keyDown.rawValue)
+        let callback = inputMonitor.createEventTapCallback()
+        
+        eventTap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: CGEventMask(eventMask),
+            callback: callback,
+            userInfo: nil
+        )
+        
         if let eventTap = eventTap {
             print("[LOG] Event tap created successfully")
-            self.eventTap = eventTap
+            
+            // 创建 RunLoop 源
             let runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0)
             self.runLoopSource = runLoopSource
+            
+            // 添加到 RunLoop
             CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
+            print("[LOG] RunLoop source added")
+            
+            // 启用事件监听
             CGEvent.tapEnable(tap: eventTap, enable: true)
+            print("[LOG] Event tap enabled")
+            
+            // 标记为活跃状态
+            isEventMonitoringActive = true
             
             // Stop the retry timer since we're successful
             retryTimer?.invalidate()
@@ -143,19 +201,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             
             print("[LOG] Event monitoring setup complete")
         } else {
-            print("[LOG] Failed to create event tap. Check Accessibility permissions and App Sandbox settings.")
-            print("[LOG] Please grant Accessibility permissions in System Settings > Privacy & Security > Accessibility")
+            print("[LOG] Failed to create event tap - this usually indicates:")
+            print("[LOG] 1. Accessibility permissions not granted")
+            print("[LOG] 2. App Sandbox restrictions")
+            print("[LOG] 3. System security settings blocking access")
+            print("[LOG] 4. Another app is already using event tapping")
+            isEventMonitoringActive = false
         }
     }
     
     private func checkAndRetryEventMonitoring(_ timer: Timer) {
-        // If we don't have an event tap and permissions are now available, try again
-        if runLoopSource == nil && AXIsProcessTrusted() {
-            print("[LOG] Accessibility permissions granted, retrying event tap creation...")
+        // If we don't have event monitoring active and permissions are now available, try again
+        if !isEventMonitoringActive && AXIsProcessTrusted() {
+            print("[LOG] Accessibility permissions granted, retrying event monitoring setup...")
             setupEventMonitoring()
-            if runLoopSource != nil {
+            if isEventMonitoringActive {
                 print("[LOG] Event monitoring setup successful after retry")
                 timer.invalidate() // Stop retrying once successful
+            }
+        } else if isEventMonitoringActive {
+            // 如果已经活跃，验证状态
+            let status = getEventMonitoringStatus()
+            if !status.isValid || !status.hasRunLoopSource {
+                print("[LOG] Event monitoring appears corrupted, attempting restart...")
+                restartEventMonitoringInternal()
             }
         }
     }

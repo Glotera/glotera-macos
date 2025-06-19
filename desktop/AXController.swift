@@ -276,31 +276,54 @@ class AXController {
     
     // 生成JavaScript代码用于动态模式匹配
     private func generateJavaScriptPatternCode(for triggers: [String]) -> String {
-        let jsPatterns = generateJavaScriptPatterns(for: triggers)
+        // 获取所有语言代码，避免硬编码
+        let allLanguageCodes = getAllLanguageCodes()
         
-        // 对每个模式进行 AppleScript 安全转义
-        let escapedPatterns = jsPatterns.map { pattern in
-            // 为 AppleScript 中的 JavaScript 字符串进行转义
-            let escaped = pattern
-                .replacingOccurrences(of: "\\", with: "\\\\\\\\")  // 四重转义反斜杠：Swift -> AppleScript -> JavaScript -> RegExp
-                .replacingOccurrences(of: "\"", with: "\\\\\\\"")  // 转义双引号
-                .replacingOccurrences(of: "'", with: "\\\\'")      // 转义单引号
-                .replacingOccurrences(of: "\n", with: "\\\\n")     // 转义换行符
-                .replacingOccurrences(of: "\r", with: "\\\\r")     // 转义回车符
-            return "'\(escaped)'"
+        // 将语言代码转换为安全的 JavaScript 字符串
+        let languageList = allLanguageCodes.map { "'\($0)'" }.joined(separator: ",")
+        
+        // 使用模板方式生成 JavaScript 代码，避免复杂的字符串转义
+        let jsCode = """
+            var languageCodes = [\(languageList)];
+            var patterns = [
+                new RegExp('(.*?)[@#](' + languageCodes.join('|') + ')\\\\s*$', 'i'),
+                new RegExp('(.*?)\\\\s+[@#](' + languageCodes.join('|') + ')\\\\s*$', 'i')
+            ];
+        """
+        
+        print("[LOG] Generated JavaScript patterns for \(allLanguageCodes.count) languages")
+        return jsCode
+    }
+    
+    // 获取所有支持的语言代码
+    private func getAllLanguageCodes() -> [String] {
+        // 直接调用当前类的方法获取所有触发器
+        let allTriggers = getAllConfiguredTriggers()
+        
+        // 从触发器中提取语言代码（去掉 @ 和 # 前缀）
+        let languageCodes = Set(allTriggers.compactMap { trigger in
+            if trigger.hasPrefix("@") || trigger.hasPrefix("#") {
+                return String(trigger.dropFirst())
+            }
+            return nil
+        })
+        
+        if !languageCodes.isEmpty {
+            print("[LOG] Extracted \(languageCodes.count) language codes from configured triggers")
+            return Array(languageCodes).sorted()
         }
         
-        let patternsArray = escapedPatterns.joined(separator: ", ")
-        
-        print("[LOG] Generated JS patterns for AppleScript: \(patternsArray)")
-        
-        return """
-            // 使用动态生成的触发器模式
-            var patternStrings = [\(patternsArray)];
-            var patterns = patternStrings.map(function(p) {
-                return new RegExp(p, 'i');
-            });
-        """
+        print("[LOG] No configured triggers found, using fallback language list")
+        // 如果无法从配置获取，使用备用的主要语言列表
+        return [
+            "af", "am", "ar", "az", "be", "bg", "bn", "bo", "bs", "ca", "ceb", "cs", "cy", "da", "de", "el", "en",
+            "eo", "es", "et", "eu", "fa", "fi", "fil", "fr", "fy", "ga", "gd", "gl", "gu", "ha", "haw", "he", "hi",
+            "hmn", "hr", "ht", "hu", "hy", "id", "ig", "is", "it", "ja", "jw", "ka", "kk", "km", "kn", "ko", "ku",
+            "ky", "la", "lb", "lo", "lt", "lv", "mg", "mi", "mk", "ml", "mn", "mr", "ms", "mt", "my", "ne", "nl",
+            "no", "ny", "or", "pa", "pl", "ps", "pt", "ro", "ru", "rw", "si", "sk", "sl", "sm", "sn", "so", "sq",
+            "sr", "st", "su", "sv", "sw", "ta", "te", "tg", "th", "tk", "tl", "tr", "tt", "ug", "uk", "ur", "uz",
+            "vi", "xh", "yi", "yo", "zh", "zu"
+        ]
     }
     
     // 安全地转义 AppleScript 中的字符串内容
@@ -450,6 +473,10 @@ class AXController {
     
     // 生成Safari浏览器的AppleScript
     private func generateSafariScript(escapedText: String, jsPatternCode: String) -> String {
+        // 对 Safari 也使用相同的安全转义方式
+        let safeJsPatternCode = escapeForAppleScript(jsPatternCode)
+        let safeEscapedText = escapeForAppleScript(escapedText)
+        
         return """
             tell application "Safari"
                 try
@@ -464,7 +491,7 @@ class AXController {
                                 var currentValue = activeElement.value;
                                 console.log('Current value:', currentValue);
                                 
-                                \(jsPatternCode)
+                                \(safeJsPatternCode)
                                 
                                 var replaced = false;
                                 for (var i = 0; i < patterns.length; i++) {
@@ -473,14 +500,14 @@ class AXController {
                                         console.log('Pattern matched:', match);
                                         var originalText = match[1].trim();
                                         console.log('Original text to replace:', originalText);
-                                        console.log('Replacement text:', '\(escapedText)');
+                                        console.log('Replacement text:', '\(safeEscapedText)');
                                         
                                         // 精确替换：只替换触发器部分
-                                        var newValue = currentValue.replace(patterns[i], '\(escapedText)');
+                                        var newValue = currentValue.replace(patterns[i], '\(safeEscapedText)');
                                         activeElement.value = newValue;
                                         
                                         // 设置光标位置到文本末尾
-                                        var cursorPos = '\(escapedText)'.length;
+                                        var cursorPos = '\(safeEscapedText)'.length;
                                         activeElement.setSelectionRange(cursorPos, cursorPos);
                                         activeElement.focus();
                                         
@@ -503,7 +530,7 @@ class AXController {
                                 var currentContent = activeElement.textContent || activeElement.innerText || '';
                                 console.log('Current content:', currentContent);
                                 
-                                \(jsPatternCode)
+                                \(safeJsPatternCode)
                                 
                                 var replaced = false;
                                 for (var i = 0; i < patterns.length; i++) {
@@ -512,7 +539,7 @@ class AXController {
                                         console.log('ContentEditable pattern matched:', match);
                                         
                                         // 清空内容并设置新内容
-                                        activeElement.textContent = '\(escapedText)';
+                                        activeElement.textContent = '\(safeEscapedText)';
                                         
                                         // 设置光标到末尾
                                         var range = document.createRange();
@@ -528,7 +555,7 @@ class AXController {
                                         var inputEvent = new Event('input', { bubbles: true });
                                         activeElement.dispatchEvent(inputEvent);
                                         
-                                        console.log('ContentEditable text replaced to:', '\(escapedText)');
+                                        console.log('ContentEditable text replaced to:', '\(safeEscapedText)');
                                         replaced = true;
                                         break;
                                     }
