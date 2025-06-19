@@ -129,8 +129,8 @@ class AXController {
     
     // 处理内容以检测触发器
     private func processContentForTrigger(_ value: String) -> (text: String, lang: String)? {
-        print("[LOG] Current input content: '\(value)'")
-        print("[LOG] Content length: \(value.count) characters")
+        //print("[LOG] Current input content: '\(value)'")
+        //print("[LOG] Content length: \(value.count) characters")
         
         // 显示换行符位置以便调试
         let lineBreaks = value.enumerated().compactMap { $0.element == "\n" ? $0.offset : nil }
@@ -141,8 +141,8 @@ class AXController {
         // 预处理内容：清理可能的干扰文本
         let cleanedValue = preprocessContent(value)
         if cleanedValue != value {
-            print("[LOG] Content after preprocessing: '\(cleanedValue)'")
-            print("[LOG] Cleaned content length: \(cleanedValue.count) characters")
+            // print("[LOG] Content after preprocessing: '\(cleanedValue)'")
+            // print("[LOG] Cleaned content length: \(cleanedValue.count) characters")
         }
         
         // 使用配置管理器获取所有触发器
@@ -153,7 +153,7 @@ class AXController {
         }
         
         // 动态生成正则表达式模式
-        let patterns = generateTriggerPatterns(triggers: allTriggers)
+        // let patterns = generateTriggerPatterns(triggers: allTriggers)
         
         // 检查每个触发器
         for trigger in allTriggers {
@@ -238,11 +238,9 @@ class AXController {
     // 为JavaScript生成触发器模式
     private func generateJavaScriptPatterns(for triggers: [String]) -> [String] {
         guard !triggers.isEmpty else {
-            // 如果没有配置的触发器，返回默认模式
+            // 如果没有配置的触发器，返回默认模式（简化版本）
             return [
-                "(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$",
-                "^(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$",
-                "(.*?)\\s+[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$"
+                "(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$"
             ]
         }
         
@@ -250,29 +248,28 @@ class AXController {
         
         // 为每个触发器生成模式
         for trigger in triggers {
-            // 转义JavaScript正则表达式中的特殊字符
+            // 简化转义：只转义真正需要的字符
             let escapedTrigger = trigger
-                .replacingOccurrences(of: "\\", with: "\\\\")
-                .replacingOccurrences(of: ".", with: "\\.")
-                .replacingOccurrences(of: "*", with: "\\*")
-                .replacingOccurrences(of: "+", with: "\\+")
-                .replacingOccurrences(of: "?", with: "\\?")
-                .replacingOccurrences(of: "^", with: "\\^")
-                .replacingOccurrences(of: "$", with: "\\$")
-                .replacingOccurrences(of: "{", with: "\\{")
-                .replacingOccurrences(of: "}", with: "\\}")
-                .replacingOccurrences(of: "[", with: "\\[")
-                .replacingOccurrences(of: "]", with: "\\]")
-                .replacingOccurrences(of: "(", with: "\\(")
-                .replacingOccurrences(of: ")", with: "\\)")
-                .replacingOccurrences(of: "|", with: "\\|")
-                // 注意：@ 和 # 在JavaScript正则表达式中不是特殊字符，不需要转义
+                .replacingOccurrences(of: "\\", with: "\\\\")   // 反斜杠
+                .replacingOccurrences(of: ".", with: "\\.")     // 点号
+                .replacingOccurrences(of: "*", with: "\\*")     // 星号
+                .replacingOccurrences(of: "+", with: "\\+")     // 加号
+                .replacingOccurrences(of: "?", with: "\\?")     // 问号
+                .replacingOccurrences(of: "^", with: "\\^")     // 脱字符
+                .replacingOccurrences(of: "$", with: "\\$")     // 美元符
+                .replacingOccurrences(of: "{", with: "\\{")     // 左大括号
+                .replacingOccurrences(of: "}", with: "\\}")     // 右大括号
+                .replacingOccurrences(of: "[", with: "\\[")     // 左方括号
+                .replacingOccurrences(of: "]", with: "\\]")     // 右方括号
+                .replacingOccurrences(of: "(", with: "\\(")     // 左圆括号
+                .replacingOccurrences(of: ")", with: "\\)")     // 右圆括号
+                .replacingOccurrences(of: "|", with: "\\|")     // 管道符
             
-            // 生成不同的匹配模式（注意：这里只需要一个反斜杠，因为是在Swift字符串中）
-            patterns.append("(.*?)" + escapedTrigger + "\\s*$")      // 标准模式
-            patterns.append("^(.*?)" + escapedTrigger + "\\s*$")     // 严格开头模式
-            patterns.append("(.*?)\\s+" + escapedTrigger + "\\s*$")  // 空格分隔
+            // 只生成一个标准模式，减少复杂性
+            patterns.append("(.*?)" + escapedTrigger + "\\s*$")
         }
+        
+        print("[LOG] Generated \(patterns.count) JavaScript patterns for \(triggers.count) triggers")
         
         return patterns
     }
@@ -280,19 +277,51 @@ class AXController {
     // 生成JavaScript代码用于动态模式匹配
     private func generateJavaScriptPatternCode(for triggers: [String]) -> String {
         let jsPatterns = generateJavaScriptPatterns(for: triggers)
-        let patternsArray = jsPatterns.map { "'\($0)'" }.joined(separator: ", ")
+        
+        // 对每个模式进行 AppleScript 安全转义
+        let escapedPatterns = jsPatterns.map { pattern in
+            // 为 AppleScript 中的 JavaScript 字符串进行转义
+            let escaped = pattern
+                .replacingOccurrences(of: "\\", with: "\\\\\\\\")  // 四重转义反斜杠：Swift -> AppleScript -> JavaScript -> RegExp
+                .replacingOccurrences(of: "\"", with: "\\\\\\\"")  // 转义双引号
+                .replacingOccurrences(of: "'", with: "\\\\'")      // 转义单引号
+                .replacingOccurrences(of: "\n", with: "\\\\n")     // 转义换行符
+                .replacingOccurrences(of: "\r", with: "\\\\r")     // 转义回车符
+            return "'\(escaped)'"
+        }
+        
+        let patternsArray = escapedPatterns.joined(separator: ", ")
+        
+        print("[LOG] Generated JS patterns for AppleScript: \(patternsArray)")
         
         return """
             // 使用动态生成的触发器模式
             var patternStrings = [\(patternsArray)];
             var patterns = patternStrings.map(function(p) {
-                return new RegExp(p, 'i'); // 直接使用模式字符串创建正则表达式
+                return new RegExp(p, 'i');
             });
         """
     }
     
+    // 安全地转义 AppleScript 中的字符串内容
+    private func escapeForAppleScript(_ string: String) -> String {
+        return string
+            .replacingOccurrences(of: "\\", with: "\\\\")    // 反斜杠
+            .replacingOccurrences(of: "\"", with: "\\\"")    // 双引号
+            .replacingOccurrences(of: "\n", with: "\\n")     // 换行符
+            .replacingOccurrences(of: "\r", with: "\\r")     // 回车符
+            .replacingOccurrences(of: "\t", with: "\\t")     // 制表符
+    }
+    
     // 生成Chrome浏览器的AppleScript
     private func generateChromeScript(escapedText: String, jsPatternCode: String) -> String {
+        // 对 JavaScript 代码进行额外的 AppleScript 转义
+        let safeJsPatternCode = escapeForAppleScript(jsPatternCode)
+        let safeEscapedText = escapeForAppleScript(escapedText)
+        
+        print("[LOG] Safe JS pattern code length: \(safeJsPatternCode.count)")
+        print("[LOG] Safe escaped text: '\(safeEscapedText)'")
+        
         return """
             tell application "Google Chrome"
                 try
@@ -307,7 +336,7 @@ class AXController {
                                 var currentValue = activeElement.value;
                                 console.log('Current value:', currentValue);
                                 
-                                \(jsPatternCode)
+                                \(safeJsPatternCode)
                                 
                                 var replaced = false;
                                 for (var i = 0; i < patterns.length; i++) {
@@ -316,14 +345,14 @@ class AXController {
                                         console.log('Pattern matched:', match);
                                         var originalText = match[1].trim();
                                         console.log('Original text to replace:', originalText);
-                                        console.log('Replacement text:', '\(escapedText)');
+                                        console.log('Replacement text:', '\(safeEscapedText)');
                                         
                                         // 精确替换：只替换触发器部分
-                                        var newValue = currentValue.replace(patterns[i], '\(escapedText)');
+                                        var newValue = currentValue.replace(patterns[i], '\(safeEscapedText)');
                                         activeElement.value = newValue;
                                         
                                         // 设置光标位置到文本末尾
-                                        var cursorPos = '\(escapedText)'.length;
+                                        var cursorPos = '\(safeEscapedText)'.length;
                                         activeElement.setSelectionRange(cursorPos, cursorPos);
                                         activeElement.focus();
                                         
@@ -346,7 +375,7 @@ class AXController {
                                 var currentContent = activeElement.textContent || activeElement.innerText || '';
                                 console.log('Current content:', currentContent);
                                 
-                                \(jsPatternCode)
+                                \(safeJsPatternCode)
                                 
                                 var replaced = false;
                                 for (var i = 0; i < patterns.length; i++) {
@@ -355,7 +384,7 @@ class AXController {
                                         console.log('ContentEditable pattern matched:', match);
                                         
                                         // 清空内容并设置新内容
-                                        activeElement.textContent = '\(escapedText)';
+                                        activeElement.textContent = '\(safeEscapedText)';
                                         
                                         // 设置光标到末尾
                                         var range = document.createRange();
@@ -371,7 +400,7 @@ class AXController {
                                         var inputEvent = new Event('input', { bubbles: true });
                                         activeElement.dispatchEvent(inputEvent);
                                         
-                                        console.log('ContentEditable text replaced to:', '\(escapedText)');
+                                        console.log('ContentEditable text replaced to:', '\(safeEscapedText)');
                                         replaced = true;
                                         break;
                                     }
@@ -929,7 +958,7 @@ class AXController {
 
     // 替换输入框内容
     func replaceInput(with text: String, completion: (() -> Void)? = nil) {
-        print("[LOG] Replacing input with: \(text)")
+        print("[LOG] Replacing input with translation result")
         guard let focused = getFocusedElement() else {
             print("[LOG] No focused element to replace")
             completion?()
@@ -938,7 +967,7 @@ class AXController {
         
         // 暂停选中文本监听，防止自动翻译回填时触发翻译菜单
         pauseSelectionMonitoring()
-        print("[LOG] Paused selection monitoring for auto-translation")
+        // print("[LOG] Paused selection monitoring for auto-translation")
         
         // 检查是否在浏览器环境中
         let isWeb = isWebEnvironment()
@@ -981,12 +1010,12 @@ class AXController {
         print("[LOG] Using Web input replacement method")
         
         // 方法1: 尝试AppleScript + JavaScript进行精确替换
-        print("[LOG] Attempting AppleScript + JavaScript replacement first")
-        if replaceViaAppleScriptJS(text: text) {
-            print("[LOG] Successfully replaced via AppleScript + JavaScript")
-            completion()
-            return
-        }
+        // print("[LOG] Attempting AppleScript + JavaScript replacement first")
+       if replaceViaAppleScriptJS(text: text) {
+           print("[LOG] Successfully replaced via AppleScript + JavaScript")
+           completion()
+           return
+       }
         
         print("[LOG] AppleScript + JavaScript failed, falling back to clipboard method")
         // 方法2: 回退到剪贴板方法，但增加额外的验证和重试
@@ -1017,9 +1046,9 @@ class AXController {
         // 获取所有配置的触发器并生成JavaScript模式
         let allTriggers = getAllConfiguredTriggers()
         let jsPatternCode = generateJavaScriptPatternCode(for: allTriggers)
-        print("[LOG] Generated JavaScript pattern code for \(allTriggers.count) triggers")
-        print("[LOG] All triggers: \(allTriggers)")
-        print("[LOG] JS Pattern Code: \(jsPatternCode)")
+        // print("[LOG] Generated JavaScript pattern code for \(allTriggers.count) triggers")
+        // print("[LOG] All triggers: \(allTriggers)")
+        // print("[LOG] JS Pattern Code: \(jsPatternCode)")
         
         var script = ""
         
@@ -1070,31 +1099,31 @@ class AXController {
             return
         }
         
-        print("[LOG] Current input value: '\(currentValue)'")
+        // print("[LOG] Current input value: '\(currentValue)'")
         
         // 使用动态生成的触发器模式检查
-        let allTriggers = getAllConfiguredTriggers()
-        let patterns = generateSwiftPatterns(for: allTriggers)
-        
-        var triggerFound = false
-        for pattern in patterns {
-            if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) {
-                let nsValue = currentValue as NSString
-                let results = regex.matches(in: currentValue, options: [], range: NSRange(location: 0, length: nsValue.length))
-                
-                if let match = results.first, match.numberOfRanges >= 3 {
-                    triggerFound = true
-                    print("[LOG] Trigger pattern found, proceeding with precise replacement")
-                    break
-                }
-            }
-        }
-        
-        if !triggerFound {
-            print("[LOG] No trigger pattern found, skipping replacement")
-            completion()
-            return
-        }
+//        let allTriggers = getAllConfiguredTriggers()
+//        let patterns = generateSwiftPatterns(for: allTriggers)
+//        
+//        var triggerFound = false
+//        for pattern in patterns {
+//            if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) {
+//                let nsValue = currentValue as NSString
+//                let results = regex.matches(in: currentValue, options: [], range: NSRange(location: 0, length: nsValue.length))
+//                
+//                if let match = results.first, match.numberOfRanges >= 3 {
+//                    triggerFound = true
+//                    print("[LOG] Trigger pattern found, proceeding with precise replacement")
+//                    break
+//                }
+//            }
+//        }
+//        
+//        if !triggerFound {
+//            print("[LOG] No trigger pattern found, skipping replacement")
+//            completion()
+//            return
+//        }
         
         // 保存原始剪贴板内容
         let pasteboard = NSPasteboard.general
@@ -1178,7 +1207,7 @@ class AXController {
         // 获取所有配置的触发器并生成JavaScript模式
         let allTriggers = getAllConfiguredTriggers()
         let jsPatternCode = generateJavaScriptPatternCode(for: allTriggers)
-        print("[LOG] Generated JS pattern code for selection: \(jsPatternCode)")
+        // print("[LOG] Generated JS pattern code for selection: \(jsPatternCode)")
         
         var script = ""
         
@@ -1857,7 +1886,7 @@ class AXController {
     func markAutoTranslationStart(withText text: String) {
         lastAutoTranslationTime = Date()
         lastAutoTranslationText = text
-        print("[LOG] Marked auto-translation start for text: '\(text)'")
+        // print("[LOG] Marked auto-translation start for text: '\(text)'")
     }
     
     // 检查文本是否可能是刚完成的自动翻译结果

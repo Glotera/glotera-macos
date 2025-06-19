@@ -21,7 +21,7 @@ class TranslatorClient: NSObject {
     } // 10秒超时
 
     func translate(text: String, to: String, completion: @escaping (String?) -> Void) {
-        NSLog("[LOG] Calling translation API: text=\(text), to=\(to)")
+        NSLog("[LOG] Calling translation API")
         guard let url = URL(string: endpoint) else { 
             NSLog("[LOG] Invalid URL: \(endpoint)")
             completion(nil)
@@ -67,7 +67,7 @@ class TranslatorClient: NSObject {
                 return
             }
             
-            NSLog("[LOG] Translation API response: \(String(data: data, encoding: .utf8) ?? "nil")")
+            // NSLog("[LOG] Translation API response: \(String(data: data, encoding: .utf8) ?? "nil")")
             
             do {
                 guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -76,7 +76,7 @@ class TranslatorClient: NSObject {
                     completion(nil)
                     return
                 }
-                NSLog("[LOG] Translation successful: \(translated)")
+                NSLog("[LOG] Translation successful")
                 completion(translated)
             } catch {
                 NSLog("[LOG] Failed to parse JSON response: \(error)")

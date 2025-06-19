@@ -347,7 +347,7 @@ class LanguageConfigViewModel: ObservableObject {
         configs = LanguageConfigManager.shared.loadLanguageConfigs()
         originalConfigs = configs
         hasUnsavedChanges = false
-        print("[LOG] Loaded \(configs.count) language configurations")
+        print("[LOG] Loaded \(configs.count) language configurations for menu bar")
     }
     
     func updateTriggers(for languageCode: String, triggers: [String]) {

@@ -29,23 +29,23 @@ class InputMonitor {
     
     // 执行健康检查
     private func performHealthCheck() {
-        print("[LOG] Performing health check...")
+        // print("[LOG] Performing health check...")
         
         // 检查权限状态
         let hasPermissions = checkAccessibilityPermissions()
-        print("[LOG] Health check - Accessibility permissions: \(hasPermissions)")
+        // print("[LOG] Health check - Accessibility permissions: \(hasPermissions)")
         
         // 检查事件监听器状态
         let eventTapValid = eventTap != nil && CFMachPortIsValid(eventTap!)
-        print("[LOG] Health check - Event tap valid: \(eventTapValid)")
+        // print("[LOG] Health check - Event tap valid: \(eventTapValid)")
         
         // 检查最近是否有事件活动
         let timeSinceLastEvent = Date().timeIntervalSince(lastEventTime)
         let timeSinceLastSpaceKey = Date().timeIntervalSince(lastSpaceKeyTime)
-        print("[LOG] Health check - Time since last event: \(timeSinceLastEvent)s")
-        print("[LOG] Health check - Time since last space key: \(timeSinceLastSpaceKey)s")
-        print("[LOG] Health check - Total key events: \(totalKeyEventCount)")
-        print("[LOG] Health check - Space key events: \(spaceKeyEventCount)")
+        // print("[LOG] Health check - Time since last event: \(timeSinceLastEvent)s")
+        // print("[LOG] Health check - Time since last space key: \(timeSinceLastSpaceKey)s")
+        // print("[LOG] Health check - Total key events: \(totalKeyEventCount)")
+        // print("[LOG] Health check - Space key events: \(spaceKeyEventCount)")
         
         // 检查空格键事件是否被正常捕获
         let spaceKeyWorking = timeSinceLastSpaceKey < 300 || spaceKeyEventCount == 0 // 5分钟内有空格键或者刚启动
@@ -161,7 +161,7 @@ class InputMonitor {
             eventTapEnabled = false
         } else {
             eventTapEnabled = true
-            print("[LOG] Event tap created successfully")
+            // print("[LOG] Event tap created successfully")
         }
         
         return eventTap
@@ -193,7 +193,7 @@ class InputMonitor {
     static let shared = InputMonitor()
 
     func handleSpaceKey() {
-        print("[LOG] Space key detected - starting trigger detection")
+        // print("[LOG] Space key detected - starting trigger detection")
         
         // 添加更详细的诊断信息
         guard let focused = AXController.shared.getFocusedElement() else {
@@ -210,7 +210,7 @@ class InputMonitor {
         
         // 首先尝试标准检测
         if let result = AXController.shared.detectTriggerAndExtract() {
-            print("[LOG] Trigger detected: text=\(result.text), lang=\(result.lang)")
+            // print("[LOG] Trigger detected: text=\(result.text), lang=\(result.lang)")
             startTranslation(text: result.text, lang: result.lang)
             return
         }
@@ -271,7 +271,7 @@ class InputMonitor {
                     print("[LOG] Translation result: \(translated)")
                     // 翻译成功后立即隐藏状态窗口，然后开始回填
                     TranslationStatusWindow.shared.hideStatus()
-                    print("[LOG] Status window hidden before auto-translation replacement")
+                    // print("[LOG] Status window hidden before auto-translation replacement")
                     // 回填翻译结果
                     AXController.shared.replaceInput(with: translated) {
                         print("[LOG] Auto-translation replacement completed")
@@ -294,12 +294,12 @@ class InputMonitor {
     func handleTabKey() {
         print("[LOG] Tab key detected")
         // Tab键可能在某些应用中完成自动补全，然后触发翻译
-        attemptTriggerDetection(source: "Tab")
+        // attemptTriggerDetection(source: "Tab")
     }
     
     private func attemptTriggerDetection(source: String) {
         if let result = AXController.shared.detectTriggerAndExtract() {
-            print("[LOG] Trigger detected via \(source): text=\(result.text), lang=\(result.lang)")
+            //print("[LOG] Trigger detected via \(source): text=\(result.text), lang=\(result.lang)")
             startTranslation(text: result.text, lang: result.lang)
         } else {
             // 对于Enter和Tab键，我们给更多时间让应用更新内容
