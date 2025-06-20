@@ -87,7 +87,7 @@ final class desktopUITests: XCTestCase {
         
         let mainWindow = WeChatApp.windows["Weixin"]
         XCTAssertTrue(mainWindow.waitForExistence(timeout: 20), "主窗口加载失败")
-        
+        showAppWindows(app: WeChatApp)
         let chatsSection = mainWindow.otherElements["Chats"]
         XCTAssertTrue(chatsSection.waitForExistence(timeout: 10), "聊天列表区域加载失败")
         

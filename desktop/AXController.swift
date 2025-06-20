@@ -1115,9 +1115,10 @@ class AXController {
         }
     }
     
-    // Web环境下的剪贴板替换，带重试机制
+        // Web环境下的剪贴板替换，简化版本（不恢复原剪贴板）
     private func replaceWebViaClipboardWithRetry(element: AXUIElement, text: String, completion: @escaping () -> Void) {
-        print("[LOG] Using Web clipboard replacement with retry")
+        print("[LOG] Using simplified Web clipboard replacement")
+        print("[LOG] Translation text to paste: '\(text)'")
         
         // 首先尝试获取当前内容，确定需要替换的部分
         guard let currentValue = getValue(of: element) else {
@@ -1126,46 +1127,17 @@ class AXController {
             return
         }
         
-        // print("[LOG] Current input value: '\(currentValue)'")
-        
-        // 使用动态生成的触发器模式检查
-//        let allTriggers = getAllConfiguredTriggers()
-//        let patterns = generateSwiftPatterns(for: allTriggers)
-//        
-//        var triggerFound = false
-//        for pattern in patterns {
-//            if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) {
-//                let nsValue = currentValue as NSString
-//                let results = regex.matches(in: currentValue, options: [], range: NSRange(location: 0, length: nsValue.length))
-//                
-//                if let match = results.first, match.numberOfRanges >= 3 {
-//                    triggerFound = true
-//                    print("[LOG] Trigger pattern found, proceeding with precise replacement")
-//                    break
-//                }
-//            }
-//        }
-//        
-//        if !triggerFound {
-//            print("[LOG] No trigger pattern found, skipping replacement")
-//            completion()
-//            return
-//        }
-        
-        // 保存原始剪贴板内容
+        // 直接设置翻译文本到剪贴板
         let pasteboard = NSPasteboard.general
-        let originalContent = pasteboard.string(forType: .string)
-        print("[LOG] Saved original clipboard: '\(originalContent ?? "nil")'")
-        
-        // 设置新文本到剪贴板
         pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
-        print("[LOG] Set clipboard to translation text: '\(text)'")
+        let setSuccess = pasteboard.setString(text, forType: .string)
+        print("[LOG] Set clipboard success: \(setSuccess), content: '\(text)'")
         
         // 验证剪贴板设置成功
         let verifyContent = pasteboard.string(forType: .string)
+        print("[LOG] Verified clipboard content: '\(verifyContent ?? "nil")'")
         if verifyContent != text {
-            print("[LOG] ERROR: Failed to set clipboard content correctly")
+            print("[LOG] ERROR: Clipboard verification failed - expected: '\(text)', got: '\(verifyContent ?? "nil")'")
             completion()
             return
         }
@@ -1175,30 +1147,28 @@ class AXController {
             if !success {
                 // 如果第一次失败，等待后重试
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    // 重新设置剪贴板内容（可能被其他操作改变）
+                    print("[LOG] Retry attempt - re-setting clipboard content")
                     pasteboard.clearContents()
-                    pasteboard.setString(text, forType: .string)
-                    print("[LOG] Re-set clipboard for retry")
+                    let retrySetSuccess = pasteboard.setString(text, forType: .string)
+                    print("[LOG] Retry clipboard set success: \(retrySetSuccess)")
                     
                     self?.attemptPreciseWebReplace(element: element, originalValue: currentValue, translatedText: text, attempt: 2) { _ in
-                        // 延长恢复时间，确保Chrome完全处理完粘贴操作
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                            self?.restoreClipboardSafely(originalContent: originalContent)
-                            completion()
-                        }
+                        print("[LOG] Translation replacement completed (retry)")
+                        // 翻译操作完成后检查 Event Tap 状态
+                        self?.checkAndRecoverEventTapAfterTranslation()
+                        completion()
                     }
                 }
             } else {
-                // 成功时也要延长恢复时间
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                    self?.restoreClipboardSafely(originalContent: originalContent)
-                    completion()
-                }
+                print("[LOG] Translation replacement completed (success)")
+                // 翻译操作完成后检查 Event Tap 状态
+                self?.checkAndRecoverEventTapAfterTranslation()
+                completion()
             }
         }
     }
     
-    // 精确的Web替换尝试
+    // 精确的Web替换尝试（简化版本）
     private func attemptPreciseWebReplace(element: AXUIElement, originalValue: String, translatedText: String, attempt: Int, completion: @escaping (Bool) -> Void) {
         print("[LOG] Precise Web replace attempt \(attempt)")
         
@@ -1207,7 +1177,8 @@ class AXController {
             print("[LOG] Successfully selected trigger text via JavaScript")
             
             // 等待选择完成，然后粘贴
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                print("[LOG] Simulating Cmd+V paste")
                 self.simulatePaste()
                 completion(true)
             }
@@ -1215,11 +1186,83 @@ class AXController {
             print("[LOG] JavaScript selection failed, falling back to traditional method")
             
             // 回退到传统的全选+粘贴方法
+            print("[LOG] Simulating Cmd+A select all")
             simulateSelectAll()
             
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                print("[LOG] Simulating Cmd+V paste") 
                 self.simulatePaste()
                 completion(true)
+            }
+        }
+    }
+    
+    // 翻译操作完成后检查和恢复 Event Tap
+    private func checkAndRecoverEventTapAfterTranslation() {
+        // 延迟检查，给系统时间处理键盘模拟事件
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            Logger.debug("Checking Event Tap status after translation...")
+            
+            // 获取 AppDelegate 实例
+            guard let appDelegate = NSApplication.shared.delegate as? AppDelegate else {
+                Logger.warn("Cannot get AppDelegate for Event Tap check")
+                return
+            }
+            
+            // 检查 Event Tap 是否仍然有效
+            if let eventTap = appDelegate.eventTap {
+                let isValid = CFMachPortIsValid(eventTap)
+                let isEnabled = CGEvent.tapIsEnabled(tap: eventTap)
+                let isActive = appDelegate.isEventMonitoringActive
+                
+                Logger.debug("Event Tap status after translation - Valid: \(isValid), Enabled: \(isEnabled), Active: \(isActive)")
+                
+                // 分情况处理不同的状态问题
+                if !isValid {
+                    Logger.warn("Event Tap invalid after translation - requesting full restart")
+                    appDelegate.restartEventMonitoring()
+                } else if !isEnabled || !isActive {
+                    Logger.warn("Event Tap disabled after translation - attempting recovery")
+                    
+                    // 尝试多次快速恢复，翻译后的失效可能需要更强力的恢复
+                    var recovered = false
+                    for attempt in 1...3 {
+                        if appDelegate.quickEnableEventTap() {
+                            Logger.info("Event Tap recovery successful after translation (attempt \(attempt))")
+                            recovered = true
+                            break
+                        } else {
+                            Logger.warn("Recovery attempt \(attempt) failed")
+                            if attempt < 3 {
+                                // 递增延迟
+                                Thread.sleep(forTimeInterval: Double(attempt) * 0.1)
+                            }
+                        }
+                    }
+                    
+                    if !recovered {
+                        Logger.warn("All recovery attempts failed after translation - requesting full restart")
+                        appDelegate.restartEventMonitoring()
+                    }
+                } else {
+                    Logger.debug("Event Tap healthy after translation")
+                }
+            } else {
+                Logger.warn("No Event Tap found after translation - system may need restart")
+                appDelegate.restartEventMonitoring()
+            }
+        }
+        
+        // 添加第二次检查，确保恢复成功
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            guard let appDelegate = NSApplication.shared.delegate as? AppDelegate else { return }
+            
+            if !appDelegate.isEventTapValid() {
+                Logger.warn("Event Tap still invalid 1s after translation - final recovery attempt")
+                if !appDelegate.quickEnableEventTap() {
+                    Logger.error("Final recovery failed - Event Tap may remain unstable")
+                    // 不强制重启，让健康检查系统处理
+                }
             }
         }
     }
@@ -1364,23 +1407,7 @@ class AXController {
         }
     }
     
-    // 安全地恢复剪贴板内容
-    private func restoreClipboardSafely(originalContent: String?) {
-        let pasteboard = NSPasteboard.general
-        
-        // 检查当前剪贴板内容
-        let currentContent = pasteboard.string(forType: .string)
-        print("[LOG] Current clipboard before restore: '\(currentContent ?? "nil")'")
-        
-        // 恢复原始剪贴板内容
-        pasteboard.clearContents()
-        if let original = originalContent {
-            pasteboard.setString(original, forType: .string)
-            print("[LOG] Restored original clipboard content: '\(original)'")
-        } else {
-            print("[LOG] Cleared clipboard as no original content")
-        }
-    }
+
     
     // 获取选中文本属性
     private func getSelectedTextAttribute(of element: AXUIElement) -> String? {
@@ -1497,6 +1524,8 @@ class AXController {
                     // 延迟恢复剪贴板，确保粘贴完成
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                         self.restoreClipboardContent(originalClipboard)
+                        // 翻译操作完成后检查 Event Tap 状态
+                        self.checkAndRecoverEventTapAfterTranslation()
                         completion()
                     }
                 }
@@ -1657,7 +1686,7 @@ class AXController {
         
         // 首先尝试通过AX API获取选中文本
         if let selectedText = getSelectedTextAttribute(of: focused), !selectedText.isEmpty {
-            print("[LOG] Got selected text via AX: '\(selectedText)'")
+            // Logger.debug("[LOG] Got selected text via AX: '\(selectedText)'")
             return (text: selectedText, element: focused)
         }
         
@@ -1740,7 +1769,7 @@ class AXController {
     
     // 开始监听选中文本变化
     func startSelectionMonitoring() {
-        print("[LOG] Starting selection monitoring (keyboard-event-safe)")
+        Logger.info("Starting selection monitoring (keyboard-event-safe)")
         
         // 延迟启动鼠标监听，确保键盘监听优先建立
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
@@ -1772,14 +1801,14 @@ class AXController {
             }
         }
         
-        // 监听键盘事件，检测 Ctrl+A
-        keyboardEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
-            DispatchQueue.main.async {
-                self?.handleKeyboardEvent(event)
-            }
-        }
+        // 移除键盘事件监听，避免与 InputMonitor 的 CGEvent 监听冲突
+        // keyboardEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+        //     DispatchQueue.main.async {
+        //         self?.handleKeyboardEvent(event)
+        //     }
+        // }
         
-        print("[LOG] Mouse and keyboard event monitoring started")
+        print("[LOG] Mouse event monitoring started (keyboard monitoring delegated to InputMonitor)")
     }
     
     private func handleMouseEvent(_ event: NSEvent) {
@@ -1823,19 +1852,6 @@ class AXController {
             
         default:
             break
-        }
-    }
-    
-    // 处理键盘事件
-    private func handleKeyboardEvent(_ event: NSEvent) {
-        // 检测 Ctrl+A (Cmd+A on Mac)
-        if event.modifierFlags.contains(.command) && event.keyCode == 0 { // keyCode 0 is 'A'
-            print("[LOG] Cmd+A detected")
-            lastCtrlATime = Date()
-            // 延迟检查 Cmd+A 选择的文本
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                self.checkForTextSelectionAfterCtrlA()
-            }
         }
     }
     
@@ -1901,7 +1917,7 @@ class AXController {
         
         // 等待延迟，确保全选完全稳定
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            self.checkSelectedTextAndShowMenuAfterKeyboardSelection()
+            self.checkForTextSelectionAfterKeyboardSelection()
         }
     }
     
@@ -1965,8 +1981,8 @@ class AXController {
         checkSelectedTextAndShowMenu(selectionType: "mouse")
     }
     
-    // 键盘选择后的菜单显示逻辑
-    private func checkSelectedTextAndShowMenuAfterKeyboardSelection() {
+    // 键盘选择后的菜单显示逻辑 - 改为 public 以便 InputMonitor 调用
+    func checkForTextSelectionAfterKeyboardSelection() {
         checkSelectedTextAndShowMenu(selectionType: "keyboard")
     }
     
@@ -2088,6 +2104,8 @@ class AXController {
                     pasteboard.setString(original, forType: .string)
                 }
                 print("[LOG] Clipboard content restored to: '\(originalContent ?? "nil")'")
+                // 翻译操作完成后检查 Event Tap 状态
+                self.checkAndRecoverEventTapAfterTranslation()
                 completion()
             }
         }
@@ -2333,11 +2351,12 @@ class AXController {
             print("[LOG] Mouse event monitor removed")
         }
         
-        if let monitor = keyboardEventMonitor {
-            NSEvent.removeMonitor(monitor)
-            keyboardEventMonitor = nil
-            print("[LOG] Keyboard event monitor removed")
-        }
+        // keyboardEventMonitor 已移除，键盘监听由 InputMonitor 统一处理
+        // if let monitor = keyboardEventMonitor {
+        //     NSEvent.removeMonitor(monitor)
+        //     keyboardEventMonitor = nil
+        //     print("[LOG] Keyboard event monitor removed")
+        // }
     }
     
     // 暂停选中文本监听

@@ -40,6 +40,8 @@
 		9BE4ED882E012FF1002AC2AE /* TranslatorClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BE4ED7B2E012FF1002AC2AE /* TranslatorClient.swift */; };
 		9BE4ED892E012FF1002AC2AE /* Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 9BE4ED7C2E012FF1002AC2AE /* Info.plist */; };
 		9BE4ED8A2E012FF1002AC2AE /* TranslateAgent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BE4ED7D2E012FF1002AC2AE /* TranslateAgent.swift */; };
+		A1B2C3D4E5F678901234567A /* Logger.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6789012345678AB /* Logger.swift */; };
+		C3D4E5F67890123456789ABC /* LoggerExample.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E5F67890123456789ABCDE /* LoggerExample.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -89,6 +91,8 @@
 		9BE4ED7C2E012FF1002AC2AE /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		9BE4ED7D2E012FF1002AC2AE /* TranslateAgent.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TranslateAgent.swift; sourceTree = "<group>"; };
 		ADA243CF57A742A49C392A18 /* language-iso-639.json */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.json; path = "language-iso-639.json"; sourceTree = "<group>"; };
+		B2C3D4E5F6789012345678AB /* Logger.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Logger.swift; sourceTree = "<group>"; };
+		D4E5F67890123456789ABCDE /* LoggerExample.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LoggerExample.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -165,6 +169,8 @@
 				3F60848B2C5C4E76B8A270AB /* LanguageConfigManager.swift */,
 				15B044BD9B2D441BAF66FA8D /* LanguageConfigWindow.swift */,
 				ADA243CF57A742A49C392A18 /* language-iso-639.json */,
+				B2C3D4E5F6789012345678AB /* Logger.swift */,
+				D4E5F67890123456789ABCDE /* LoggerExample.swift */,
 				9BE4ED722E012FF1002AC2AE /* MenuBarController.swift */,
 				9BE4ED712E012FF1002AC2AE /* SettingsView.swift */,
 				9BE4ED7D2E012FF1002AC2AE /* TranslateAgent.swift */,
@@ -334,6 +340,8 @@
 				9BE4ED872E012FF1002AC2AE /* AppDelegate.swift in Sources */,
 				52E75974376A4A2C80038B26 /* LanguageConfigManager.swift in Sources */,
 				3D153861DB83474CB7A5CE30 /* LanguageConfigWindow.swift in Sources */,
+				A1B2C3D4E5F678901234567A /* Logger.swift in Sources */,
+				C3D4E5F67890123456789ABC /* LoggerExample.swift in Sources */,
 				9BE4ED802E012FF1002AC2AE /* MenuBarController.swift in Sources */,
 				9BE4ED7F2E012FF1002AC2AE /* SettingsView.swift in Sources */,
 				9BE4ED852E012FF1002AC2AE /* TranslationResultWindow.swift in Sources */,
@@ -512,13 +520,12 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = R3F7G5M76J;
+				DEVELOPMENT_TEAM = UGTSP534S3;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "$(SRCROOT)/desktop/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Glotera;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "cross language communication ai tool";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -541,7 +548,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = R3F7G5M76J;
+				DEVELOPMENT_TEAM = UGTSP534S3;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -567,7 +574,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = R3F7G5M76J;
+				DEVELOPMENT_TEAM = UGTSP534S3;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 13.5;
 				MARKETING_VERSION = 1.0;
@@ -575,7 +582,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/desktop.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/desktop";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Glotera.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Glotera";
 			};
 			name = Debug;
 		};
@@ -586,7 +593,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = R3F7G5M76J;
+				DEVELOPMENT_TEAM = UGTSP534S3;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 13.5;
 				MARKETING_VERSION = 1.0;
@@ -594,7 +601,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/desktop.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/desktop";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Glotera.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Glotera";
 			};
 			name = Release;
 		};
@@ -604,7 +611,7 @@
 				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = R3F7G5M76J;
+				DEVELOPMENT_TEAM = UGTSP534S3;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = glotera.ai.desktopUITests;
@@ -621,7 +628,7 @@
 				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = R3F7G5M76J;
+				DEVELOPMENT_TEAM = UGTSP534S3;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = glotera.ai.desktopUITests;

@@ -6,7 +6,7 @@
 //
 
 import Testing
-@testable import desktop
+@testable import Glotera
 
 struct desktopTests {
 
