@@ -12,6 +12,7 @@ class TranslationMenuWindow: NSWindow {
     private var cachedBrowserInfo: AppInfo?
     private var lastMousePosition: NSPoint = .zero
     private var sourceElementPid: pid_t = 0
+    private var currentStreamWindow: TranslationResultWindow?
     
     private init() {
         super.init(
@@ -98,7 +99,7 @@ class TranslationMenuWindow: NSWindow {
         keyEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
             if let window = self, window.isVisible {
                 // 在任何键盘输入时隐藏菜单
-                print("[LOG] Key pressed while menu visible, hiding menu")
+                Logger.info("Key pressed while menu visible, hiding menu")
                 window.hide()
             }
         }
@@ -138,9 +139,7 @@ class TranslationMenuWindow: NSWindow {
         }
         
         self.setFrameTopLeftPoint(menuPoint)
-        self.makeKeyAndOrderFront(nil)
-        
-        NSLog("[LOG] Translation menu shown at \(menuPoint) for text: '\(text)'")
+        self.makeKeyAndOrderFront(nil) 
     }
     
     func hide() {
@@ -158,7 +157,10 @@ class TranslationMenuWindow: NSWindow {
             keyEventMonitor = nil
         }
         
-        NSLog("[LOG] Translation menu hidden")
+        // 清理当前流式翻译窗口引用
+        currentStreamWindow = nil
+        
+        Logger.info("Translation menu hidden")
     }
     
     // 重写方法以控制窗口焦点行为
@@ -171,18 +173,16 @@ class TranslationMenuWindow: NSWindow {
     }
     
     private func translateToLanguage(_ language: String) {
-        NSLog("[LOG] Translating to language: \(language)")
+        Logger.info("Translating to language: \(language)")
         
         guard !selectedText.isEmpty else {
-            NSLog("[LOG] No text selected for translation")
+            Logger.info("No text selected for translation")
             hide()
             return
         }
         
         // 检查源元素是否可编辑
-        let isEditable = sourceElement != nil ? AXController.shared.isElementEditable(sourceElement!) : false
-        NSLog("[LOG] Source element editable: \(isEditable)")
-        NSLog("[LOG] Source element: \(sourceElement != nil ? "exists" : "nil")")
+        let isEditable = sourceElement != nil ? AXController.shared.isElementEditable(sourceElement!) : false 
         
         // 隐藏菜单
         hide()
@@ -194,36 +194,36 @@ class TranslationMenuWindow: NSWindow {
             TranslatorClient.shared.translate(text: selectedText, to: language) { [weak self] translated in
                 DispatchQueue.main.async {
                     if let translated = translated, !translated.isEmpty {
-                        NSLog("[LOG] Translation result: \(translated)")
+                        Logger.info("Translation result: \(translated)")
                         // 翻译成功后立即隐藏状态窗口，然后开始回填
                         TranslationStatusWindow.shared.hideStatus()
-                        NSLog("[LOG] Status window hidden before text replacement")
+                        Logger.info("Status window hidden before text replacement")
                         
                         // 可编辑元素：替换选中的文本
-                        NSLog("[LOG] Replacing text in editable element")
+                        Logger.info("Replacing text in editable element")
                         if let element = self?.sourceElement {
                             self?.replaceSelectedText(in: element, with: translated) {
-                                NSLog("[LOG] Text replacement completed")
+                                Logger.info("Text replacement completed")
                             }
                         } else {
-                            NSLog("[LOG] No source element available for text replacement")
+                            Logger.info("No source element available for text replacement")
                         }
                     } else {
-                        NSLog("[LOG] Translation failed or empty result")
+                        Logger.info("Translation failed or empty result")
                         TranslationStatusWindow.shared.showFailure()
                     }
                 }
             }
         } else {
             // 不可编辑元素：使用流式翻译显示结果浮窗
-            NSLog("[LOG] Using stream translation for non-editable element")
+            Logger.info("Using stream translation for non-editable element")
             showStreamTranslationResult(original: selectedText, targetLanguage: language)
         }
     }
     
     private func replaceSelectedText(in element: AXUIElement, with text: String, completion: @escaping () -> Void) {
-        NSLog("[LOG] Attempting to replace selected text with: '\(text)'")
-        NSLog("[LOG] Original selected text was: '\(selectedText)'")
+        Logger.info("Attempting to replace selected text with: '\(text)'")
+        Logger.info("Original selected text was: '\(selectedText)'")
 
         // 暂时禁用选中文本监听，防止我们的操作触发新的菜单
         AXController.shared.pauseSelectionMonitoring()
@@ -253,7 +253,7 @@ class TranslationMenuWindow: NSWindow {
             completion()
         }
         
-        NSLog("[LOG] Text replacement method: \(methodUsed ?? "None")")
+        Logger.info("Text replacement method: \(methodUsed ?? "None")")
     }
 
     // 通过JavaScript替换文本（仅限Chrome）
@@ -302,10 +302,10 @@ class TranslationMenuWindow: NSWindow {
         var error: NSDictionary?
         if let scriptObject = NSAppleScript(source: appleScript) {
             if scriptObject.executeAndReturnError(&error).stringValue != nil {
-                NSLog("[LOG] Successfully executed JavaScript replacement")
+                Logger.info("Successfully executed JavaScript replacement")
                 return true
             } else if let errorInfo = error {
-                NSLog("[LOG] AppleScript execution error: \(errorInfo)")
+                Logger.info("AppleScript execution error: \(errorInfo)")
             }
         }
         return false
@@ -324,21 +324,21 @@ class TranslationMenuWindow: NSWindow {
     
     // 最简化的剪贴板替换方法 - 已重构为更稳健的流程
     private func replaceTextViaSimpleClipboard(with text: String, completion: @escaping () -> Void) {
-        NSLog("[LOG] Using enhanced clipboard replacement method for '\(text)'")
+        Logger.info("Using enhanced clipboard replacement method for '\(text)'")
         
         let pasteboard = NSPasteboard.general
         let originalClipboard = pasteboard.string(forType: .string)
         
         pasteboard.clearContents()
         guard pasteboard.setString(text, forType: .string) else {
-            NSLog("[LOG] Failed to set clipboard content")
+            Logger.info("Failed to set clipboard content")
             restoreClipboard(originalClipboard)
             completion()
             return
         }
         
         guard pasteboard.string(forType: .string) == text else {
-            NSLog("[LOG] ERROR: Clipboard content verification failed!")
+            Logger.info("ERROR: Clipboard content verification failed!")
             restoreClipboard(originalClipboard)
             completion()
             return
@@ -356,7 +356,7 @@ class TranslationMenuWindow: NSWindow {
                         }
                     }
                 } else {
-                    NSLog("[LOG] Could not focus original app. Aborting replacement.")
+                    Logger.info("Could not focus original app. Aborting replacement.")
                     self.restoreClipboard(originalClipboard)
                     completion()
                 }
@@ -369,7 +369,7 @@ class TranslationMenuWindow: NSWindow {
         if sourceElementPid != 0 {
              if let app = NSRunningApplication(processIdentifier: sourceElementPid) {
                 app.activate(options: .activateIgnoringOtherApps)
-                NSLog("[LOG] Activating app with pid: \(sourceElementPid)")
+                Logger.info("Activating app with pid: \(sourceElementPid)")
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { completion(true) }
                 return
             }
@@ -377,13 +377,13 @@ class TranslationMenuWindow: NSWindow {
 
         guard let info = cachedBrowserInfo,
               let app = NSRunningApplication.runningApplications(withBundleIdentifier: info.bundleId).first else {
-            NSLog("[LOG] Cannot get original app info to focus.")
+            Logger.info("Cannot get original app info to focus.")
             completion(false)
             return
         }
         
         app.activate(options: .activateIgnoringOtherApps)
-        NSLog("[LOG] Activating app: \(info.appName)")
+        Logger.info("Activating app: \(info.appName)")
         
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             completion(true)
@@ -398,17 +398,17 @@ class TranslationMenuWindow: NSWindow {
         }
 
         if currentText == originalText {
-            NSLog("[LOG] Content matches original selected text. Using Cmd+A to select all.")
+            Logger.info("Content matches original selected text. Using Cmd+A to select all.")
             sendSelectAllCommand()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { completion(true) }
             return
         }
         
         if originalText.count <= 50 {
-             NSLog("[LOG] Short text detected. Attempting to double-click to re-select.")
+             Logger.info("Short text detected. Attempting to double-click to re-select.")
             doubleClickToSelectText(at: lastMousePosition)
         } else {
-            NSLog("[LOG] Long text detected. Using Cmd+A to select all.")
+            Logger.info("Long text detected. Using Cmd+A to select all.")
             sendSelectAllCommand()
         }
         
@@ -428,7 +428,7 @@ class TranslationMenuWindow: NSWindow {
 
         downEvent?.post(tap: .cghidEventTap)
         upEvent?.post(tap: .cghidEventTap)
-        NSLog("[LOG] Sent double-click event at \(position)")
+        Logger.info("Sent double-click event at \(position)")
     }
     
     // 立即发送粘贴命令（无延迟）
@@ -436,7 +436,7 @@ class TranslationMenuWindow: NSWindow {
         let source = CGEventSource(stateID: .hidSystemState)
         guard let cmdVDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: true),
               let cmdVUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: false) else {
-            NSLog("[LOG] Failed to create paste events")
+            Logger.info("Failed to create paste events")
             return
         }
         
@@ -446,19 +446,19 @@ class TranslationMenuWindow: NSWindow {
         cmdVDown.post(tap: .cghidEventTap)
         usleep(50000) // 50ms
         cmdVUp.post(tap: .cghidEventTap)
-        NSLog("[LOG] Sent immediate paste command.")
+        Logger.info("Sent immediate paste command.")
     }
 
     // 微信特殊文本替换方法
     private func replaceTextInWeChat(with text: String, completion: @escaping () -> Void) {
-        NSLog("[LOG] Using enhanced WeChat-specific text replacement")
+        Logger.info("Using enhanced WeChat-specific text replacement")
         
         let pasteboard = NSPasteboard.general
         let originalClipboard = pasteboard.string(forType: .string)
 
         pasteboard.clearContents()
         guard pasteboard.setString(text, forType: .string) else {
-            NSLog("[LOG] WeChat: Failed to set clipboard")
+            Logger.info("WeChat: Failed to set clipboard")
             restoreClipboard(originalClipboard)
             completion()
             return
@@ -467,7 +467,7 @@ class TranslationMenuWindow: NSWindow {
         // 核心流程：激活微信 -> 全选 -> 粘贴
         ensureOriginalAppFocus { focused in
             guard focused else {
-                NSLog("[LOG] WeChat: Failed to focus app.")
+                Logger.info("WeChat: Failed to focus app.")
                 self.restoreClipboard(originalClipboard)
                 completion()
                 return
@@ -475,12 +475,12 @@ class TranslationMenuWindow: NSWindow {
             
             // 等待焦点稳定
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                NSLog("[LOG] WeChat: Sending Cmd+A to select text.")
+                Logger.info("WeChat: Sending Cmd+A to select text.")
                 self.sendSelectAllCommand()
                 
                 // 等待全选完成
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                    NSLog("[LOG] WeChat: Sending paste command.")
+                    Logger.info("WeChat: Sending paste command.")
                     self.sendImmediatePasteCommand()
                     
                     // 延迟恢复剪贴板，确保粘贴完成
@@ -501,8 +501,12 @@ class TranslationMenuWindow: NSWindow {
     
     // 显示流式翻译结果浮窗 - 新增
     private func showStreamTranslationResult(original: String, targetLanguage: String) {
-        let streamWindow = TranslationResultWindow(originalText: original, targetLanguage: targetLanguage)
-        streamWindow.showAt(point: lastMousePosition)
+        // 先清理之前的窗口
+        currentStreamWindow?.hide()
+        
+        // 创建新的流式翻译窗口并持有强引用
+        currentStreamWindow = TranslationResultWindow(originalText: original, targetLanguage: targetLanguage)
+        currentStreamWindow?.showAt(point: lastMousePosition)
     }
 
     // 恢复剪贴板内容
@@ -511,36 +515,36 @@ class TranslationMenuWindow: NSWindow {
         if let original = originalClipboard {
             pasteboard.clearContents()
             pasteboard.setString(original, forType: .string)
-            NSLog("[LOG] Restored original clipboard content: '\(original)'")
+            Logger.info("Restored original clipboard content: '\(original)'")
         } else {
             pasteboard.clearContents()
-            NSLog("[LOG] Cleared clipboard as there was no original content.")
+            Logger.info("Cleared clipboard as there was no original content.")
         }
         
         AXController.shared.resumeSelectionMonitoring()
-        NSLog("[LOG] Resumed selection monitoring")
+        Logger.info("Resumed selection monitoring")
     }
     
     // #@指令场景的剪贴板替换方法
     func replaceTextViaClipboardForTrigger(with text: String, completion: @escaping () -> Void) {
-        NSLog("[LOG] Using clipboard replacement for #@ trigger")
+        Logger.info("Using clipboard replacement for #@ trigger")
         
         let pasteboard = NSPasteboard.general
         let originalClipboard = pasteboard.string(forType: .string)
 
         pasteboard.clearContents()
         guard pasteboard.setString(text, forType: .string) else {
-            NSLog("[LOG] Failed to set clipboard for trigger")
+            Logger.info("Failed to set clipboard for trigger")
             completion()
             return
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            NSLog("[LOG] Sending Cmd+A to select all content before paste")
+            Logger.info("Sending Cmd+A to select all content before paste")
             self.sendSelectAllCommand()
             
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                NSLog("[LOG] Sending paste command to replace selected content")
+                Logger.info("Sending paste command to replace selected content")
                 self.sendImmediatePasteCommand()
                 
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -564,7 +568,7 @@ class TranslationMenuWindow: NSWindow {
         cmdAUp?.flags = .maskCommand
         cmdAUp?.post(tap: .cghidEventTap)
         
-        NSLog("[LOG] Sent Cmd+A select all command")
+        Logger.info("Sent Cmd+A select all command")
     }
     
     // 输入文本
@@ -581,7 +585,7 @@ class TranslationMenuWindow: NSWindow {
                 }
             }
         }
-        NSLog("[LOG] Typed text: '\(text)'")
+        Logger.info("Typed text: '\(text)'")
     }
     
     // 使用Base64编码来安全传递文本到JavaScript，避免转义问题
@@ -596,32 +600,32 @@ class TranslationMenuWindow: NSWindow {
     private func showChromeJavaScriptPermissionAlert() {
         DispatchQueue.main.async {
             let alert = NSAlert()
-            alert.messageText = "Chrome JavaScript权限设置"
+            alert.messageText = "Chrome JavaScript Permission Setting"
             alert.informativeText = """
-            为了在浏览器中实现精确的文本替换，需要启用Chrome的JavaScript权限。
+            To enable precise text replacement in browsers, Chrome's JavaScript permission needs to be enabled.
             
-            请按以下步骤设置：
-            1. 在Chrome浏览器中，点击菜单栏的"查看"
-            2. 选择 "开发者" -> "允许来自Apple事件的JavaScript"
+            Please follow these steps to set up:
+            1. In Chrome browser, click "View" in the menu bar
+            2. Select "Developer" -> "Allow JavaScript from Apple Events"
             
-            如果找不到该选项，请确保Chrome已更新到最新版本。
+            If you cannot find this option, please ensure Chrome is updated to the latest version.
             
-            设置完成后，此功能将自动启用。如果选择不设置，将继续使用剪贴板进行替换。
+            After setting up, this feature will be automatically enabled. If you choose not to set it up, the clipboard will be used for replacement.
             """
             alert.alertStyle = .informational
             
-            alert.addButton(withTitle: "好的")
-            alert.addButton(withTitle: "复制设置路径")
+            alert.addButton(withTitle: "OK")
+            alert.addButton(withTitle: "Copy Setting Path")
             
             let response = alert.runModal()
             if response == .alertSecondButtonReturn {
                 let pasteboard = NSPasteboard.general
                 pasteboard.clearContents()
-                pasteboard.setString("查看 > 开发者 > 允许来自Apple事件的JavaScript", forType: .string)
+                pasteboard.setString("View > Developer > Allow JavaScript from Apple Events", forType: .string)
                 
                 let confirmationAlert = NSAlert()
-                confirmationAlert.messageText = "路径已复制"
-                confirmationAlert.informativeText = "设置路径已复制到剪贴板。"
+                confirmationAlert.messageText = "Path copied"
+                confirmationAlert.informativeText = "Setting path copied to clipboard."
                 confirmationAlert.runModal()
             }
         }

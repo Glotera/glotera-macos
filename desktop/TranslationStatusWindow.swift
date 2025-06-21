@@ -47,9 +47,7 @@ class TranslationStatusWindow: NSWindow {
         }
         
         self.setFrameTopLeftPoint(statusPoint)
-        self.orderFront(nil)  // 不抢夺焦点，避免取消选中状态
-        
-        print("[LOG] Translation status shown: translating")
+        self.orderFront(nil)  // 不抢夺焦点，避免取消选中状态 
     }
     
     func showSuccess() {
@@ -58,9 +56,7 @@ class TranslationStatusWindow: NSWindow {
         // 2秒后自动隐藏
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             self.hideStatus()
-        }
-        
-        print("[LOG] Translation status shown: success")
+        } 
     }
     
     func showFailure() {
@@ -70,13 +66,11 @@ class TranslationStatusWindow: NSWindow {
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
             self.hideStatus()
         }
-        
-        print("[LOG] Translation status shown: failure")
+         
     }
     
     func hideStatus() {
-        self.orderOut(nil)
-        print("[LOG] Translation status hidden")
+        self.orderOut(nil) 
     }
     
     // 防止状态窗口抢夺焦点

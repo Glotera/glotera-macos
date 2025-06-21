@@ -13,7 +13,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastMouseLocation: NSPoint?
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
-        print("[LOG] AppDelegate did finish launching")
+        Logger.info("AppDelegate did finish launching")
         menuBarController = MenuBarController()
         inputMonitor = InputMonitor()
         
@@ -86,7 +86,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
         
-        print("[LOG] Application lifecycle monitoring setup complete")
+        Logger.info("Application lifecycle monitoring setup complete")
     }
     
     // 启动主动 Event Tap 监控
@@ -101,7 +101,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Logger.info("Event tap proactive monitoring started (30s interval)")
     }
     
-    // 主动检查 Event Tap 状态
+    // 统一的 Event Tap 健康检查
     private func proactiveEventTapCheck() {
         guard let eventTap = eventTap else { return }
         
@@ -109,15 +109,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let isEnabled = CGEvent.tapIsEnabled(tap: eventTap)
         let isActive = isEventMonitoringActive
         
+        // 检查是否刚进行过选中文本翻译（可能导致暂时失效）
+        let timeSinceSelectionTranslation = inputMonitor.getTimeSinceLastSelectionTranslation()
+        let isRecentSelectionTranslation = timeSinceSelectionTranslation < 60.0 // 60秒内
+        
         // 如果发现问题征兆，主动修复
         if !isEnabled || !isValid || !isActive {
-            Logger.warn("Proactive check detected issue - Valid: \(isValid), Enabled: \(isEnabled), Active: \(isActive)")
+            // 如果刚进行了选中文本翻译，跳过检查
+            if isRecentSelectionTranslation {
+                Logger.debug("Skipping Event Tap check - recent selection translation (\(String(format: "%.1f", timeSinceSelectionTranslation))s ago)")
+                return
+            }
+            
+            Logger.warn("Event Tap check detected issue - Valid: \(isValid), Enabled: \(isEnabled), Active: \(isActive)")
             
             // 尝试快速恢复
             if quickEnableEventTap() {
-                Logger.info("Proactive recovery successful")
+                Logger.info("Event Tap recovery successful")
             } else {
-                Logger.warn("Proactive recovery failed, scheduling full restart")
+                Logger.warn("Event Tap recovery failed, scheduling full restart")
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                     self.restartEventMonitoringInternal()
                 }
@@ -126,13 +136,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // 每10次检查输出一次正常状态
             let currentTime = Int(Date().timeIntervalSince1970)
             if currentTime % 300 == 0 { // 大约每5分钟输出一次
-                Logger.debug("Proactive check: Event tap healthy")
+                Logger.debug("Event Tap health check: OK")
             }
         }
     }
     
     @objc private func applicationDidBecomeActive() {
-        print("[LOG] Application became active - checking event monitoring")
+        Logger.info("Application became active - checking event monitoring")
         // 应用变为活跃时检查事件监听状态
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             self.verifyEventMonitoring()
@@ -140,11 +150,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @objc private func applicationDidResignActive() {
-        print("[LOG] Application resigned active")
+        Logger.info("Application resigned active")
     }
     
     @objc private func systemDidWakeUp() {
-        print("[LOG] System woke up - restarting event monitoring")
+        Logger.info("System woke up - restarting event monitoring")
         // 系统唤醒后重新启动事件监听
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             self.restartEventMonitoringInternal()
@@ -153,32 +163,37 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     private func verifyEventMonitoring() {
         let status = getEventMonitoringStatus()
-        print("[LOG] Event monitoring status - Active: \(status.isActive), Valid: \(status.isValid), HasRunLoopSource: \(status.hasRunLoopSource)")
-        
+         
         if !status.isValid || !status.hasRunLoopSource || !status.isActive {
-            print("[LOG] Event monitoring verification failed, restarting...")
+            Logger.warn("Event monitoring verification failed, restarting...")
             restartEventMonitoringInternal()
         } else {
-            print("[LOG] Event monitoring verification passed")
+            Logger.info("Event monitoring verification passed")
         }
     }
     
     public func restartEventMonitoring() {
-        print("[LOG] Public restart method called")
+        Logger.info("Public restart method called")
         restartEventMonitoringInternal()
     }
     
     // 尝试快速重新启用 Event Tap（不完全重建）
     public func quickEnableEventTap() -> Bool {
         guard let eventTap = eventTap else {
-            Logger.debug("Quick enable failed: no event tap")
+            Logger.warn("Quick enable failed: no event tap")
             return false
         }
         
         // 检查 Mach Port 是否有效
         let portValid = CFMachPortIsValid(eventTap)
         if !portValid {
-            Logger.debug("Quick enable failed: event tap port invalid")
+            Logger.warn("Quick enable failed: event tap port invalid")
+            return false
+        }
+        
+        // 检查权限
+        if !AXIsProcessTrusted() {
+            Logger.warn("Quick enable failed: accessibility permissions lost")
             return false
         }
         
@@ -196,7 +211,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let isEnabled = CGEvent.tapIsEnabled(tap: eventTap)
         let finalValid = CFMachPortIsValid(eventTap)
         
-        Logger.debug("Quick recovery result - Enabled: \(isEnabled), Valid: \(finalValid)")
+        Logger.info("Quick event tap recovery result - Enabled: \(isEnabled), Valid: \(finalValid)")
         
         if isEnabled && finalValid {
             isEventMonitoringActive = true
@@ -209,7 +224,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func restartEventMonitoringInternal() {
-        print("[LOG] Restarting event monitoring...")
+        Logger.info("Restarting event monitoring...")
         
         // 清理现有的监听
         cleanupEventMonitoring()
@@ -220,9 +235,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
-    private func cleanupEventMonitoring() {
-        print("[LOG] Cleaning up event monitoring...")
-        
+    private func cleanupEventMonitoring() { 
         // 标记为非活跃状态
         isEventMonitoringActive = false
         
@@ -230,7 +243,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let runLoopSource = runLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
             self.runLoopSource = nil
-            print("[LOG] RunLoop source removed")
+            Logger.info("RunLoop source removed")
         }
         
         // 清理 Event Tap
@@ -238,21 +251,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             CGEvent.tapEnable(tap: eventTap, enable: false)
             CFMachPortInvalidate(eventTap)
             self.eventTap = nil
-            print("[LOG] Event tap invalidated")
+            Logger.info("Event tap invalidated")
         }
         
-        print("[LOG] Event monitoring cleanup complete")
+        Logger.info("Event monitoring cleanup complete")
     }
     
-    private func setupEventMonitoring() {
-        print("[LOG] Setting up event monitoring...")
+    private func setupEventMonitoring() { 
         
         // Check accessibility permissions first
         if !AXIsProcessTrusted() {
-            print("[LOG] Accessibility permissions not granted")
+            Logger.warn("Accessibility permissions not granted")
             let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
             let result = AXIsProcessTrustedWithOptions(options as CFDictionary)
-            print("[LOG] Permission request result: \(result)")
+            Logger.info("Permission request result: \(result)")
             return
         }
         
@@ -269,20 +281,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             userInfo: nil
         )
         
-        if let eventTap = eventTap {
-            print("[LOG] Event tap created successfully")
+        if let eventTap = eventTap { 
             
             // 创建 RunLoop 源
             let runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0)
             self.runLoopSource = runLoopSource
             
             // 添加到 RunLoop
-            CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
-            print("[LOG] RunLoop source added")
+            CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes) 
             
             // 启用事件监听
-            CGEvent.tapEnable(tap: eventTap, enable: true)
-            print("[LOG] Event tap enabled")
+            CGEvent.tapEnable(tap: eventTap, enable: true) 
             
             // 标记为活跃状态
             isEventMonitoringActive = true
@@ -291,13 +300,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             retryTimer?.invalidate()
             retryTimer = nil
             
-            print("[LOG] Event monitoring setup complete")
+            Logger.info("Event monitoring setup complete")
         } else {
-            print("[LOG] Failed to create event tap - this usually indicates:")
-            print("[LOG] 1. Accessibility permissions not granted")
-            print("[LOG] 2. App Sandbox restrictions")
-            print("[LOG] 3. System security settings blocking access")
-            print("[LOG] 4. Another app is already using event tapping")
+            Logger.error("Failed to create event tap - this usually indicates:")
+            Logger.error("1. Accessibility permissions not granted")
+            Logger.error("2. App Sandbox restrictions")
+            Logger.error("3. System security settings blocking access")
+            Logger.error("4. Another app is already using event tapping")
             isEventMonitoringActive = false
         }
     }
@@ -347,23 +356,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
             // 5. 长时间没有键盘事件检查 - 更宽松的条件
-            else if timeSinceLastEvent > 600 && NSApplication.shared.isActive { // 10分钟而不是5分钟
+            else if timeSinceLastEvent > 1800 && NSApplication.shared.isActive { // 30分钟而不是10分钟
                 // 只有在以下条件都满足时才重启：
                 // - 应用处于活跃状态
-                // - 超过10分钟没有键盘事件
+                // - 超过30分钟没有键盘事件
                 // - 用户可能在使用电脑（检查鼠标活动等）
-                let shouldCheck = checkIfUserIsActive()
-                if shouldCheck {
-                    Logger.warn("No keyboard events for \(Int(timeSinceLastEvent))s while app is active and user seems active")
+                // - 时间差不是异常值（小于1天）
+                if timeSinceLastEvent < 86400 { // 小于24小时才认为是正常的时间差
+                    let shouldCheck = checkIfUserIsActive()
+                    if shouldCheck {
+                        Logger.warn("No keyboard events for \(Int(timeSinceLastEvent))s while app is active and user seems active")
+                        needsRestart = true
+                        reason = "Long period without keyboard events (\(Int(timeSinceLastEvent))s)"
+                    }
+                } else {
+                    // 时间差异常，可能是时间计算错误，重置事件时间
+                    Logger.warn("Detected abnormal time difference (\(Int(timeSinceLastEvent))s), resetting event monitoring")
                     needsRestart = true
-                    reason = "Long period without keyboard events (\(Int(timeSinceLastEvent))s)"
+                    reason = "Abnormal time difference detected, likely initialization issue"
                 }
             }
             
             if needsRestart {
                 Logger.error("Event monitoring health check failed: \(reason)")
-                Logger.debug("Status details - Active: \(status.isActive), Valid: \(status.isValid), HasRunLoopSource: \(status.hasRunLoopSource)")
-                Logger.debug("Time since last event: \(timeSinceLastEvent)s")
+                Logger.debug("Debug info - Status: \(status), TimeSinceLastEvent: \(timeSinceLastEvent), LastEventTime: \(getLastEventTime())")
                 
                 // 增加重启之间的间隔，避免频繁重启
                 if let lastRestart = lastRestartTime, Date().timeIntervalSince(lastRestart) < 30 {
@@ -405,7 +421,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func applicationWillTerminate(_ aNotification: Notification) {
-        print("[LOG] Application will terminate - cleaning up")
+        Logger.info("Application will terminate - cleaning up")
         cleanupEventMonitoring()
         
         // 清理通知观察者

@@ -347,7 +347,7 @@ class LanguageConfigViewModel: ObservableObject {
         configs = LanguageConfigManager.shared.loadLanguageConfigs()
         originalConfigs = configs
         hasUnsavedChanges = false
-        print("[LOG] Loaded \(configs.count) language configurations for menu bar")
+        Logger.info("Loaded \(configs.count) language configurations for menu bar")
     }
     
     func updateTriggers(for languageCode: String, triggers: [String]) {
@@ -367,7 +367,7 @@ class LanguageConfigViewModel: ObservableObject {
         if success {
             originalConfigs = configs
             hasUnsavedChanges = false
-            print("[LOG] Language configurations saved successfully")
+            Logger.info("Language configurations saved successfully")
             
             // Show save success notification
             DispatchQueue.main.async {
@@ -379,7 +379,7 @@ class LanguageConfigViewModel: ObservableObject {
                 alert.runModal()
             }
         } else {
-            print("[LOG] Failed to save language configurations")
+            Logger.info("Failed to save language configurations")
             
             // Show save failure notification
             DispatchQueue.main.async {
@@ -406,7 +406,7 @@ class LanguageConfigViewModel: ObservableObject {
             configs = LanguageConfigManager.shared.resetToDefaults()
             originalConfigs = configs
             hasUnsavedChanges = false
-            print("[LOG] Language configurations reset to defaults")
+            Logger.info("Language configurations reset to defaults")
         }
     }
     

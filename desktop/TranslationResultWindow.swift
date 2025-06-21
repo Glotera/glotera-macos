@@ -69,20 +69,19 @@ class TranslationResultWindow: NSWindow {
     }
     
     private func startStreamTranslation(original: String, to: String) {
-        NSLog("[LOG] Starting stream translation for: '\(original)' to: \(to)")
-        
+         
         // 添加超时机制，防止状态卡住
         var isCompleted = false
         var lastContent = ""
         let timeoutTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: false) { [weak self] _ in
             if !isCompleted {
-                NSLog("[LOG] Stream translation timeout detected")
+                Logger.info("Stream translation timeout detected")
                 // 如果有内容，使用最后的内容；否则显示超时信息
                 if !lastContent.isEmpty {
-                    NSLog("[LOG] Using last received content as final result: '\(lastContent)'")
+                    Logger.info("Using last received content as final result: '\(lastContent)'")
                     self?.completeStreamTranslation(lastContent)
                 } else {
-                    NSLog("[LOG] No content received, showing timeout message")
+                    Logger.info("No content received, showing timeout message")
                     self?.completeStreamTranslation("Translation timeout")
                 }
             }
@@ -93,8 +92,7 @@ class TranslationResultWindow: NSWindow {
             to: to,
             onChunk: { [weak self] chunk, fullContent in
                 // 实时更新翻译内容
-                lastContent = fullContent
-                NSLog("[LOG] Stream chunk received: '\(chunk)', full: '\(fullContent)'")
+                lastContent = fullContent 
                 DispatchQueue.main.async {
                     self?.updateStreamContent(fullContent)
                 }
@@ -105,7 +103,7 @@ class TranslationResultWindow: NSWindow {
                 timeoutTimer.invalidate()
                 
                 let result = finalResult ?? lastContent
-                NSLog("[LOG] Stream translation completed: '\(result)'")
+                Logger.info("Stream translation completed: '\(result)'")
                 DispatchQueue.main.async {
                     self?.completeStreamTranslation(result)
                 }
@@ -115,7 +113,7 @@ class TranslationResultWindow: NSWindow {
                 isCompleted = true
                 timeoutTimer.invalidate()
                 
-                NSLog("[LOG] Stream translation error: '\(errorMessage)'")
+                Logger.info("Stream translation error: '\(errorMessage)'")
                 DispatchQueue.main.async {
                     self?.handleStreamError(errorMessage)
                 }
@@ -125,7 +123,7 @@ class TranslationResultWindow: NSWindow {
     
     private func updateStreamContent(_ content: String) {
         guard let resultView = self.resultView else {
-            NSLog("[LOG] Warning: resultView is nil in updateStreamContent")
+            Logger.info("Warning: resultView is nil in updateStreamContent")
             return
         }
         
@@ -152,15 +150,13 @@ class TranslationResultWindow: NSWindow {
     
     private func completeStreamTranslation(_ finalResult: String) {
         guard let resultView = self.resultView else {
-            NSLog("[LOG] Warning: resultView is nil in completeStreamTranslation")
+            Logger.info("Warning: resultView is nil in completeStreamTranslation")
             return
         }
         
         // 确保在主线程更新UI
-        if Thread.isMainThread {
-            NSLog("[LOG] Completing stream translation with result: '\(finalResult)'")
-            resultView.viewModel.updateTranslation(finalResult, isStreaming: false)
-            NSLog("[LOG] Stream translation completed in window, isStreaming set to false")
+        if Thread.isMainThread { 
+            resultView.viewModel.updateTranslation(finalResult, isStreaming: false) 
         } else {
             DispatchQueue.main.async { [weak self] in
                 self?.completeStreamTranslation(finalResult)
@@ -172,7 +168,7 @@ class TranslationResultWindow: NSWindow {
         DispatchQueue.main.async { [weak self] in
             let errorText = "Translation failed: \(errorMessage)"
             self?.resultView?.viewModel.updateTranslation(errorText, isStreaming: false)
-            NSLog("[LOG] Stream translation error in window: \(errorMessage)")
+            Logger.info("Stream translation error in window: \(errorMessage)")
         }
     }
     
@@ -206,7 +202,7 @@ class TranslationResultWindow: NSWindow {
         self.orderFront(nil)
         self.makeKey()
         
-        print("[LOG] Translation result window shown at screen center")
+        Logger.info("Translation result window shown at screen center")
     }
     
     func showAt(point: NSPoint) {
@@ -268,9 +264,7 @@ class TranslationResultWindow: NSWindow {
         
         self.setFrameTopLeftPoint(resultPoint)
         self.orderFront(nil)
-        self.makeKey()
-        
-        print("[LOG] Translation result window shown at \(resultPoint) (screen: \(screenFrame))")
+        self.makeKey() 
     }
     
     func hide() {
@@ -282,7 +276,7 @@ class TranslationResultWindow: NSWindow {
             clickMonitor = nil
         }
         
-        print("[LOG] Translation result window hidden")
+        Logger.info("Translation result window hidden")
     }
     
     deinit {
@@ -296,7 +290,7 @@ class TranslationResultWindow: NSWindow {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
-        print("[LOG] Copied to clipboard: \(text)")
+        Logger.info("Copied to clipboard: \(text)")
         
         // 简短显示复制成功提示
         // 这里可以添加一个临时的"已复制"提示
@@ -380,12 +374,11 @@ class TranslationResultViewModel: ObservableObject {
     init(translated: String, isStreaming: Bool) {
         self.translated = translated
         self.isStreaming = isStreaming
-        NSLog("[LOG] TranslationResultViewModel initialized with isStreaming: \(isStreaming)")
+        Logger.info("TranslationResultViewModel initialized with isStreaming: \(isStreaming)")
     }
     
     func updateTranslation(_ newTranslation: String, isStreaming: Bool) {
-        NSLog("[LOG] Updating translation - isStreaming: \(self.isStreaming) -> \(isStreaming), text: '\(newTranslation.prefix(50))...'")
-        
+         
         // 确保在主线程更新
         if Thread.isMainThread {
             self.translated = newTranslation

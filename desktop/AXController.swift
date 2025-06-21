@@ -83,7 +83,7 @@ class AXController {
         var pid: pid_t = 0
         let result = AXUIElementGetPid(element, &pid)
         if result != .success {
-            print("[LOG] Failed to get PID for element")
+            Logger.error("Failed to get PID for element")
         }
         return pid
     }
@@ -97,27 +97,27 @@ class AXController {
 
     // 检测当前焦点输入框内容，提取触发标记和原文
     func detectTriggerAndExtract() -> (text: String, lang: String)? {
-        print("[LOG] Starting trigger detection")
+        Logger.info("Starting trigger detection")
         
         guard let focused = getFocusedElement() else {
-            print("[LOG] No focused element found")
+            Logger.warn("No focused element found")
             return nil
         }
         
         // 检查是否在浏览器环境中
         let isWeb = isWebEnvironment()
         if let browserInfo = getCurrentBrowserInfo() {
-            print("[LOG] Detected browser environment: \(browserInfo.appName) (\(browserInfo.bundleId))")
+            Logger.info("Detected browser environment: \(browserInfo.appName) (\(browserInfo.bundleId))")
         }
         
         // 获取输入框内容，使用Web环境特殊处理
         guard let value = getValueWithWebSupport(of: focused, isWeb: isWeb) else {
-            print("[LOG] No value found in focused element")
+            Logger.warn("No value found in focused element")
             
             // 尝试备用方法获取内容
-            print("[LOG] Trying alternative content retrieval methods...")
+            Logger.info("Trying alternative content retrieval methods...")
             if let alternativeValue = getAlternativeValue(of: focused) {
-                print("[LOG] Got content via alternative method: '\(alternativeValue)'")
+                Logger.info("Got content via alternative method: '\(alternativeValue)'")    
                 return processContentForTrigger(alternativeValue)
             }
             
@@ -129,26 +129,20 @@ class AXController {
     
     // 处理内容以检测触发器
     private func processContentForTrigger(_ value: String) -> (text: String, lang: String)? {
-        //print("[LOG] Current input content: '\(value)'")
-        //print("[LOG] Content length: \(value.count) characters")
-        
+         
         // 显示换行符位置以便调试
         let lineBreaks = value.enumerated().compactMap { $0.element == "\n" ? $0.offset : nil }
         if !lineBreaks.isEmpty {
-            print("[LOG] Newlines found at positions: \(lineBreaks)")
+            Logger.info("Newlines found at positions: \(lineBreaks)")
         }
         
         // 预处理内容：清理可能的干扰文本
-        let cleanedValue = preprocessContent(value)
-        if cleanedValue != value {
-            // print("[LOG] Content after preprocessing: '\(cleanedValue)'")
-            // print("[LOG] Cleaned content length: \(cleanedValue.count) characters")
-        }
+        let cleanedValue = preprocessContent(value) 
         
         // 使用配置管理器获取所有触发器
         let allTriggers = getAllConfiguredTriggers()
         if allTriggers.isEmpty {
-            print("[LOG] No configured triggers found, falling back to default patterns")
+            Logger.warn("No configured triggers found, falling back to default patterns")
             return processContentWithDefaultTriggers(cleanedValue)
         }
         
@@ -158,22 +152,11 @@ class AXController {
         // 检查每个触发器
         for trigger in allTriggers {
             if let result = checkForTrigger(trigger, in: cleanedValue) {
-                print("[LOG] Trigger found: '\(trigger)' -> text='\(result.text)', lang='\(result.lang)'")
+                Logger.info("Trigger found: '\(trigger)' -> text='\(result.text)', lang='\(result.lang)'")
                 return result
             }
-        }
-        
-        print("[LOG] No trigger pattern matched")
-        
-        // 添加详细的调试信息
-        print("[LOG] Debug - checking for configured triggers in content:")
-        for trigger in allTriggers {
-            if cleanedValue.lowercased().contains(trigger.lowercased()) {
-                print("[LOG] Debug - Found '\(trigger)' in content but pattern didn't match")
-                print("[LOG] Debug - Content around trigger: '\(getContextAroundTrigger(cleanedValue, trigger: trigger))'")
-            }
-        }
-        
+        } 
+
         return nil
     }
     
@@ -186,7 +169,7 @@ class AXController {
             allTriggers.append(contentsOf: config.triggers)
         }
         
-        print("[LOG] Loaded \(allTriggers.count) configured triggers from \(configs.count) languages")
+        Logger.info("Loaded \(allTriggers.count) configured triggers from \(configs.count) languages")
         return allTriggers
     }
     
@@ -269,7 +252,7 @@ class AXController {
             patterns.append("(.*?)" + escapedTrigger + "\\s*$")
         }
         
-        print("[LOG] Generated \(patterns.count) JavaScript patterns for \(triggers.count) triggers")
+        Logger.info("Generated \(patterns.count) JavaScript patterns for \(triggers.count) triggers")
         
         return patterns
     }
@@ -291,7 +274,7 @@ class AXController {
             ];
         """
         
-        print("[LOG] Generated JavaScript patterns for \(allLanguageCodes.count) languages")
+        Logger.info("Generated JavaScript patterns for \(allLanguageCodes.count) languages")
         return jsCode
     }
     
@@ -308,12 +291,11 @@ class AXController {
             return nil
         })
         
-        if !languageCodes.isEmpty {
-            print("[LOG] Extracted \(languageCodes.count) language codes from configured triggers")
+        if !languageCodes.isEmpty { 
             return Array(languageCodes).sorted()
         }
         
-        print("[LOG] No configured triggers found, using fallback language list")
+        Logger.warn("No configured triggers found, using fallback language list")
         // 如果无法从配置获取，使用备用的主要语言列表
         return [
             "af", "am", "ar", "az", "be", "bg", "bn", "bo", "bs", "ca", "ceb", "cs", "cy", "da", "de", "el", "en",
@@ -341,9 +323,8 @@ class AXController {
         // 对 JavaScript 代码进行额外的 AppleScript 转义
         let safeJsPatternCode = escapeForAppleScript(jsPatternCode)
         let safeEscapedText = escapeForAppleScript(escapedText)
-        
-        print("[LOG] Safe JS pattern code length: \(safeJsPatternCode.count)")
-        print("[LOG] Safe escaped text: '\(safeEscapedText)'")
+         
+        Logger.info("Safe escaped text: '\(safeEscapedText)'")
         
         return """
             tell application "Google Chrome"
@@ -578,7 +559,7 @@ class AXController {
     
     // 使用默认触发器的后备方法
     private func processContentWithDefaultTriggers(_ content: String) -> (text: String, lang: String)? {
-        print("[LOG] Using fallback default trigger processing")
+        Logger.info("Using fallback default trigger processing")
         
         // 默认触发器模式
         let patterns = [
@@ -606,7 +587,7 @@ class AXController {
                         if lang == "jp" { lang = "ja" }
                         
                         if !text.isEmpty {
-                            print("[LOG] Default trigger found using pattern \(index + 1): text='\(text)', lang='\(lang)'")
+                            Logger.info("Default trigger found using pattern \(index + 1): text='\(text)', lang='\(lang)'")
                             return (text: text, lang: lang)
                         }
                     }
@@ -630,11 +611,11 @@ class AXController {
     
     // 备用内容获取方法
     private func getAlternativeValue(of element: AXUIElement) -> String? {
-        print("[LOG] Trying alternative value retrieval methods")
+        Logger.info("Trying alternative value retrieval methods")
         
         // 方法1: 尝试获取选中文本
         if let selectedText = getSelectedTextAttribute(of: element), !selectedText.isEmpty {
-            print("[LOG] Got content via selected text: \(selectedText)")
+            Logger.info("Got content via selected text: \(selectedText)")
             return selectedText
         }
         
@@ -650,23 +631,23 @@ class AXController {
             var value: CFTypeRef?
             let result = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
             if result == .success, let stringValue = value as? String, !stringValue.isEmpty {
-                print("[LOG] Got content via \(attribute): \(stringValue)")
+                Logger.info("Got content via \(attribute): \(stringValue)")
                 return stringValue
             }
         }
         
         // 方法3: 如果在Web环境，强制重试AppleScript
         if isWebEnvironment() {
-            print("[LOG] Forcing AppleScript retry for web content")
+            Logger.info("Forcing AppleScript retry for web content")
             // 等待一小段时间后重试
             Thread.sleep(forTimeInterval: 0.1)
             if let webContent = getWebContentViaAppleScript() {
-                print("[LOG] Got content via forced AppleScript retry: \(webContent)")
+                Logger.info("Got content via forced AppleScript retry: \(webContent)")
                 return webContent
             }
         }
         
-        print("[LOG] All alternative methods failed")
+        Logger.warn("All alternative methods failed")
         return nil
     }
     
@@ -679,7 +660,7 @@ class AXController {
         
         // 对于Discord等聊天应用，使用更保守的清理策略
         if isDiscordOrChat {
-            print("[LOG] Detected Discord/Chat app - using conservative preprocessing")
+            Logger.info("Detected Discord/Chat app - using conservative preprocessing")
             // 只进行基本的空格合并，不移除任何文本内容
             cleaned = cleaned.replacingOccurrences(of: #"[ \t]+"#, with: " ", options: .regularExpression)
             cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -759,7 +740,7 @@ class AXController {
         
         let result = chatAppBundleIds.contains(bundleId)
         if result {
-            print("[LOG] Detected chat app: \(frontmostApp.localizedName ?? "Unknown") (\(bundleId))")
+            Logger.info("Detected chat app: \(frontmostApp.localizedName ?? "Unknown") (\(bundleId))")
         }
         return result
     }
@@ -772,7 +753,7 @@ class AXController {
         // 首先尝试标准方法
         if let value = getValue(of: element) {
             standardContent = value
-            print("[LOG] Got content via standard method: \(value.count) chars")
+            Logger.info("Got content via standard method: \(value.count) chars")
         }
         
         // 如果在Web环境中，同时尝试Web方法
@@ -780,12 +761,12 @@ class AXController {
             // 优先尝试AppleScript方法
             if let content = getWebContentViaAppleScript() {
                 webContent = content
-                print("[LOG] Got content via AppleScript: \(content.count) chars")
+                Logger.info("Got content via AppleScript: \(content.count) chars")
             } else {
                 // 如果AppleScript失败，尝试其他Web方法
                 if let content = getWebInputValue(of: element) {
                     webContent = content
-                    print("[LOG] Got content via Web input value: \(content.count) chars")
+                    Logger.info("Got content via Web input value: \(content.count) chars")
                 }
             }
         }
@@ -794,31 +775,29 @@ class AXController {
         if let web = webContent, let standard = standardContent {
             // 如果两种方法都有结果，选择更长的或者非空的
             if web.count > standard.count {
-                print("[LOG] Using web content (longer): \(web.count) chars vs \(standard.count) chars")
+                Logger.info("Using web content (longer): \(web.count) chars vs \(standard.count) chars")
                 return web
             } else {
-                print("[LOG] Using standard content: \(standard.count) chars vs \(web.count) chars")
+                Logger.info("Using standard content: \(standard.count) chars vs \(web.count) chars")
                 return standard
             }
         } else if let web = webContent {
-            print("[LOG] Using web content (only available): \(web.count) chars")
+            Logger.info("Using web content (only available): \(web.count) chars")
             return web
         } else if let standard = standardContent {
-            print("[LOG] Using standard content (only available): \(standard.count) chars")
+            Logger.info("Using standard content (only available): \(standard.count) chars")
             return standard
         }
         
-        print("[LOG] No content available from any method")
+        Logger.warn("No content available from any method")
         return nil
     }
     
     // Web输入框内容获取的特殊方法
-    private func getWebInputValue(of element: AXUIElement) -> String? {
-        print("[LOG] Attempting Web input value extraction via AX attributes")
-        
+    private func getWebInputValue(of element: AXUIElement) -> String? { 
         // 方法1: 尝试获取选中文本（在Web输入框中很常见）
         if let selectedText = getSelectedTextAttribute(of: element), !selectedText.isEmpty {
-            print("[LOG] Got selected text: \(selectedText)")
+            Logger.info("Got selected text: \(selectedText)")
             return selectedText
         }
         
@@ -834,18 +813,17 @@ class AXController {
             var value: CFTypeRef?
             let result = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
             if result == .success, let stringValue = value as? String, !stringValue.isEmpty {
-                print("[LOG] Got value from \(attribute): \(stringValue)")
+                Logger.info("Got value from \(attribute): \(stringValue)")
                 return stringValue
             }
         }
         
-        print("[LOG] No content found via AX attributes")
+        Logger.warn("No content found via AX attributes")
         return nil
     }
     
     // 使用AppleScript获取Web内容
-    private func getWebContentViaAppleScript() -> String? {
-        print("[LOG] Attempting AppleScript Web content extraction")
+    private func getWebContentViaAppleScript() -> String? { 
         
         guard let browserInfo = getCurrentBrowserInfo() else { return nil }
         
@@ -909,13 +887,13 @@ class AXController {
             let result = appleScript.executeAndReturnError(&error)
             
             if let error = error {
-                print("[LOG] AppleScript error: \(error)")
+                Logger.error("AppleScript error: \(error)")
                 return nil
             }
             
             let content = result.stringValue ?? ""
             if !content.isEmpty {
-                print("[LOG] AppleScript got content: \(content)")
+                Logger.info("AppleScript got content: \(content)")
                 return content
             }
         }
@@ -928,17 +906,16 @@ class AXController {
         let sysWide = AXUIElementCreateSystemWide()
         var focusedApp: CFTypeRef?
         AXUIElementCopyAttributeValue(sysWide, kAXFocusedApplicationAttribute as CFString, &focusedApp)
-        guard let app = focusedApp else {
-            // print("[LOG] No focused app found")
+        guard let app = focusedApp else { 
             return nil
         }
+
         var focusedElem: CFTypeRef?
         AXUIElementCopyAttributeValue(app as! AXUIElement, kAXFocusedUIElementAttribute as CFString, &focusedElem)
-        if let elem = focusedElem {
-            // print("[LOG] Focused element found")
+        if let elem = focusedElem { 
             return (elem as! AXUIElement)
-        }
-        // print("[LOG] No focused element found")
+        } 
+
         return nil
     }
 
@@ -952,7 +929,7 @@ class AXController {
     // 禁用输入
     func disableInput() {
         guard let focused = getFocusedElement() else {
-            print("[LOG] No focused element to disable")
+            Logger.warn("No focused element to disable")
             return
         }
         
@@ -963,13 +940,13 @@ class AXController {
         // 尝试设置为禁用状态（不是所有元素都支持）
         AXUIElementSetAttributeValue(focused, kAXEnabledAttribute as CFString, false as CFTypeRef)
         
-        print("[LOG] Input disabled")
+        Logger.info("Input disabled")
     }
     
     // 启用输入
     func enableInput() {
         guard isInputDisabled, let element = disabledElement else {
-            print("[LOG] No disabled input to enable")
+            Logger.warn("No disabled input to enable")
             return
         }
         
@@ -980,14 +957,14 @@ class AXController {
         disabledElement = nil
         originalValue = nil
         
-        print("[LOG] Input enabled")
+        Logger.info("Input enabled")
     }
 
     // 替换输入框内容
     func replaceInput(with text: String, completion: (() -> Void)? = nil) {
-        print("[LOG] Replacing input with translation result")
+        Logger.info("Replacing input with translation result")
         guard let focused = getFocusedElement() else {
-            print("[LOG] No focused element to replace")
+            Logger.warn("No focused element to replace")
             completion?()
             return
         }
@@ -999,7 +976,7 @@ class AXController {
         // 检查是否在浏览器环境中
         let isWeb = isWebEnvironment()
         if let browserInfo = getCurrentBrowserInfo() {
-            print("[LOG] Replacing content in browser: \(browserInfo.appName)")
+            Logger.info("Replacing content in browser: \(browserInfo.appName)")
         }
         
         if isWeb {
@@ -1012,7 +989,7 @@ class AXController {
             let isWeChat = isWeChatApp()
             if isWeChat {
                 // 使用微信专用的替换方法
-                print("[LOG] Using WeChat-specific replacement method")
+                Logger.info("Using WeChat-specific replacement method")
                 replaceTextInWeChat(with: text) {
                 completion?()
             }
@@ -1028,38 +1005,32 @@ class AXController {
         // 使用更长的延迟，确保自动翻译完全完成且文本状态稳定
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
             self.resumeSelectionMonitoring()
-            print("[LOG] Resumed selection monitoring after auto-translation")
+            Logger.info("Resumed selection monitoring after auto-translation")
         }
     }
     
     // Web输入框内容替换的专用方法
-    private func replaceWebInputContent(element: AXUIElement, text: String, completion: @escaping () -> Void) {
-        print("[LOG] Using Web input replacement method")
-        
-        // 方法1: 尝试AppleScript + JavaScript进行精确替换
-        // print("[LOG] Attempting AppleScript + JavaScript replacement first")
+    private func replaceWebInputContent(element: AXUIElement, text: String, completion: @escaping () -> Void) { 
+        // 方法1: 尝试AppleScript + JavaScript进行精确替换 
        if replaceViaAppleScriptJS(text: text) {
-           print("[LOG] Successfully replaced via AppleScript + JavaScript")
+           Logger.info("Successfully replaced via AppleScript + JavaScript")
            completion()
            return
        }
         
-        print("[LOG] AppleScript + JavaScript failed, falling back to clipboard method")
+        Logger.warn("AppleScript + JavaScript failed, falling back to clipboard method")
         // 方法2: 回退到剪贴板方法，但增加额外的验证和重试
         replaceWebViaClipboardWithRetry(element: element, text: text, completion: completion)
     }
     
     // 使用AppleScript + JavaScript进行Web内容替换
-    private func replaceViaAppleScriptJS(text: String) -> Bool {
-        print("[LOG] Attempting AppleScript + JavaScript replacement")
+    private func replaceViaAppleScriptJS(text: String) -> Bool { 
         
         guard let browserInfo = getCurrentBrowserInfo() else { 
-            print("[LOG] No browser info available")
+            Logger.warn("No browser info available")
             return false 
         }
-        
-        print("[LOG] Browser detected: \(browserInfo.appName) (\(browserInfo.bundleId))")
-        
+          
         // 转义JavaScript字符串中的特殊字符
         let escapedText = text
             .replacingOccurrences(of: "\\", with: "\\\\")
@@ -1067,16 +1038,11 @@ class AXController {
             .replacingOccurrences(of: "\"", with: "\\\"")
             .replacingOccurrences(of: "\n", with: "\\n")
             .replacingOccurrences(of: "\r", with: "\\r")
-        
-        print("[LOG] Escaped text for JavaScript: '\(escapedText)'")
-        
+         
         // 获取所有配置的触发器并生成JavaScript模式
         let allTriggers = getAllConfiguredTriggers()
         let jsPatternCode = generateJavaScriptPatternCode(for: allTriggers)
-        // print("[LOG] Generated JavaScript pattern code for \(allTriggers.count) triggers")
-        // print("[LOG] All triggers: \(allTriggers)")
-        // print("[LOG] JS Pattern Code: \(jsPatternCode)")
-        
+         
         var script = ""
         
         switch browserInfo.bundleId {
@@ -1085,44 +1051,41 @@ class AXController {
         case "com.apple.Safari":
             script = generateSafariScript(escapedText: escapedText, jsPatternCode: jsPatternCode)
         default:
-            print("[LOG] Unsupported browser: \(browserInfo.bundleId)")
+            Logger.warn("Unsupported browser: \(browserInfo.bundleId)")
             return false
         }
         
-        print("[LOG] Executing AppleScript...")
+        Logger.info("Executing AppleScript...")
         if let appleScript = NSAppleScript(source: script) {
             var error: NSDictionary?
             let result = appleScript.executeAndReturnError(&error)
             
             if let error = error {
-                print("[LOG] AppleScript replacement error: \(error)")
+                Logger.error("AppleScript replacement error: \(error)")
                 return false
             }
             
-            let resultString = result.stringValue ?? ""
-            print("[LOG] AppleScript replacement result: '\(resultString)'")
-            
+            let resultString = result.stringValue ?? "" 
             if resultString == "success" {
-                print("[LOG] AppleScript replacement successful")
+                Logger.info("AppleScript replacement successful")
                 return true
             } else {
-                print("[LOG] AppleScript replacement failed with result: \(resultString)")
+                Logger.warn("AppleScript replacement failed with result: \(resultString)")
                 return false
             }
         } else {
-            print("[LOG] Failed to create AppleScript object")
+            Logger.warn("Failed to create AppleScript object")
             return false
         }
     }
     
         // Web环境下的剪贴板替换，简化版本（不恢复原剪贴板）
     private func replaceWebViaClipboardWithRetry(element: AXUIElement, text: String, completion: @escaping () -> Void) {
-        print("[LOG] Using simplified Web clipboard replacement")
-        print("[LOG] Translation text to paste: '\(text)'")
+        Logger.info("Using simplified Web clipboard replacement") 
         
         // 首先尝试获取当前内容，确定需要替换的部分
         guard let currentValue = getValue(of: element) else {
-            print("[LOG] Cannot get current value for precise replacement")
+            Logger.warn("Cannot get current value for precise replacement")
             completion()
             return
         }
@@ -1130,14 +1093,12 @@ class AXController {
         // 直接设置翻译文本到剪贴板
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        let setSuccess = pasteboard.setString(text, forType: .string)
-        print("[LOG] Set clipboard success: \(setSuccess), content: '\(text)'")
+        let setSuccess = pasteboard.setString(text, forType: .string) 
         
         // 验证剪贴板设置成功
-        let verifyContent = pasteboard.string(forType: .string)
-        print("[LOG] Verified clipboard content: '\(verifyContent ?? "nil")'")
+        let verifyContent = pasteboard.string(forType: .string) 
         if verifyContent != text {
-            print("[LOG] ERROR: Clipboard verification failed - expected: '\(text)', got: '\(verifyContent ?? "nil")'")
+            Logger.error("Clipboard verification failed - expected: '\(text)', got: '\(verifyContent ?? "nil")'")
             completion()
             return
         }
@@ -1146,21 +1107,20 @@ class AXController {
         attemptPreciseWebReplace(element: element, originalValue: currentValue, translatedText: text, attempt: 1) { [weak self] success in
             if !success {
                 // 如果第一次失败，等待后重试
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    print("[LOG] Retry attempt - re-setting clipboard content")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { 
                     pasteboard.clearContents()
                     let retrySetSuccess = pasteboard.setString(text, forType: .string)
-                    print("[LOG] Retry clipboard set success: \(retrySetSuccess)")
+                    Logger.info("Retry clipboard set success: \(retrySetSuccess)")
                     
                     self?.attemptPreciseWebReplace(element: element, originalValue: currentValue, translatedText: text, attempt: 2) { _ in
-                        print("[LOG] Translation replacement completed (retry)")
+                        Logger.info("Translation replacement completed (retry)")
                         // 翻译操作完成后检查 Event Tap 状态
                         self?.checkAndRecoverEventTapAfterTranslation()
                         completion()
                     }
                 }
             } else {
-                print("[LOG] Translation replacement completed (success)")
+                Logger.info("Translation replacement completed (success)")
                 // 翻译操作完成后检查 Event Tap 状态
                 self?.checkAndRecoverEventTapAfterTranslation()
                 completion()
@@ -1170,27 +1130,26 @@ class AXController {
     
     // 精确的Web替换尝试（简化版本）
     private func attemptPreciseWebReplace(element: AXUIElement, originalValue: String, translatedText: String, attempt: Int, completion: @escaping (Bool) -> Void) {
-        print("[LOG] Precise Web replace attempt \(attempt)")
-        
+         
         // 策略：使用JavaScript选择触发器部分，然后粘贴
         if selectTriggerTextViaJS(originalValue: originalValue) {
-            print("[LOG] Successfully selected trigger text via JavaScript")
+            Logger.info("Successfully selected trigger text via JavaScript")
             
             // 等待选择完成，然后粘贴
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                print("[LOG] Simulating Cmd+V paste")
+                Logger.info("Simulating Cmd+V paste")
                 self.simulatePaste()
                 completion(true)
             }
         } else {
-            print("[LOG] JavaScript selection failed, falling back to traditional method")
+            Logger.warn("JavaScript selection failed, falling back to traditional method")
             
             // 回退到传统的全选+粘贴方法
-            print("[LOG] Simulating Cmd+A select all")
+            Logger.info("Simulating Cmd+A select all")
             simulateSelectAll()
             
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                print("[LOG] Simulating Cmd+V paste") 
+                Logger.info("Simulating Cmd+V paste") 
                 self.simulatePaste()
                 completion(true)
             }
@@ -1201,7 +1160,7 @@ class AXController {
     private func checkAndRecoverEventTapAfterTranslation() {
         // 延迟检查，给系统时间处理键盘模拟事件
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            Logger.debug("Checking Event Tap status after translation...")
+            Logger.info("Checking Event Tap status after translation...")
             
             // 获取 AppDelegate 实例
             guard let appDelegate = NSApplication.shared.delegate as? AppDelegate else {
@@ -1214,9 +1173,7 @@ class AXController {
                 let isValid = CFMachPortIsValid(eventTap)
                 let isEnabled = CGEvent.tapIsEnabled(tap: eventTap)
                 let isActive = appDelegate.isEventMonitoringActive
-                
-                Logger.debug("Event Tap status after translation - Valid: \(isValid), Enabled: \(isEnabled), Active: \(isActive)")
-                
+                 
                 // 分情况处理不同的状态问题
                 if !isValid {
                     Logger.warn("Event Tap invalid after translation - requesting full restart")
@@ -1245,7 +1202,7 @@ class AXController {
                         appDelegate.restartEventMonitoring()
                     }
                 } else {
-                    Logger.debug("Event Tap healthy after translation")
+                    Logger.info("Event Tap healthy after translation")
                 }
             } else {
                 Logger.warn("No Event Tap found after translation - system may need restart")
@@ -1270,14 +1227,13 @@ class AXController {
     // 使用JavaScript精确选择触发器文本
     private func selectTriggerTextViaJS(originalValue: String) -> Bool {
         guard let browserInfo = getCurrentBrowserInfo() else { 
-            print("[LOG] No browser info for JS selection")
+            Logger.warn("No browser info for JS selection")
             return false 
         }
         
         // 获取所有配置的触发器并生成JavaScript模式
         let allTriggers = getAllConfiguredTriggers()
-        let jsPatternCode = generateJavaScriptPatternCode(for: allTriggers)
-        // print("[LOG] Generated JS pattern code for selection: \(jsPatternCode)")
+        let jsPatternCode = generateJavaScriptPatternCode(for: allTriggers) 
         
         var script = ""
         
@@ -1383,26 +1339,26 @@ class AXController {
                 end tell
             """
         default:
-            print("[LOG] Unsupported browser for JS selection: \(browserInfo.bundleId)")
+            Logger.warn("Unsupported browser for JS selection: \(browserInfo.bundleId)")
             return false
         }
         
-        print("[LOG] Executing selection AppleScript...")
+        Logger.info("Executing selection AppleScript...")
         if let appleScript = NSAppleScript(source: script) {
             var error: NSDictionary?
             let result = appleScript.executeAndReturnError(&error)
             
             if let error = error {
-                print("[LOG] AppleScript selection error: \(error)")
+                Logger.error("AppleScript selection error: \(error)")
                 return false
             }
             
             let resultString = result.stringValue ?? ""
-            print("[LOG] AppleScript selection result: '\(resultString)'")
+            Logger.info("AppleScript selection result: '\(resultString)'")
             
             return resultString == "success"
         } else {
-            print("[LOG] Failed to create selection AppleScript object")
+            Logger.warn("Failed to create selection AppleScript object")
             return false
         }
     }
@@ -1435,12 +1391,12 @@ class AXController {
                 "AXTextField",          // 文本输入框
                 "AXTextArea",           // 文本区域
                 "AXComboBox",           // 组合框
-                "AXSecureTextField",    // 密码输入框
+                //"AXSecureTextField",    // 密码输入框
                 "AXSearchField",        // 搜索框
                 "AXStaticText"          // 静态文本（某些情况下可编辑）
             ]
             
-            NSLog("[LOG] Element role: \(roleString), isWeChat: \(isWeChat)")
+            Logger.info("Element role: \(roleString), isWeChat: \(isWeChat)")
             
             // 如果是明确的可编辑控件
             if editableRoles.prefix(5).contains(roleString) {
@@ -1451,7 +1407,7 @@ class AXController {
             if isWeChat {
                 // 微信中的文本通常都可以被替换，即使是StaticText
                 if roleString == "AXStaticText" || roleString == "AXTextArea" || roleString == "AXTextField" {
-                    NSLog("[LOG] WeChat element detected as editable")
+                    Logger.info("WeChat element detected as editable")
                     return true
                 }
             }
@@ -1488,15 +1444,14 @@ class AXController {
     }
     
     // 微信特殊文本替换方法
-    private func replaceTextInWeChat(with text: String, completion: @escaping () -> Void) {
-        print("[LOG] Using enhanced WeChat-specific text replacement")
+    private func replaceTextInWeChat(with text: String, completion: @escaping () -> Void) { 
         
         let pasteboard = NSPasteboard.general
         let originalClipboard = pasteboard.string(forType: .string)
 
         pasteboard.clearContents()
         guard pasteboard.setString(text, forType: .string) else {
-            print("[LOG] WeChat: Failed to set clipboard")
+            Logger.warn("WeChat: Failed to set clipboard")
             restoreClipboardContent(originalClipboard)
             completion()
             return
@@ -1505,7 +1460,7 @@ class AXController {
         // 核心流程：激活微信 -> 全选 -> 粘贴
         ensureWeChatAppFocus { focused in
             guard focused else {
-                print("[LOG] WeChat: Failed to focus app.")
+                Logger.warn("WeChat: Failed to focus app.")
                 self.restoreClipboardContent(originalClipboard)
                 completion()
                 return
@@ -1513,12 +1468,12 @@ class AXController {
             
             // 等待焦点稳定
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                print("[LOG] WeChat: Sending Cmd+A to select text.")
+                Logger.info("WeChat: Sending Cmd+A to select text.")
                 self.sendWeChatSelectAllCommand()
                 
                 // 等待全选完成
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                    print("[LOG] WeChat: Sending paste command.")
+                    Logger.info("WeChat: Sending paste command.")
                     self.sendWeChatPasteCommand()
                     
                     // 延迟恢复剪贴板，确保粘贴完成
@@ -1538,13 +1493,11 @@ class AXController {
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
               let bundleId = frontmostApp.bundleIdentifier,
               bundleId.contains("wechat") || bundleId.contains("WeChat") else {
-            print("[LOG] WeChat: Not currently focused")
+            Logger.warn("WeChat: Not currently focused")
             completion(false)
             return
         }
-        
-        // 微信已经是前台应用
-        print("[LOG] WeChat: App is already focused")
+         
         completion(true)
     }
     
@@ -1559,7 +1512,7 @@ class AXController {
         cmdAUp?.flags = CGEventFlags.maskCommand
         cmdAUp?.post(tap: CGEventTapLocation.cghidEventTap)
         
-        print("[LOG] WeChat: Sent Cmd+A select all command")
+        Logger.info("WeChat: Sent Cmd+A select all command")
     }
     
     // 发送微信专用的粘贴命令
@@ -1573,7 +1526,7 @@ class AXController {
         cmdVUp?.flags = CGEventFlags.maskCommand
         cmdVUp?.post(tap: CGEventTapLocation.cghidEventTap)
         
-        print("[LOG] WeChat: Sent Cmd+V paste command")
+        Logger.info("WeChat: Sent Cmd+V paste command")
     }
     
     // 恢复剪贴板内容
@@ -1582,10 +1535,10 @@ class AXController {
         if let original = originalClipboard {
             pasteboard.clearContents()
             pasteboard.setString(original, forType: .string)
-            print("[LOG] WeChat: Restored original clipboard content: '\(original)'")
+            Logger.info("WeChat: Restored original clipboard content: '\(original)'")
         } else {
             pasteboard.clearContents()
-            print("[LOG] WeChat: Cleared clipboard as there was no original content.")
+            Logger.info("WeChat: Cleared clipboard as there was no original content.")
         }
     }
     
@@ -1667,7 +1620,7 @@ class AXController {
             let result = appleScript.executeAndReturnError(&error)
             
             if let error = error {
-                print("[LOG] AppleScript error checking editability: \(error)")
+                Logger.error("AppleScript error checking editability: \(error)")
                 return false
             }
             
@@ -1693,12 +1646,11 @@ class AXController {
         // 如果在浏览器环境中，尝试通过JavaScript获取选中文本
         if isWebEnvironment() {
             if let selectedText = getWebSelectedText(), !selectedText.isEmpty {
-                print("[LOG] Got selected text via Web: '\(selectedText)'")
+                Logger.info("Got selected text via Web: '\(selectedText)'")
                 return (text: selectedText, element: focused)
             }
         }
-        
-        // print("[LOG] No text selected")
+         
         return nil
     }
     
@@ -1756,7 +1708,7 @@ class AXController {
             let result = appleScript.executeAndReturnError(&error)
             
             if let error = error {
-                print("[LOG] AppleScript error getting selection: \(error)")
+                Logger.error("AppleScript error getting selection: \(error)")
                 return nil
             }
             
@@ -1808,7 +1760,7 @@ class AXController {
         //     }
         // }
         
-        print("[LOG] Mouse event monitoring started (keyboard monitoring delegated to InputMonitor)")
+        Logger.info("Mouse event monitoring started (keyboard monitoring delegated to InputMonitor)")
     }
     
     private func handleMouseEvent(_ event: NSEvent) {
@@ -1820,7 +1772,7 @@ class AXController {
             
             if timeSinceLastClick < 0.5 && timeSinceLastClick > 0.1 {
                 // 双击检测
-                print("[LOG] Double click detected")
+                Logger.info("Double click detected")
                 lastDoubleClickTime = now
                 // 延迟检查双击选择的文本
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -1892,7 +1844,7 @@ class AXController {
     
     // 鼠标释放后的专门检查
     private func checkForTextSelectionAfterMouseUp() {
-        print("[LOG] Checking text selection after mouse up")
+        Logger.info("Checking text selection after mouse up")
         
         // 等待一个更长的延迟，确保选择完全稳定
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -1903,7 +1855,7 @@ class AXController {
     
     // 双击后的文本选择检查
     private func checkForTextSelectionAfterDoubleClick() {
-        print("[LOG] Checking text selection after double click")
+        Logger.info("Checking text selection after double click")
         
         // 等待延迟，确保双击选择完全稳定
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
@@ -1913,7 +1865,7 @@ class AXController {
     
     // Cmd+A 后的文本选择检查
     private func checkForTextSelectionAfterCtrlA() {
-        print("[LOG] Checking text selection after Cmd+A")
+        Logger.info("Checking text selection after Cmd+A")
         
         // 等待延迟，确保全选完全稳定
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
@@ -1948,7 +1900,7 @@ class AXController {
         
         // 如果选中的文本长度与原始文本相近，可能是翻译结果
         if abs(trimmedText.count - originalText.count) < originalText.count / 3 {
-            print("[LOG] Detected potential translation result within 5s of auto-translation")
+            Logger.info("Detected potential translation result within 5s of auto-translation")
             return true
         }
         
@@ -2005,7 +1957,7 @@ class AXController {
         
         // 检查是否是刚刚完成的自动翻译结果，避免对翻译结果再次触发菜单
         if isLikelyTranslationResult(selection.text) {
-            print("[LOG] Skipping menu for likely translation result: '\(selection.text)'")
+            Logger.info("Skipping menu for likely translation result: '\(selection.text)'")
             return
         }
         
@@ -2027,8 +1979,10 @@ class AXController {
             lastSelectedText = originalText
             isMenuShowing = true
             
-            print("[LOG] Selected text after \(selectionType) selection: '\(originalText)' (length: \(originalText.count))")
-            print("[LOG] Trimmed for check: '\(trimmedForCheck)' (length: \(trimmedForCheck.count))")
+            Logger.info("Selected text after \(selectionType) selection: '\(originalText)' (length: \(originalText.count))") 
+            
+            // 标记选中文本翻译开始，通知 InputMonitor
+            InputMonitor.shared.markSelectionTranslationStart()
             
             // 获取选中文本的位置和应用信息
             let mouseLocation = NSEvent.mouseLocation
@@ -2046,31 +2000,28 @@ class AXController {
             TranslationMenuWindow.shared.onMenuClosed = { [weak self] in
                     self?.isMenuShowing = false
                     self?.lastSelectedText = ""
-                print("[LOG] Menu closed callback triggered")
+                Logger.info("Menu closed callback triggered")
                 }
         }
     }
     
     // 使用剪贴板强力替换内容
     private func forceReplaceWithClipboard(element: AXUIElement, text: String, completion: @escaping () -> Void) {
-        print("[LOG] Using clipboard force replace method")
+        Logger.info("Using clipboard force replace method")
         
         // 保存当前剪贴板内容
         let pasteboard = NSPasteboard.general
-        let originalContent = pasteboard.string(forType: .string)
-        print("[LOG] Original clipboard content: '\(originalContent ?? "nil")'")
+        let originalContent = pasteboard.string(forType: .string) 
         
         // 将新文本放入剪贴板
         pasteboard.clearContents()
-        let setSuccess = pasteboard.setString(text, forType: .string)
-        print("[LOG] Set clipboard success: \(setSuccess), content: '\(text)'")
+        let setSuccess = pasteboard.setString(text, forType: .string) 
         
         // 验证剪贴板内容是否正确设置
-        let verifyContent = pasteboard.string(forType: .string)
-        print("[LOG] Verified clipboard content: '\(verifyContent ?? "nil")'")
+        let verifyContent = pasteboard.string(forType: .string) 
         
         if verifyContent != text {
-            print("[LOG] ERROR: Clipboard content verification failed!")
+            Logger.error("Clipboard content verification failed!")
             completion()
             return
         }
@@ -2081,17 +2032,15 @@ class AXController {
         // 等待一小段时间确保选择完成
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             // 在粘贴前再次验证剪贴板内容
-            let prepasteContent = pasteboard.string(forType: .string)
-            print("[LOG] Pre-paste clipboard content: '\(prepasteContent ?? "nil")'")
+            let prepasteContent = pasteboard.string(forType: .string) 
             
-            if prepasteContent != text {
-                print("[LOG] ERROR: Clipboard content changed before paste! Re-setting...")
+            if prepasteContent != text { 
                 pasteboard.clearContents()
                 pasteboard.setString(text, forType: .string)
                 
                 // 再次验证
                 let reVerifyContent = pasteboard.string(forType: .string)
-                print("[LOG] Re-verified clipboard content: '\(reVerifyContent ?? "nil")'")
+                Logger.info("Re-verified clipboard content: '\(reVerifyContent ?? "nil")'")
             }
             
             // 粘贴新内容 (Cmd+V)
@@ -2103,7 +2052,7 @@ class AXController {
                 if let original = originalContent {
                     pasteboard.setString(original, forType: .string)
                 }
-                print("[LOG] Clipboard content restored to: '\(originalContent ?? "nil")'")
+                Logger.info("Clipboard content restored to: '\(originalContent ?? "nil")'")
                 // 翻译操作完成后检查 Event Tap 状态
                 self.checkAndRecoverEventTapAfterTranslation()
                 completion()
@@ -2115,7 +2064,7 @@ class AXController {
     private func simulateSelectAll() {
         // 添加延迟，确保与InputMonitor的事件处理分离
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            print("[LOG] Simulating Cmd+A select all")
+            Logger.info("Simulating Cmd+A select all")
             let source = CGEventSource(stateID: .hidSystemState)
             
             // Cmd+A
@@ -2136,9 +2085,9 @@ class AXController {
                 aUp.post(tap: .cghidEventTap)
                 cmdUp.post(tap: .cghidEventTap)
                 
-                print("[LOG] Simulated Cmd+A select all (with timing separation)")
+                Logger.info("Simulated Cmd+A select all (with timing separation)")
             } else {
-                print("[LOG] Failed to create Cmd+A events")
+                Logger.warn("Failed to create Cmd+A events")
             }
         }
     }
@@ -2147,7 +2096,7 @@ class AXController {
     private func simulatePaste() {
         // 添加延迟，确保与InputMonitor的事件处理分离
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            print("[LOG] Simulating Cmd+V paste")
+            Logger.info("Simulating Cmd+V paste")
             let source = CGEventSource(stateID: .hidSystemState)
             
             // Cmd+V
@@ -2168,16 +2117,16 @@ class AXController {
                 vUp.post(tap: .cghidEventTap)
                 cmdUp.post(tap: .cghidEventTap)
                 
-                print("[LOG] Simulated Cmd+V paste (with timing separation)")
+                Logger.info("Simulated Cmd+V paste (with timing separation)")
             } else {
-                print("[LOG] Failed to create Cmd+V events")
+                Logger.warn("Failed to create Cmd+V events")
             }
         }
     }
     
     // 添加一个新的方法来重新选中文本，用于替换时保持选中状态
     func reselectText(in element: AXUIElement, with text: String) -> Bool {
-        print("[LOG] Attempting to reselect text for replacement")
+        Logger.info("Attempting to reselect text for replacement")
         
         // 如果在Web环境中，使用JavaScript重新选中
         if isWebEnvironment() {
@@ -2300,12 +2249,12 @@ class AXController {
             let result = appleScript.executeAndReturnError(&error)
             
             if let error = error {
-                print("[LOG] AppleScript error reselecting text: \(error)")
+                Logger.error("AppleScript error reselecting text: \(error)")
                 return false
             }
             
             let resultString = result.stringValue ?? ""
-            print("[LOG] Reselect text result: \(resultString)")
+            Logger.info("Reselect text result: \(resultString)")
             return resultString == "success"
         }
         
@@ -2327,13 +2276,13 @@ class AXController {
                 let result = AXUIElementSetAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, axValue)
             
                             if result == .success {
-                    print("[LOG] Successfully reselected text at range: \(startIndex)-\(startIndex + length)")
+                    Logger.info("Successfully reselected text at range: \(startIndex)-\(startIndex + length)")
                     return true
                 } else {
-                    print("[LOG] Failed to reselect text via AX API: \(result.rawValue)")
+                    Logger.warn("Failed to reselect text via AX API: \(result.rawValue)")
                 }
             } else {
-                print("[LOG] Failed to create AXValue for range")
+                Logger.warn("Failed to create AXValue for range")
             }
         }
         
@@ -2348,40 +2297,52 @@ class AXController {
         if let monitor = mouseEventMonitor {
             NSEvent.removeMonitor(monitor)
             mouseEventMonitor = nil
-            print("[LOG] Mouse event monitor removed")
-        }
-        
-        // keyboardEventMonitor 已移除，键盘监听由 InputMonitor 统一处理
-        // if let monitor = keyboardEventMonitor {
-        //     NSEvent.removeMonitor(monitor)
-        //     keyboardEventMonitor = nil
-        //     print("[LOG] Keyboard event monitor removed")
-        // }
+            Logger.info("Mouse event monitor removed")
+        } 
     }
     
     // 暂停选中文本监听
     func pauseSelectionMonitoring() {
         isSelectionMonitoringPaused = true
-        print("[LOG] Selection monitoring paused")
+        Logger.info("Selection monitoring paused")
     }
     
     // 恢复选中文本监听
     func resumeSelectionMonitoring() {
         isSelectionMonitoringPaused = false
-        print("[LOG] Selection monitoring resumed")
+        Logger.info("Selection monitoring resumed")
     }
     
     // 检查Chrome的AppleScript JavaScript权限
     private func checkChromeJavaScriptPermission() -> Bool {
+        // 先检查自动化权限
+        let bundleId = "com.google.Chrome"
+        let appUrl = URL(fileURLWithPath: "/Applications/Google Chrome.app")
+        
+        // 检查应用是否安装
+        guard NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) != nil else {
+            Logger.error("Chrome application not found")
+            return false
+        }
+        
+        // 检查自动化权限
+        let options: [String: Any] = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: false]
+        let isTrusted = AXIsProcessTrustedWithOptions(options as CFDictionary)
+        
+        if !isTrusted {
+            Logger.warn("App does not have automation permission for Chrome")
+            return false
+        }
+        
+        // 尝试执行简单的Chrome AppleScript命令来验证
         let scriptSource = """
-        tell application "System Events"
-            tell process "Google Chrome"
-                if exists (menu item "允许来自 Apple 事件的 JavaScript" of menu "开发者" of menu item "开发者" of menu "查看" of menu bar 1) then
-                    return true
-                else
-                    return false
-                end if
-            end tell
+        tell application "Google Chrome"
+            try
+                get name of first window
+                return true
+            on error
+                return false
+            end try
         end tell
         """
         
@@ -2391,9 +2352,10 @@ class AXController {
             if error == nil {
                 return result.booleanValue
             } else {
-                print("[LOG] Error checking Chrome permissions: \(error!)")
+                Logger.error("Error executing Chrome AppleScript: \(error!)")
             }
         }
+        
         return false
     }
 } 

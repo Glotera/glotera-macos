@@ -21,9 +21,9 @@ class TranslatorClient: NSObject {
     } // 10秒超时
 
     func translate(text: String, to: String, completion: @escaping (String?) -> Void) {
-        NSLog("[LOG] Calling translation API")
+        Logger.info("Calling translation API")
         guard let url = URL(string: endpoint) else { 
-            NSLog("[LOG] Invalid URL: \(endpoint)")
+            Logger.info("Invalid URL: \(endpoint)")
             completion(nil)
             return 
         }
@@ -37,49 +37,47 @@ class TranslatorClient: NSObject {
         do {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         } catch {
-            NSLog("[LOG] Failed to serialize request body: \(error)")
+            Logger.info("Failed to serialize request body: \(error)")
             completion(nil)
             return
         }
         
         let task = URLSession.shared.dataTask(with: request) { data, response, error in
             if let error = error {
-                NSLog("[LOG] Translation API error: \(error.localizedDescription)")
+                Logger.info("Translation API error: \(error.localizedDescription)")
                 completion(nil)
                 return
             }
             
             guard let httpResponse = response as? HTTPURLResponse else {
-                NSLog("[LOG] Invalid response type")
+                Logger.info("Invalid response type")
                 completion(nil)
                 return
             }
             
             guard httpResponse.statusCode == 200 else {
-                NSLog("[LOG] Translation API HTTP error: \(httpResponse.statusCode)")
+                Logger.info("Translation API HTTP error: \(httpResponse.statusCode)")
                 completion(nil)
                 return
             }
             
             guard let data = data else {
-                NSLog("[LOG] No data received from translation API")
+                Logger.info("No data received from translation API")
                 completion(nil)
                 return
-            }
-            
-            // NSLog("[LOG] Translation API response: \(String(data: data, encoding: .utf8) ?? "nil")")
+            } 
             
             do {
                 guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                       let translated = json["translated"] as? String else {
-                    NSLog("[LOG] Failed to parse translation response")
+                    Logger.info("Failed to parse translation response")
                     completion(nil)
                     return
                 }
-                NSLog("[LOG] Translation successful")
+                Logger.info("Translation successful")
                 completion(translated)
             } catch {
-                NSLog("[LOG] Failed to parse JSON response: \(error)")
+                Logger.info("Failed to parse JSON response: \(error)")
                 completion(nil)
             }
         }
@@ -93,10 +91,10 @@ class TranslatorClient: NSObject {
         onComplete: @escaping (String?) -> Void,      // finalResult
         onError: @escaping (String) -> Void          // errorMessage
     ) {
-        NSLog("[LOG] Starting stream translation: text=\(text), to=\(to)")
+        Logger.info("Starting stream translation: text=\(text), to=\(to)")
         
         guard let url = URL(string: endpoint) else { 
-            NSLog("[LOG] Invalid URL: \(endpoint)")
+            Logger.info("Invalid URL: \(endpoint)")
             DispatchQueue.main.async {
                 onError("Invalid server URL")
             }
@@ -123,7 +121,7 @@ class TranslatorClient: NSObject {
         do {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         } catch {
-            NSLog("[LOG] Failed to serialize stream request body: \(error)")
+            Logger.info("Failed to serialize stream request body: \(error)")
             DispatchQueue.main.async {
                 onError("Failed to prepare request")
             }
@@ -132,96 +130,8 @@ class TranslatorClient: NSObject {
         
         let task = streamSession!.dataTask(with: request)
         task.resume()
-        NSLog("[LOG] Stream translation request started")
-    }
-    
-    private func parseStreamData(
-        _ data: Data,
-        onChunk: @escaping (String, String) -> Void,
-        onComplete: @escaping (String?) -> Void,
-        onError: @escaping (String) -> Void
-    ) {
-        guard let responseString = String(data: data, encoding: .utf8) else {
-            NSLog("[LOG] Failed to decode stream response")
-            onError("Failed to decode response")
-            return
-        }
-        
-        NSLog("[LOG] Stream response received: \(responseString)")
-        
-        let lines = responseString.components(separatedBy: .newlines)
-        var fullContent = ""
-        
-        for line in lines {
-            let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            
-            if trimmedLine.isEmpty || trimmedLine == "data: [DONE]" {
-                continue
-            }
-            
-            if trimmedLine.hasPrefix("data: ") {
-                let jsonString = String(trimmedLine.dropFirst(6))
-                
-                do {
-                    guard let jsonData = jsonString.data(using: .utf8),
-                          let json = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-                          let type = json["type"] as? String else {
-                        NSLog("[LOG] Failed to parse stream JSON: \(jsonString)")
-                        continue
-                    }
-                    
-                    switch type {
-                    case "chunk":
-                        if let content = json["content"] as? String,
-                           let fullContentFromResponse = json["fullContent"] as? String {
-                            fullContent = fullContentFromResponse
-                            NSLog("[LOG] Stream chunk received: \(content)")
-                            DispatchQueue.main.async {
-                                onChunk(content, fullContent)
-                            }
-                        }
-                        
-                    case "end":
-                        if let result = json["result"] as? [String: Any],
-                           let translated = result["translated"] as? String {
-                            NSLog("[LOG] Stream translation completed: \(translated)")
-                            DispatchQueue.main.async {
-                                onComplete(translated)
-                            }
-                        } else {
-                            NSLog("[LOG] Stream translation completed with accumulated content")
-                            DispatchQueue.main.async {
-                                onComplete(fullContent.isEmpty ? nil : fullContent)
-                            }
-                        }
-                        return
-                        
-                    case "error":
-                        if let errorMessage = json["error"] as? String {
-                            NSLog("[LOG] Stream translation error: \(errorMessage)")
-                            DispatchQueue.main.async {
-                                onError(errorMessage)
-                            }
-                        }
-                        return
-                        
-                    default:
-                        NSLog("[LOG] Unknown stream event type: \(type)")
-                    }
-                    
-                } catch {
-                    NSLog("[LOG] Failed to parse stream JSON: \(error), data: \(jsonString)")
-                }
-            }
-        }
-        
-        if !fullContent.isEmpty {
-            NSLog("[LOG] Stream ended without explicit end event, using accumulated content")
-            DispatchQueue.main.async {
-                onComplete(fullContent)
-            }
-        }
-    }
+        Logger.info("Stream translation request started")
+    }  
 }
 
 // MARK: - URLSessionDataDelegate
@@ -229,7 +139,7 @@ extension TranslatorClient: URLSessionDataDelegate {
     
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
         guard let httpResponse = response as? HTTPURLResponse else {
-            NSLog("[LOG] Invalid stream response type")
+            Logger.info("Invalid stream response type")
             DispatchQueue.main.async {
                 self.streamCallbacks?.onError("Invalid response format")
             }
@@ -238,7 +148,7 @@ extension TranslatorClient: URLSessionDataDelegate {
         }
         
         guard httpResponse.statusCode == 200 else {
-            NSLog("[LOG] Stream translation API HTTP error: \(httpResponse.statusCode)")
+            Logger.info("Stream translation API HTTP error: \(httpResponse.statusCode)")
             DispatchQueue.main.async {
                 self.streamCallbacks?.onError("Server error: \(httpResponse.statusCode)")
             }
@@ -246,13 +156,13 @@ extension TranslatorClient: URLSessionDataDelegate {
             return
         }
         
-        NSLog("[LOG] Stream response started, status: \(httpResponse.statusCode)")
+        Logger.info("Stream response started, status: \(httpResponse.statusCode)")
         completionHandler(.allow)
     }
     
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         guard let dataString = String(data: data, encoding: .utf8) else {
-            NSLog("[LOG] Failed to decode stream data")
+            Logger.info("Failed to decode stream data")
             return
         }
         
@@ -274,9 +184,10 @@ extension TranslatorClient: URLSessionDataDelegate {
         }
     }
     
-    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) { 
+        
         if let error = error {
-            NSLog("[LOG] Stream translation error: \(error.localizedDescription)")
+            Logger.error("Stream translation error: \(error.localizedDescription)")
             DispatchQueue.main.async {
                 self.streamCallbacks?.onError("Network error: \(error.localizedDescription)")
             }
@@ -286,14 +197,14 @@ extension TranslatorClient: URLSessionDataDelegate {
                 var fullContent = ""
                 processStreamLine(streamBuffer, fullContent: &fullContent)
             }
-            NSLog("[LOG] Stream translation completed")
+            Logger.info("Stream translation completed")
         }
-        
+         
         // 清理
         streamSession?.invalidateAndCancel()
         streamSession = nil
         streamCallbacks = nil
-        streamBuffer = ""
+        streamBuffer = "" 
     }
     
     private func processStreamLine(_ line: String, fullContent: inout String) {
@@ -310,7 +221,7 @@ extension TranslatorClient: URLSessionDataDelegate {
                 guard let jsonData = jsonString.data(using: .utf8),
                       let json = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
                       let type = json["type"] as? String else {
-                    NSLog("[LOG] Failed to parse stream JSON: \(jsonString)")
+                    Logger.info("Failed to parse stream JSON: \(jsonString)")
                     return
                 }
                 
@@ -319,7 +230,7 @@ extension TranslatorClient: URLSessionDataDelegate {
                     if let content = json["content"] as? String,
                        let fullContentFromResponse = json["fullContent"] as? String {
                         fullContent = fullContentFromResponse
-                        NSLog("[LOG] Stream chunk received: \(content)")
+                        Logger.info("Stream chunk received: \(content)")
                         let capturedFullContent = fullContent // 捕获值而非引用
                         DispatchQueue.main.async {
                             self.streamCallbacks?.onChunk(content, capturedFullContent)
@@ -327,25 +238,28 @@ extension TranslatorClient: URLSessionDataDelegate {
                     }
                     
                 case "end":
-                    NSLog("[LOG] Processing end event, json: \(json)")
+                    Logger.info("Processing end event") 
+                    
+                    // 捕获回调，避免被 didCompleteWithError 清理
+                    let capturedCallbacks = self.streamCallbacks
+                    
                     if let result = json["result"] as? [String: Any],
-                       let translated = result["translated"] as? String {
-                        NSLog("[LOG] Stream translation completed with translated field: \(translated)")
+                       let translated = result["translated"] as? String { 
                         DispatchQueue.main.async {
-                            self.streamCallbacks?.onComplete(translated)
+                            capturedCallbacks?.onComplete(translated)
                         }
                     } else {
-                        NSLog("[LOG] Stream translation completed with accumulated content: \(fullContent)")
+                        Logger.info("Stream translation completed with accumulated content: \(fullContent)")
                         let capturedFullContent = fullContent // 捕获值而非引用
-                        DispatchQueue.main.async {
-                            self.streamCallbacks?.onComplete(capturedFullContent.isEmpty ? nil : capturedFullContent)
+                        DispatchQueue.main.async { 
+                            capturedCallbacks?.onComplete(capturedFullContent.isEmpty ? nil : capturedFullContent)
                         }
-                    }
+                    } 
                     return
                     
                 case "error":
                     if let errorMessage = json["error"] as? String {
-                        NSLog("[LOG] Stream translation error: \(errorMessage)")
+                        Logger.error("Stream translation error: \(errorMessage)")
                         DispatchQueue.main.async {
                             self.streamCallbacks?.onError(errorMessage)
                         }
@@ -353,11 +267,11 @@ extension TranslatorClient: URLSessionDataDelegate {
                     return
                     
                 default:
-                    NSLog("[LOG] Unknown stream event type: \(type)")
+                    Logger.error("Unknown stream event type: \(type)")
                 }
                 
             } catch {
-                NSLog("[LOG] Failed to parse stream JSON: \(error), data: \(jsonString)")
+                Logger.error("Failed to parse stream JSON: \(error)")
             }
         }
     }

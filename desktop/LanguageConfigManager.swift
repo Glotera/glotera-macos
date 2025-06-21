@@ -37,28 +37,28 @@ class LanguageConfigManager {
     
     // 加载语言配置
     func loadLanguageConfigs() -> [LanguageConfig] {
-        print("[LOG] Loading language configurations...")
+        Logger.info("Loading language configurations...")
         
         // 首先尝试加载用户自定义配置
         if let userConfigs = loadUserConfigs() {
-            print("[LOG] Loaded \(userConfigs.count) user-customized language configs")
+            Logger.info("Loaded \(userConfigs.count) user-customized language configs")
             return userConfigs
         }
         
         // 如果没有用户配置，加载默认配置
         if let defaultConfigs = loadDefaultConfigs() {
-            print("[LOG] Loaded \(defaultConfigs.count) default language configs")
+            Logger.info("Loaded \(defaultConfigs.count) default language configs")
             return defaultConfigs
         }
         
-        print("[LOG] Failed to load any language configurations")
+        Logger.info("Failed to load any language configurations")
         return []
     }
     
     // 加载用户自定义配置
     private func loadUserConfigs() -> [LanguageConfig]? {
         guard FileManager.default.fileExists(atPath: configFileURL.path) else {
-            print("[LOG] User config file does not exist: \(configFileURL.path)")
+            Logger.info("User config file does not exist: \(configFileURL.path)")
             return nil
         }
         
@@ -67,7 +67,7 @@ class LanguageConfigManager {
             let configs = try JSONDecoder().decode([LanguageConfig].self, from: data)
             return configs
         } catch {
-            print("[LOG] Error loading user configs: \(error)")
+            Logger.info("Error loading user configs: \(error)")
             return nil
         }
     }
@@ -75,7 +75,7 @@ class LanguageConfigManager {
     // 加载默认配置
     private func loadDefaultConfigs() -> [LanguageConfig]? {
         guard let defaultURL = defaultConfigFileURL else {
-            print("[LOG] Default config file not found in bundle")
+            Logger.info("Default config file not found in bundle")
             return nil
         }
         
@@ -111,7 +111,7 @@ class LanguageConfigManager {
             
             return configs
         } catch {
-            print("[LOG] Error loading default configs: \(error)")
+            Logger.info("Error loading default configs: \(error)")
             return nil
         }
     }
@@ -121,10 +121,10 @@ class LanguageConfigManager {
         do {
             let data = try JSONEncoder().encode(configs)
             try data.write(to: configFileURL)
-            print("[LOG] Successfully saved language configs to: \(configFileURL.path)")
+            Logger.info("Successfully saved language configs to: \(configFileURL.path)")
             return true
         } catch {
-            print("[LOG] Error saving language configs: \(error)")
+            Logger.info("Error saving language configs: \(error)")
             return false
         }
     }
@@ -133,7 +133,7 @@ class LanguageConfigManager {
     func resetToDefaults() -> [LanguageConfig] {
         // 删除用户配置文件
         try? FileManager.default.removeItem(at: configFileURL)
-        print("[LOG] User config file deleted, loading defaults")
+        Logger.info("User config file deleted, loading defaults")
         
         return loadLanguageConfigs()
     }

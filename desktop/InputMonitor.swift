@@ -6,14 +6,13 @@ class InputMonitor {
     private let triggerPattern = #"(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\s*$"#
     private let regex: NSRegularExpression
     
-    // 添加健康检查相关属性
+    // 事件统计和业务逻辑相关属性
     private var lastEventTime: Date = Date()
-    private var lastSpaceKeyTime: Date = Date.distantPast
-    private var healthCheckTimer: Timer?
+    private var lastSpaceKeyTime: Date = Date()
     var spaceKeyEventCount = 0
     var totalKeyEventCount = 0
-    private var lastHealthCheckRestart: Date?
     private var lastTranslationTime: Date?
+    private var lastSelectionTranslationTime: Date?
     
     // 添加 AppDelegate 引用以便统一管理
     private weak var appDelegate: AppDelegate?
@@ -27,122 +26,36 @@ class InputMonitor {
     
     // 启动健康检查定时器
     private func startHealthCheck() {
-        healthCheckTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
-            self?.performHealthCheck()
-        }
-        print("[LOG] Health check timer started")
+        // 移除独立的健康检查，改为依赖 AppDelegate 的统一管理
+        // AppDelegate 已经有 proactiveEventTapCheck 在每30秒检查 Event Tap 状态
+        // InputMonitor 只需要关注业务逻辑层面的问题
+        Logger.info("InputMonitor initialized - relying on AppDelegate for Event Tap health monitoring")
     }
     
-    // 执行健康检查
-    func performHealthCheck() {
+    // 简化的业务逻辑检查（仅在需要时调用）
+    private func checkBusinessLogicHealth() {
         let currentTime = Date()
         let timeSinceLastEvent = currentTime.timeIntervalSince(lastEventTime)
-        let timeSinceLastSpaceKey = currentTime.timeIntervalSince(lastSpaceKeyTime)
         
-        // 检查是否刚刚进行过翻译（可能导致 Event Tap 暂时失效）
-        let timeSinceLastTranslation = lastTranslationTime.map { currentTime.timeIntervalSince($0) } ?? Double.infinity
-        let isRecentTranslation = timeSinceLastTranslation < 10.0 // 10秒内的翻译被认为是"最近的"
-        
-        // 检查权限
+        // 检查权限（这是业务逻辑必需的）
         let hasPermissions = checkAccessibilityPermissions()
+        if !hasPermissions {
+            Logger.error("Accessibility permissions lost - business logic cannot function")
+            return
+        }
         
-        // 检查事件监听器是否有效（通过 AppDelegate）
-        let eventTapValid = appDelegate?.isEventTapValid() ?? false
-        
-        // 检查空格键是否正常工作
+        // 检查空格键是否正常工作（业务逻辑相关）
+        let timeSinceLastSpaceKey = currentTime.timeIntervalSince(lastSpaceKeyTime)
         let spaceKeyWorking = (spaceKeyEventCount > 0 && timeSinceLastSpaceKey < 300) || totalKeyEventCount < 10
         
-        // 更智能的健康检查条件
-        var shouldRestart = false
-        var shouldQuickRecover = false
-        var reason = ""
-        
-        // 优先级处理：权限问题最严重
-        if !hasPermissions {
-            shouldRestart = true
-            reason = "Accessibility permissions lost"
-        } else if !eventTapValid && totalKeyEventCount > 0 {
-            // Event Tap 失效 - 先尝试快速恢复
-            if isRecentTranslation {
-                Logger.debug("Event tap invalid after recent translation (\(String(format: "%.1f", timeSinceLastTranslation))s ago) - attempting quick recovery")
-            } else {
-                Logger.warn("Event tap invalid detected during health check - attempting quick recovery")
-            }
-            
-            if let appDelegate = appDelegate, appDelegate.quickEnableEventTap() {
-                let message = isRecentTranslation ? 
-                    "Event tap quick recovery successful after recent translation" :
-                    "Event tap quick recovery successful during health check"
-                Logger.info(message)
-                return // 快速恢复成功，跳过重启
-            } else {
-                shouldRestart = true
-                let reasonSuffix = isRecentTranslation ? " (post-translation)" : ""
-                reason = "Event tap invalid after having events (quick recovery failed)\(reasonSuffix)"
-            }
-        } else if !spaceKeyWorking && totalKeyEventCount > 100 {
-            // 空格键问题，可能是部分功能失效
-            shouldQuickRecover = true
-            reason = "Space key not working after \(totalKeyEventCount) events"
+        if !spaceKeyWorking && totalKeyEventCount > 100 {
+            Logger.warn("Space key detection may not be working properly - \(spaceKeyEventCount) space events out of \(totalKeyEventCount) total events")
         }
         
-        // 如果只是快速恢复需求，尝试轻量级修复
-        if shouldQuickRecover && !shouldRestart {
-            Logger.info("Attempting quick recovery for: \(reason)")
-            if let appDelegate = appDelegate, appDelegate.quickEnableEventTap() {
-                Logger.info("Quick recovery successful")
-                return
-            } else {
-                // 快速恢复失败，升级为重启
-                shouldRestart = true
-                reason = "\(reason) (quick recovery failed)"
-            }
-        }
-        
-        // 增加重启间隔限制，避免频繁重启
-        if shouldRestart {
-            // 使用递增的重启间隔：第一次60秒，第二次120秒，第三次300秒
-            let minInterval: TimeInterval
-            if let lastRestart = lastHealthCheckRestart {
-                let timeSinceLastRestart = currentTime.timeIntervalSince(lastRestart)
-                if timeSinceLastRestart < 60 {
-                    minInterval = 60
-                } else if timeSinceLastRestart < 300 {
-                    minInterval = 120
-                } else {
-                    minInterval = 300
-                }
-            } else {
-                minInterval = 60
-            }
-            
-            if let lastRestart = lastHealthCheckRestart, currentTime.timeIntervalSince(lastRestart) < minInterval {
-                Logger.warn("InputMonitor: Skipping restart request - last restart was less than \(Int(minInterval)) seconds ago")
-                return
-            }
-            
-            // 根据是否为翻译后的问题调整日志级别
-            if isRecentTranslation {
-                Logger.warn("InputMonitor health check failed after recent translation: \(reason)")
-            } else {
-                Logger.error("InputMonitor health check failed: \(reason)")
-            }
-            lastHealthCheckRestart = currentTime
-            requestEventMonitoringRestart()
-        } else {
-            // 减少调试输出
-            if Int(currentTime.timeIntervalSince1970) % 300 == 0 { // 每5分钟输出一次
-                Logger.info("InputMonitor health: OK - Events: \(totalKeyEventCount), Space: \(spaceKeyEventCount), Last event: \(Int(timeSinceLastEvent))s ago")
-            }
-        }
+        // 输出业务逻辑状态
+        Logger.info("Business logic health: Events: \(totalKeyEventCount), Space: \(spaceKeyEventCount), Last event: \(Int(timeSinceLastEvent))s ago")
     }
     
-    // 请求 AppDelegate 重启事件监听
-    private func requestEventMonitoringRestart() {
-        Logger.warn("InputMonitor requesting AppDelegate to restart event monitoring...")
-        appDelegate?.restartEventMonitoring()
-    }
-
     // 创建事件监听器的回调函数（供 AppDelegate 调用）
     func createEventTapCallback() -> CGEventTapCallBack {
         return { (proxy, type, event, refcon) -> Unmanaged<CGEvent>? in
@@ -184,8 +97,14 @@ class InputMonitor {
             
             // 极简的事件统计更新
             let shared = InputMonitor.shared
-            shared.lastEventTime = Date()
+            let currentTime = Date()
+            shared.lastEventTime = currentTime
             shared.totalKeyEventCount += 1
+            
+            // 每1000个事件输出一次调试信息
+            if shared.totalKeyEventCount % 1000 == 0 {
+                Logger.debug("Event callback: \(shared.totalKeyEventCount) events processed, last event time: \(currentTime)")
+            }
             
             // 只处理关键事件，快速返回
             if type == .keyDown {
@@ -231,59 +150,54 @@ class InputMonitor {
     }
     
     private func checkAccessibilityPermissions() -> Bool {
-        let trusted = AXIsProcessTrusted()
-        // print("[LOG] Accessibility permission check result: \(trusted)")
+        let trusted = AXIsProcessTrusted() 
         
         if !trusted {
             // 获取当前应用的Bundle ID和路径以便调试
             if let bundleId = Bundle.main.bundleIdentifier {
-                print("[LOG] Current Bundle ID: \(bundleId)")
+                Logger.info("Current Bundle ID: \(bundleId)")
             }
             let bundlePath = Bundle.main.bundlePath
-            print("[LOG] Current Bundle Path: \(bundlePath)")
+            Logger.info("Current Bundle Path: \(bundlePath)")
         }
         
         return trusted
     }
     
-    private func requestAccessibilityPermissions() {
-        print("[LOG] Requesting accessibility permissions...")
+    private func requestAccessibilityPermissions() { 
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
         let result = AXIsProcessTrustedWithOptions(options as CFDictionary)
-        print("[LOG] Permission request result: \(result)")
+        Logger.info("Permission request result: \(result)")
     }
 
     static let shared = InputMonitor()
 
-    func handleSpaceKey() {
-        // print("[LOG] Space key detected - starting trigger detection")
+    func handleSpaceKey() { 
         
         // 添加更详细的诊断信息
         guard let focused = AXController.shared.getFocusedElement() else {
-            print("[LOG] ERROR: No focused element found")
+            Logger.error("No focused element found")
             return
-        }
-        print("[LOG] Focused element found")
+        } 
         
         // 检查是否为Discord应用
         let isDiscord = isDiscordApp()
         if isDiscord {
-            print("[LOG] Discord detected - using extended delay for trigger detection")
+            Logger.info("Discord detected - using extended delay for trigger detection")
         }
         
         // 首先尝试标准检测
-        if let result = AXController.shared.detectTriggerAndExtract() {
-            // print("[LOG] Trigger detected: text=\(result.text), lang=\(result.lang)")
+        if let result = AXController.shared.detectTriggerAndExtract() { 
             startTranslation(text: result.text, lang: result.lang)
             return
         }
         
-        print("[LOG] Standard detection failed, trying delayed detection...")
+        Logger.warn("Standard detection failed, trying delayed detection...")
         // 如果标准检测失败，等待一小段时间后重试（Discord需要更长的延迟）
         let delayTime = isDiscord ? 0.3 : 0.1
         DispatchQueue.main.asyncAfter(deadline: .now() + delayTime) {
             if let result = AXController.shared.detectTriggerAndExtract() {
-                print("[LOG] Delayed trigger detected: text=\(result.text), lang=\(result.lang)")
+                Logger.info("Delayed trigger detected: text=\(result.text), lang=\(result.lang)")
                 self.startTranslation(text: result.text, lang: result.lang)
             } else {
                 // print("[LOG] No trigger detected in input after delay")
@@ -334,16 +248,16 @@ class InputMonitor {
         TranslatorClient.shared.translate(text: text, to: lang) { [weak self] translated in
             DispatchQueue.main.async {
                 if let translated = translated {
-                    print("[LOG] Translation result: \(translated)")
+                    Logger.info("Translation result: \(translated)")
                     // 翻译成功后立即隐藏状态窗口，然后开始回填
                     TranslationStatusWindow.shared.hideStatus()
                     // print("[LOG] Status window hidden before auto-translation replacement")
                     // 回填翻译结果
                     AXController.shared.replaceInput(with: translated) {
-                        print("[LOG] Auto-translation replacement completed")
+                        Logger.info("Auto-translation replacement completed")
                     }
                 } else {
-                    print("[LOG] Translation failed")
+                    Logger.warn("Translation failed")
                     // 显示失败状态
                     TranslationStatusWindow.shared.showFailure()
                 }
@@ -352,7 +266,7 @@ class InputMonitor {
     }
 
     func handleEnterKey() {
-        print("[LOG] Enter key detected (non-intercepted)")
+        Logger.info("Enter key detected (non-intercepted)")
         // 非拦截的Enter键处理，用于某些特殊情况
         attemptTriggerDetection(source: "Enter")
     }
@@ -364,14 +278,13 @@ class InputMonitor {
     }
     
     private func attemptTriggerDetection(source: String) {
-        if let result = AXController.shared.detectTriggerAndExtract() {
-            //print("[LOG] Trigger detected via \(source): text=\(result.text), lang=\(result.lang)")
+        if let result = AXController.shared.detectTriggerAndExtract() { 
             startTranslation(text: result.text, lang: result.lang)
         } else {
             // 对于Enter和Tab键，我们给更多时间让应用更新内容
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                 if let result = AXController.shared.detectTriggerAndExtract() {
-                    print("[LOG] Delayed trigger detected via \(source): text=\(result.text), lang=\(result.lang)")
+                    Logger.info("Delayed trigger detected via \(source): text=\(result.text), lang=\(result.lang)")
                     self.startTranslation(text: result.text, lang: result.lang)
                 }
             }
@@ -418,15 +331,15 @@ class InputMonitor {
     
     // 处理被拦截的回车键
     func handleInterceptedEnter() {
-        print("[LOG] Handling intercepted Enter key")
+        Logger.info("Handling intercepted Enter key")
         
         if let result = AXController.shared.detectTriggerAndExtract() {
-            print("[LOG] Trigger detected via intercepted Enter: text=\(result.text), lang=\(result.lang)")
+            Logger.info("Trigger detected via intercepted Enter: text=\(result.text), lang=\(result.lang)")
             
             // 开始翻译，完成后自动发送
             startTranslationWithAutoSend(text: result.text, lang: result.lang)
         } else {
-            print("[LOG] No trigger found, sending original Enter key")
+            Logger.warn("No trigger found, sending original Enter key")
             // 如果没有检测到触发器，发送原始回车键
             sendEnterKey()
         }
@@ -447,13 +360,12 @@ class InputMonitor {
         TranslatorClient.shared.translate(text: text, to: lang) { [weak self] translated in
             DispatchQueue.main.async {
                 if let translated = translated {
-                    print("[LOG] Translation result: \(translated)")
+                    Logger.info("Translation result: \(translated)")
                     // 翻译成功后立即隐藏状态窗口，然后开始回填
-                    TranslationStatusWindow.shared.hideStatus()
-                    print("[LOG] Status window hidden before auto-translation with send")
+                    TranslationStatusWindow.shared.hideStatus() 
                     // 回填翻译结果，完成后发送回车键
                     AXController.shared.replaceInput(with: translated) {
-                        print("[LOG] Auto-translation with send completed")
+                        Logger.info("Auto-translation with send completed")
                         
                         // 等待一小段时间确保内容更新，然后发送回车键
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -461,7 +373,7 @@ class InputMonitor {
                         }
                     }
                 } else {
-                    print("[LOG] Translation failed")
+                    Logger.warn("Translation failed")
                     // 显示失败状态
                     TranslationStatusWindow.shared.showFailure()
                     // 翻译失败时发送原始内容
@@ -475,7 +387,7 @@ class InputMonitor {
     
     // 发送回车键事件
     private func sendEnterKey() {
-        print("[LOG] Sending Enter key event")
+        Logger.info("Sending Enter key event")
         
         let source = CGEventSource(stateID: .hidSystemState)
         if let enterKeyDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Return), keyDown: true),
@@ -485,50 +397,50 @@ class InputMonitor {
             enterKeyUp.post(tap: .cghidEventTap)
         }
     }
-
+    
     // 手动测试触发器检测（用于调试）
     func manualTriggerTest() {
-        print("[LOG] === Manual Trigger Test Started ===")
+        Logger.info("=== Manual Trigger Test Started ===")
         
         // 检查权限
         let hasPermissions = checkAccessibilityPermissions()
-        print("[LOG] Test - Accessibility permissions: \(hasPermissions)")
+        Logger.info("Test - Accessibility permissions: \(hasPermissions)")
         
         // 检查事件监听器
         let eventTapValid = appDelegate?.isEventTapValid() ?? false
-        print("[LOG] Test - Event tap valid: \(eventTapValid)")
+        Logger.info("Test - Event tap valid: \(eventTapValid)")
         
         // 检查焦点元素
         if let focused = AXController.shared.getFocusedElement() {
-            print("[LOG] Test - Focused element found")
+            Logger.info("Test - Focused element found")
             
             // 尝试获取内容
             if let value = AXController.shared.getValue(of: focused) {
-                print("[LOG] Test - Current content: '\(value)'")
-                print("[LOG] Test - Content length: \(value.count)")
+                Logger.info("Test - Current content: '\(value)'")
+                Logger.info("Test - Content length: \(value.count)")
                 
                 // 测试触发器检测
                 if let result = AXController.shared.detectTriggerAndExtract() {
-                    print("[LOG] Test - Trigger detected: text='\(result.text)', lang='\(result.lang)'")
+                    Logger.info("Test - Trigger detected: text='\(result.text)', lang='\(result.lang)'")
                 } else {
-                    print("[LOG] Test - No trigger detected")
+                    Logger.info("Test - No trigger detected")
                     
                     // 检查是否包含常见模式
                     let testPatterns = ["@en", "#en", "@zh", "#zh"]
                     for pattern in testPatterns {
                         if value.lowercased().contains(pattern) {
-                            print("[LOG] Test - Found '\(pattern)' in content but not detected as trigger")
+                            Logger.info("Test - Found '\(pattern)' in content but not detected as trigger")
                         }
                     }
                 }
             } else {
-                print("[LOG] Test - Cannot get value from focused element")
+                Logger.info("Test - Cannot get value from focused element")
             }
         } else {
-            print("[LOG] Test - No focused element found")
+            Logger.info("Test - No focused element found")
         }
         
-        print("[LOG] === Manual Trigger Test Completed ===")
+        Logger.info("=== Manual Trigger Test Completed ===")
     }
     
     // 获取当前状态信息
@@ -567,83 +479,97 @@ class InputMonitor {
     func getLastEventTime() -> Date {
         return lastEventTime
     }
+    
+    // 获取距离上次选中翻译的时间间隔
+    func getTimeSinceLastSelectionTranslation() -> TimeInterval {
+        guard let lastTime = lastSelectionTranslationTime else {
+            return Double.infinity
+        }
+        return Date().timeIntervalSince(lastTime)
+    }
+    
+    // 标记选中文本翻译开始（由 TranslationMenuWindow 调用）
+    func markSelectionTranslationStart() {
+        lastSelectionTranslationTime = Date()
+        Logger.debug("Marked selection translation start")
+    }
 
     // 专门的Discord测试方法
     func testDiscordTrigger() {
-        print("[LOG] === Discord Trigger Test Started ===")
+        Logger.info("=== Discord Trigger Test Started ===")
         
         // 检查是否在Discord中
         let isDiscord = isDiscordApp()
-        print("[LOG] Discord Test - Is Discord app: \(isDiscord)")
+        Logger.info("Discord Test - Is Discord app: \(isDiscord)")
         
         if !isDiscord {
-            print("[LOG] Discord Test - Warning: Not currently in Discord app")
+            Logger.warn("Discord Test - Warning: Not currently in Discord app")
         }
         
         // 检查基本状态
         let hasPermissions = checkAccessibilityPermissions()
-        print("[LOG] Discord Test - Accessibility permissions: \(hasPermissions)")
+        Logger.info("Discord Test - Accessibility permissions: \(hasPermissions)")
         
         let eventTapValid = appDelegate?.isEventTapValid() ?? false
-        print("[LOG] Discord Test - Event tap valid: \(eventTapValid)")
+        Logger.info("Discord Test - Event tap valid: \(eventTapValid)")
         
         // 检查焦点元素
         if let focused = AXController.shared.getFocusedElement() {
-            print("[LOG] Discord Test - Focused element found")
+            Logger.info("Discord Test - Focused element found")
             
             // 尝试获取内容
             if let value = AXController.shared.getValue(of: focused) {
-                print("[LOG] Discord Test - Current content: '\(value)'")
-                print("[LOG] Discord Test - Content length: \(value.count)")
+                Logger.info("Discord Test - Current content: '\(value)'")
+                Logger.info("Discord Test - Content length: \(value.count)")
                 
                 // 测试预处理
                 let isDiscordOrChat = AXController.shared.isDiscordOrChatApp()
-                print("[LOG] Discord Test - Detected as chat app: \(isDiscordOrChat)")
+                Logger.info("Discord Test - Detected as chat app: \(isDiscordOrChat)")
                 
                 // 测试触发器检测
                 if let result = AXController.shared.detectTriggerAndExtract() {
-                    print("[LOG] Discord Test - Trigger detected: text='\(result.text)', lang='\(result.lang)'")
+                    Logger.info("Discord Test - Trigger detected: text='\(result.text)', lang='\(result.lang)'")
                 } else {
-                    print("[LOG] Discord Test - No trigger detected")
+                    Logger.info("Discord Test - No trigger detected")
                     
                     // 检查常见模式
                     let testPatterns = ["@en", "#en", "@zh", "#zh"]
                     for pattern in testPatterns {
                         if value.lowercased().contains(pattern) {
-                            print("[LOG] Discord Test - Found '\(pattern)' in content but not detected as trigger")
-                            print("[LOG] Discord Test - Raw content: '\(value)'")
-                            print("[LOG] Discord Test - Lowercased: '\(value.lowercased())'")
+                            Logger.info("Discord Test - Found '\(pattern)' in content but not detected as trigger")
+                            Logger.info("Discord Test - Raw content: '\(value)'")
+                            Logger.info("Discord Test - Lowercased: '\(value.lowercased())'")
                         }
                     }
                 }
             } else {
-                print("[LOG] Discord Test - Cannot get value from focused element")
+                Logger.info("Discord Test - Cannot get value from focused element")
             }
         } else {
-            print("[LOG] Discord Test - No focused element found")
+            Logger.info("Discord Test - No focused element found")
         }
         
-        print("[LOG] === Discord Trigger Test Completed ===")
+        Logger.info("=== Discord Trigger Test Completed ===")
     }
 
     // 专门测试空格键捕获
     func testSpaceKeyCapture() {
-        print("[LOG] === Space Key Capture Test Started ===")
+        Logger.info("=== Space Key Capture Test Started ===")
         
         let initialSpaceCount = spaceKeyEventCount
         let initialTotalCount = totalKeyEventCount
         
-        print("[LOG] Space Key Test - Initial space key count: \(initialSpaceCount)")
-        print("[LOG] Space Key Test - Initial total key count: \(initialTotalCount)")
-        print("[LOG] Space Key Test - Event tap valid: \(appDelegate?.isEventTapValid() ?? false)")
+        Logger.info("Space Key Test - Initial space key count: \(initialSpaceCount)")
+        Logger.info("Space Key Test - Initial total key count: \(initialTotalCount)")
+        Logger.info("Space Key Test - Event tap valid: \(appDelegate?.isEventTapValid() ?? false)")
         
         // 提示用户按空格键
         let alert = NSAlert()
-        alert.messageText = "空格键测试"
-        alert.informativeText = "请在任意输入框中按几次空格键，然后点击'完成测试'按钮。\n\n当前空格键事件计数: \(spaceKeyEventCount)"
+        alert.messageText = "Space Key Test"
+        alert.informativeText = "Please press the space key in any input field a few times, then click the 'Complete Test' button.\n\nCurrent space key event count: \(spaceKeyEventCount)"
         alert.alertStyle = .informational
-        alert.addButton(withTitle: "完成测试")
-        alert.addButton(withTitle: "取消")
+        alert.addButton(withTitle: "Complete Test")
+        alert.addButton(withTitle: "Cancel")
         
         let response = alert.runModal()
         if response == .alertFirstButtonReturn {
@@ -651,28 +577,28 @@ class InputMonitor {
             let finalSpaceCount = spaceKeyEventCount
             let finalTotalCount = totalKeyEventCount
             
-            print("[LOG] Space Key Test - Final space key count: \(finalSpaceCount)")
-            print("[LOG] Space Key Test - Final total key count: \(finalTotalCount)")
-            print("[LOG] Space Key Test - Space key events captured: \(finalSpaceCount - initialSpaceCount)")
-            print("[LOG] Space Key Test - Total key events captured: \(finalTotalCount - initialTotalCount)")
+            Logger.info("Space Key Test - Final space key count: \(finalSpaceCount)")
+            Logger.info("Space Key Test - Final total key count: \(finalTotalCount)")
+            Logger.info("Space Key Test - Space key events captured: \(finalSpaceCount - initialSpaceCount)")
+            Logger.info("Space Key Test - Total key events captured: \(finalTotalCount - initialTotalCount)")
             
             let resultAlert = NSAlert()
             if finalSpaceCount > initialSpaceCount {
-                resultAlert.messageText = "空格键测试成功"
-                resultAlert.informativeText = "捕获到 \(finalSpaceCount - initialSpaceCount) 个空格键事件"
+                resultAlert.messageText = "Space Key Test Success"
+                resultAlert.informativeText = "Captured \(finalSpaceCount - initialSpaceCount) space key events"
                 resultAlert.alertStyle = .informational
-                print("[LOG] Space Key Test - SUCCESS: Space key capture is working")
+                Logger.info("Space Key Test - SUCCESS: Space key capture is working")
             } else {
-                resultAlert.messageText = "空格键测试失败"
-                resultAlert.informativeText = "没有捕获到空格键事件，但捕获到 \(finalTotalCount - initialTotalCount) 个其他键事件"
+                resultAlert.messageText = "Space Key Test Failed"
+                resultAlert.informativeText = "No space key events captured, but captured \(finalTotalCount - initialTotalCount) other key events"
                 resultAlert.alertStyle = .warning
-                print("[LOG] Space Key Test - FAILURE: Space key capture is not working")
+                Logger.info("Space Key Test - FAILURE: Space key capture is not working")
             }
-            resultAlert.addButton(withTitle: "确定")
+            resultAlert.addButton(withTitle: "OK")
             resultAlert.runModal()
         }
         
-        print("[LOG] === Space Key Capture Test Completed ===")
+        Logger.info("=== Space Key Capture Test Completed ===")
     }
     
     // 重置统计计数器
@@ -680,18 +606,18 @@ class InputMonitor {
         spaceKeyEventCount = 0
         totalKeyEventCount = 0
         lastEventTime = Date()
-        lastSpaceKeyTime = Date.distantPast
-        print("[LOG] Event counters reset")
+        lastSpaceKeyTime = Date()
+        Logger.info("Event counters reset")
     }
     
-    // 强制触发健康检查
-    func forceHealthCheck() {
-        print("[LOG] Force health check requested")
-        performHealthCheck()
+    // 强制触发业务逻辑检查
+    func forceBusinessLogicCheck() {
+        Logger.info("Force business logic check requested")
+        checkBusinessLogicHealth()
     }
 
     func handleCmdA() {
-        print("[LOG] Handling Cmd+A event")
+        Logger.info("Handling Cmd+A event")
         // 延迟检查，让 Cmd+A 操作完成
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             // 通知 AXController 检查文本选择
