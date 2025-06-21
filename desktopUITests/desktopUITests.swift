@@ -858,6 +858,177 @@ final class desktopUITests: XCTestCase {
 
     }
     
+    /**
+     Chrome 137.0.7151.120
+     
+     */
+    func testChrome() throws {
+        let targetApp = XCUIApplication(bundleIdentifier: "com.google.Chrome")
+        
+        // 1.启动Discord
+        targetApp.launch()
+        
+        XCTAssertTrue(targetApp.wait(for: .runningForeground, timeout: 5), "Chrome 启动失败")
+
+        // 5.启动我们的 Glotera app
+        let app = XCUIApplication()
+        app.launch()
+        
+        // 6.获取编辑框
+        
+        // 6.获取编辑框
+        let textEditor = targetApp.comboBoxes["Search Google or type a URL"]
+        
+        
+        textEditor.tap()
+        
+        let pos_begin = textEditor.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.02))
+        let pos_end = textEditor.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.8))
+        /** TEST1:          选中中间的"你好呀",然后弹窗进行翻译，翻译后替换原来中间的”你好呀“，并检测正确性   -----------------    **/
+        // TEST1.1.全选已有内容
+        
+        
+        let testString = "你好呀"
+        let blankString = ". "
+        let testStringLen = testString.count
+        let testStringWidth = 120
+        let Y = 20
+        textEditor.typeText(testString + blankString)
+        let pos0 = textEditor.coordinate(withNormalizedOffset:.zero)
+        
+        let pos1 = textEditor.coordinate(withNormalizedOffset:.zero).withOffset(CGVector(dx: testStringWidth, dy: Y))
+        pos1.tap()
+        textEditor.typeText(testString + blankString)
+        let pos2 = textEditor.coordinate(withNormalizedOffset:.zero).withOffset(CGVector(dx: testStringWidth*2, dy:Y))
+        pos2.tap()
+        textEditor.typeText(testString + blankString)
+        let pos3 = textEditor.coordinate(withNormalizedOffset:.zero).withOffset(CGVector(dx: testStringWidth*3, dy: Y))
+        
+        
+        let pos4 = textEditor.coordinate(withNormalizedOffset:.zero).withOffset(CGVector(dx: testStringWidth*4, dy: Y))
+        // TEST1.2.选中部分文字进行弹窗翻译后插入，选中的是"好呀  你"，翻译后应该满足 "你好呀  你.+好呀  "
+        pos1.click(forDuration: 1, thenDragTo: pos2)
+        
+        var windowsQuery = app.windows
+        var popUpButton = app.popUpButtons.element(boundBy: 0)
+        popUpButton.click()
+        windowsQuery = app.windows
+        
+        // TEST1.3.选中英语进行翻译
+        windowsQuery.menuItems["English"].click()
+        
+        sleep(5)
+        // TEST1.3.自动插入后，检验结果是否满足 "你好呀  你.+好呀  " 正则表达式
+        var translatedString : String! = textEditor.value as! String
+        print("translatedString:" + translatedString)
+        // 定义正则表达式："你好呀  你.+好呀  "
+        let pattern = "你好呀\\s+你.+好呀\\s+"
+        
+        
+        let regex = try NSRegularExpression(pattern: pattern)
+        let matches = regex.matches(in: translatedString, range: NSRange(translatedString.startIndex..., in: translatedString))
+        
+        
+        // XCTAssertTrue(matches.count > 0, "输入框部分翻译插入失败")
+        
+        
+        /** TEST2:          全选输入框文字,然后弹窗进行翻译，翻译后整体替换原来输入框文字，并检测正确性   -----------------    **/
+        // TEST2.1.全选已有内容
+        textEditor.tap()
+        pos_begin.click(forDuration: 1, thenDragTo: pos_end)
+        
+        
+        
+        textEditor.typeText(testString + blankString + testString + blankString + testString + blankString)
+        
+        
+        pos3.tap()
+        
+        // TEST2.2.输入 #en 触发翻译
+        textEditor.typeText("#en ")
+        
+        
+        sleep(3)
+        // TEST2.3.整体翻译后，检查结果是否是 "Hello there, hello there, hello there."
+        translatedString = textEditor.value as! String
+        print("translatedString:" + translatedString)
+        
+        
+        // 定义正则表达式："你好呀  你.+好呀  "
+        var matchString = "Hello there, hello there, hello there"
+        
+        
+        //  XCTAssertTrue(translatedString == matchString, "输入框整体翻译插入失败")
+        
+        
+        pos4.tap()
+        
+        pos_begin.click(forDuration: 1, thenDragTo: pos_end)
+        
+        
+        let testWeb = "https://baike.baidu.com/item/人工智能/24604211"
+        
+        textEditor.typeText(testWeb)
+        
+        // TEST2.4.回车发送
+        textEditor.typeText("\n")
+        textEditor.typeText("\n")
+        
+        
+        sleep(3)
+        
+      //  showAppWindows(app: targetApp)
+        /** TEST3:          在聊天记录中，选中刚发发送的"你好呀你好呀你好呀"对应的英文翻译，弹出翻译弹窗，下来语言选择框，选择"中文' 进行翻译，并检测翻译结果的正确性   -----------------    **/
+        
+        // TEST3.1.获取最后一条聊天记录
+        let messageList = targetApp.staticTexts["人工智能"]
+        print("messageList:\(messageList.debugDescription)")
+        
+        let lastMessageLabel : XCUIElement! = messageList.firstMatch as! XCUIElement
+        print("lastMessageLabel:\(lastMessageLabel.debugDescription)")
+        
+        let lastMessageLabelFrame = lastMessageLabel.frame
+        let endX = lastMessageLabelFrame.width - 3
+        let midX = lastMessageLabelFrame.width - 150
+        let startX = endX - 180
+        let midY = lastMessageLabelFrame.height / 2.0
+        
+        // TEST3.2.选中
+        let lastMessageLabelMidPoint = lastMessageLabel.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx:midX,dy: midY))
+        
+        lastMessageLabel.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx:endX,dy: midY)).click(forDuration: 1.0, thenDragTo: lastMessageLabel.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx:startX,dy: midY)), withVelocity: 1000, thenHoldForDuration: 1)
+        
+        
+        sleep(5)
+        
+        popUpButton = app.popUpButtons.element(boundBy: 0)
+        print("app:\(app.debugDescription),app.popUpButtons:\(app.popUpButtons)")
+        popUpButton.click()
+        windowsQuery = app.windows
+        
+        // TEST3.3.选中中文进行翻译
+        windowsQuery.menuItems["English"].click()
+        
+        sleep(3)
+        
+        
+        // TEST3.4.检测翻译结果
+        
+        let appScrollView = app.scrollViews.firstMatch
+        let translatedStaticText = appScrollView.staticTexts.firstMatch
+        translatedString = translatedStaticText.value as! String
+        print("translatedString:" + translatedString)
+        
+        
+        // 定义正则表达式："你好呀  你.+好呀  "
+        matchString = "Artificial Intelligence"
+        
+        
+        XCTAssertTrue(translatedString == matchString, "翻译失败")
+        
+        windowsQuery.buttons["Close"].click()
+        
+    }
     
     @MainActor
     func testLaunchPerformance() throws {
