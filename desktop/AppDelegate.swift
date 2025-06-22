@@ -201,11 +201,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // 先禁用再启用，确保状态重置
         CGEvent.tapEnable(tap: eventTap, enable: false)
-        Thread.sleep(forTimeInterval: 0.01) // 10ms 短暂延迟
         CGEvent.tapEnable(tap: eventTap, enable: true)
-        
-        // 等待一小段时间让系统处理
-        Thread.sleep(forTimeInterval: 0.05) // 50ms
         
         // 验证是否成功
         let isEnabled = CGEvent.tapIsEnabled(tap: eventTap)

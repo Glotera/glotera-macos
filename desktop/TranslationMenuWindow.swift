@@ -444,7 +444,6 @@ class TranslationMenuWindow: NSWindow {
         cmdVUp.flags = .maskCommand
         
         cmdVDown.post(tap: .cghidEventTap)
-        usleep(50000) // 50ms
         cmdVUp.post(tap: .cghidEventTap)
         Logger.info("Sent immediate paste command.")
     }

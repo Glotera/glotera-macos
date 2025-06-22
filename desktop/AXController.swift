@@ -1182,25 +1182,27 @@ class AXController {
                     Logger.warn("Event Tap disabled after translation - attempting recovery")
                     
                     // 尝试多次快速恢复，翻译后的失效可能需要更强力的恢复
-                    var recovered = false
-                    for attempt in 1...3 {
-                        if appDelegate.quickEnableEventTap() {
-                            Logger.info("Event Tap recovery successful after translation (attempt \(attempt))")
-                            recovered = true
-                            break
-                        } else {
-                            Logger.warn("Recovery attempt \(attempt) failed")
-                            if attempt < 3 {
-                                // 递增延迟
-                                Thread.sleep(forTimeInterval: Double(attempt) * 0.1)
+                    // 移到后台线程避免阻塞主线程
+                    DispatchQueue.global(qos: .utility).async {
+                        var recovered = false
+                        for attempt in 1...3 {
+                            if appDelegate.quickEnableEventTap() {
+                                Logger.info("Event Tap recovery successful after translation (attempt \(attempt))")
+                                recovered = true
+                                break
+                            } else {
+                                Logger.warn("Recovery attempt \(attempt) failed")
+                                if attempt < 3 {
+                                    // 递增延迟
+                                    Thread.sleep(forTimeInterval: Double(attempt) * 0.1)
+                                }
                             }
                         }
+                        
+                        
                     }
                     
-                    if !recovered {
-                        Logger.warn("All recovery attempts failed after translation - requesting full restart")
-                        appDelegate.restartEventMonitoring()
-                    }
+
                 } else {
                     Logger.info("Event Tap healthy after translation")
                 }
