@@ -265,7 +265,6 @@ final class desktopUITests: XCTestCase {
         sleep(5)
         
         popUpButton = app.popUpButtons.element(boundBy: 0)
-        print("app:\(app.debugDescription),app.popUpButtons:\(app.popUpButtons)")
         popUpButton.click()
         windowsQuery = app.windows
         
@@ -478,7 +477,6 @@ final class desktopUITests: XCTestCase {
         sleep(5)
         
         popUpButton = app.popUpButtons.element(boundBy: 0)
-        print("app:\(app.debugDescription),app.popUpButtons:\(app.popUpButtons)")
         popUpButton.click()
         windowsQuery = app.windows
         
@@ -544,7 +542,6 @@ final class desktopUITests: XCTestCase {
 
         // 6.获取编辑框
         let textEditor = targetApp.textViews.matching(predicate).firstMatch
-        print("textEditor:\(textEditor)")
         textEditor.tap()
 
         let pos_begin = textEditor.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.1))
@@ -676,7 +673,6 @@ final class desktopUITests: XCTestCase {
         sleep(5)
         
         popUpButton = app.popUpButtons.element(boundBy: 0)
-        print("app:\(app.debugDescription),app.popUpButtons:\(app.popUpButtons)")
         popUpButton.click()
         windowsQuery = app.windows
         
@@ -868,7 +864,6 @@ final class desktopUITests: XCTestCase {
         sleep(5)
         
         popUpButton = app.popUpButtons.element(boundBy: 0)
-        print("app:\(app.debugDescription),app.popUpButtons:\(app.popUpButtons)")
         popUpButton.click()
         windowsQuery = app.windows
         
@@ -1022,10 +1017,8 @@ final class desktopUITests: XCTestCase {
         
         // TEST3.1.获取最后一条聊天记录
         let messageList = targetApp.staticTexts["人工智能"]
-        print("messageList:\(messageList.debugDescription)")
         
         let lastMessageLabel : XCUIElement! = messageList.firstMatch as! XCUIElement
-        print("lastMessageLabel:\(lastMessageLabel.debugDescription)")
         
         let lastMessageLabelFrame = lastMessageLabel.frame
         let endX = lastMessageLabelFrame.width - 3
@@ -1042,7 +1035,6 @@ final class desktopUITests: XCTestCase {
         sleep(5)
         
         popUpButton = app.popUpButtons.element(boundBy: 0)
-        print("app:\(app.debugDescription),app.popUpButtons:\(app.popUpButtons)")
         popUpButton.click()
         windowsQuery = app.windows
         
@@ -1091,7 +1083,6 @@ final class desktopUITests: XCTestCase {
    
         var textEditor : XCUIElement! = targetApp.comboBoxes["搜索"].firstMatch
         
-        print("textEditor:\(textEditor.debugDescription)")
         
         var pos_begin = textEditor.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5))
         
@@ -1201,10 +1192,8 @@ final class desktopUITests: XCTestCase {
         
         // TEST3.1.获取最后一条聊天记录
         let messageList = targetApp.staticTexts["人工智能"]
-        print("messageList:\(messageList.debugDescription)")
         
         let lastMessageLabel : XCUIElement! = messageList.firstMatch as! XCUIElement
-        print("lastMessageLabel:\(lastMessageLabel.debugDescription)")
         
         let lastMessageLabelFrame = lastMessageLabel.frame
         let endX = lastMessageLabelFrame.width - 3
@@ -1221,7 +1210,6 @@ final class desktopUITests: XCTestCase {
         sleep(5)
         
         popUpButton = app.popUpButtons.element(boundBy: 0)
-        print("app:\(app.debugDescription),app.popUpButtons:\(app.popUpButtons)")
         popUpButton.click()
         windowsQuery = app.windows
         
@@ -1407,11 +1395,6 @@ final class desktopUITests: XCTestCase {
         
         
         // 6.获取编辑框
-        
-        
-        
-   
-
         var newChatButton = targetApp.buttons["New Chat (⌘N) [⌥] New Tab (⌘T)"]
         var settingButton = targetApp.popUpButtons["Close, Export, Settings and More..."]
 
@@ -1428,9 +1411,10 @@ final class desktopUITests: XCTestCase {
         var clearAllChatMenuItem = targetApp.menuItems["Clear All Chats"]
         clearAllChatMenuItem.click()
         
-        newChatButton.click()
+        //newChatButton.click()
         var textEditor = targetApp.staticTexts.matching(predicate).firstMatch
-        
+        textEditor.typeText("只输出 test 这个单词\n")
+        sleep(5)
         
         var pos_begin = textEditor.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.02))
         var pos_end = textEditor.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 1))
@@ -1477,7 +1461,7 @@ final class desktopUITests: XCTestCase {
         windowsQuery.menuItems["English"].click()
         
  
-        
+        sleep(3)
         // TEST1.3.自动插入后，检验结果是否满足 "你好呀  你.+好呀  " 正则表达式
         var translatedString : String! = textEditor.value as! String
         print("translatedString:" + translatedString)
@@ -1527,43 +1511,19 @@ final class desktopUITests: XCTestCase {
         
     
         textEditor.typeText(" 直接输出前面这3句英文，其他不要输出\n")
-        
-        pos_begin = textEditor.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.02))
-        pos_end = textEditor.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.02))
 
-        pos_begin.click()
-        textEditor = targetApp.staticTexts.matching(predicate).firstMatch
-        pos_begin = textEditor.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.02))
-        pos_end = textEditor.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.02))
-        pos_begin.click(forDuration: 1, thenDragTo: pos_end)
-        textEditor.typeText(" ceshi")
+        sleep(5)
         
-
-        // 重新获得焦点
-        targetApp.activate()
-        
-        // 验证应用是否已回到前台
-        XCTAssertTrue(targetApp.wait(for: .runningForeground, timeout: 5))
-        
-        showAppWindows(app: targetApp)
-        
-        let lastMessageLabel : XCUIElement! = targetApp.staticTexts.matching(predicate).firstMatch
-        lastMessageLabel.waitForExistence(timeout: 20)
-        print("lastMessageLabel:\(lastMessageLabel.debugDescription)")
-        sleep(3)
-        let lastMessageLabelFrame = lastMessageLabel.frame
-        let endX = lastMessageLabelFrame.width
-        let midX = lastMessageLabelFrame.width - 150
-        let startX = endX - 210
-        let midY = lastMessageLabelFrame.height / 2.0
+ 
         
         // TEST3.2.选中
-        let lastMessageLabelMidPoint = lastMessageLabel.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx:midX,dy: midY))
-        lastMessageLabel.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx:endX,dy: midY)).click(forDuration: 1.0, thenDragTo: lastMessageLabel.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx:startX,dy: midY)), withVelocity: 1000, thenHoldForDuration: 1)
-        
+        let lastMessageLabel_begin : XCUICoordinate! = textEditor.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 0, dy: 50))
+
+        let lastMessageLabel_end : XCUICoordinate! = textEditor.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 260, dy: 50))
+
+        lastMessageLabel_begin.click(forDuration: 1, thenDragTo: lastMessageLabel_end)
         
         popUpButton = app.popUpButtons.element(boundBy: 0)
-        print("app:\(app.debugDescription),app.popUpButtons:\(app.popUpButtons)")
         popUpButton.click()
         windowsQuery = app.windows
         
@@ -1574,7 +1534,6 @@ final class desktopUITests: XCTestCase {
         
         
         // TEST3.4.检测翻译结果
-        
         let appScrollView = app.scrollViews.firstMatch
         let translatedStaticText = appScrollView.staticTexts.firstMatch
         translatedString = translatedStaticText.value as! String
@@ -1588,9 +1547,6 @@ final class desktopUITests: XCTestCase {
         XCTAssertTrue(translatedString == matchString, "翻译失败")
         
         windowsQuery.buttons["Close"].click()
-        
-        
-        showAppWindows(app: targetApp)
     }
     
     @MainActor
