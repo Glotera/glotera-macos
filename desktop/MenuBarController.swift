@@ -45,6 +45,24 @@ class MenuBarController {
         testSpaceKeyItem.target = self
         debugSubMenu.addItem(testSpaceKeyItem)
         
+        let testWeChatEnterItem = NSMenuItem(title: "Test WeChat Enter Key", action: #selector(testWeChatEnterKey), keyEquivalent: "")
+        testWeChatEnterItem.target = self
+        debugSubMenu.addItem(testWeChatEnterItem)
+        
+        let testEnterLoopItem = NSMenuItem(title: "Test Enter Key Loop", action: #selector(testEnterKeyLoop), keyEquivalent: "")
+        testEnterLoopItem.target = self
+        debugSubMenu.addItem(testEnterLoopItem)
+        
+        debugSubMenu.addItem(NSMenuItem.separator())
+        
+        let showCacheInfoItem = NSMenuItem(title: "Show Language Cache Info", action: #selector(showLanguageCacheInfo), keyEquivalent: "")
+        showCacheInfoItem.target = self
+        debugSubMenu.addItem(showCacheInfoItem)
+        
+        let refreshCacheItem = NSMenuItem(title: "Refresh Language Cache", action: #selector(refreshLanguageCache), keyEquivalent: "")
+        refreshCacheItem.target = self
+        debugSubMenu.addItem(refreshCacheItem)
+        
         let showStatusItem = NSMenuItem(title: "Show Status", action: #selector(showStatus), keyEquivalent: "")
         showStatusItem.target = self
         debugSubMenu.addItem(showStatusItem)
@@ -141,6 +159,51 @@ class MenuBarController {
     @objc func testSpaceKeyCapture() {
         Logger.info("Space key capture test requested")
         InputMonitor.shared.testSpaceKeyCapture()
+    }
+    
+    @objc func testWeChatEnterKey() {
+        Logger.info("WeChat Enter key test requested")
+        
+        // 在后台线程执行测试，避免阻塞主线程
+        DispatchQueue.global(qos: .userInitiated).async {
+            InputMonitor.shared.testWeChatEnterKey()
+        }
+    }
+    
+    @objc func testEnterKeyLoop() {
+        Logger.info("Enter key loop test requested")
+        
+        // 在后台线程执行测试，避免阻塞主线程
+        DispatchQueue.global(qos: .userInitiated).async {
+            InputMonitor.shared.testEnterKeyLoop()
+        }
+    }
+    
+    @objc func showLanguageCacheInfo() {
+        Logger.info("Language cache info requested")
+        
+        let cacheInfo = LanguageConfigManager.shared.getCacheInfo()
+        Logger.info("Cache info: \(cacheInfo)")
+        
+        // 显示缓存信息窗口
+        DispatchQueue.main.async {
+            self.showStatusWindow(statusInfo: cacheInfo)
+        }
+    }
+    
+    @objc func refreshLanguageCache() {
+        Logger.info("Language cache refresh requested")
+        
+        DispatchQueue.global(qos: .userInitiated).async {
+            LanguageConfigManager.shared.refreshCache()
+            
+            DispatchQueue.main.async {
+                self.showNonBlockingNotification(
+                    title: "Cache Refreshed",
+                    message: "Language configuration cache has been refreshed"
+                )
+            }
+        }
     }
     
     @objc func showStatus() {

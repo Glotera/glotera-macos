@@ -14,6 +14,10 @@ class InputMonitor {
     private var lastTranslationTime: Date?
     private var lastSelectionTranslationTime: Date?
     
+    // 防止死循环的标志
+    private var isSendingEnterKey = false
+    private var enterKeySentTime: Date?
+    
     // 添加 AppDelegate 引用以便统一管理
     private weak var appDelegate: AppDelegate?
 
@@ -293,40 +297,43 @@ class InputMonitor {
 
     // 检查是否应该拦截回车键进行翻译 - 优化版本
     func shouldInterceptEnter() -> Bool {
-        // 使用缓存的最后一次空格键事件时间来决定是否需要检查
-        let timeSinceLastSpace = Date().timeIntervalSince(lastSpaceKeyTime)
-        
-        // 如果距离上次空格键超过5秒，很可能没有触发器
-        if timeSinceLastSpace > 5.0 {
+        // 防止拦截我们自己发送的Enter键
+        if isSendingEnterKey {
+            Logger.info("Ignoring Enter key - we are currently sending one")
             return false
         }
+        
+        // 如果最近刚发送过Enter键，也忽略（防止时序问题）
+        if let sentTime = enterKeySentTime,
+           Date().timeIntervalSince(sentTime) < 1.0 {
+            Logger.info("Ignoring Enter key - recently sent one")
+            return false
+        }
+        
+        // 使用缓存的最后一次空格键事件时间来决定是否需要检查
+        let timeSinceLastSpace = Date().timeIntervalSince(lastSpaceKeyTime) 
         
         // 快速检查当前输入内容是否包含触发器
         guard let focused = AXController.shared.getFocusedElement(),
               let value = AXController.shared.getValue(of: focused) else {
             return false
-        }
-        
-        // 快速预筛选：如果内容太短或太长，不太可能有触发器
-        if value.count < 3 || value.count > 1000 {
-            return false
-        }
+        } 
         
         // 简单检查是否包含语言代码的前缀字符
-        let content = value.lowercased()
-        if !content.contains("@") && !content.contains("#") && !content.contains(" ") {
-            return false
-        }
+        // let content = value.lowercased()
+        // if !content.contains("@") && !content.contains("#") && !content.contains(" ") {
+        //     return false
+        // }
         
-        // 检查常见的语言代码模式
-        let quickPatterns = ["@en", "#en", "@zh", "#zh", "@id", "#id", " en ", " zh ", " id "]
-        for pattern in quickPatterns {
-            if content.contains(pattern) {
-                return true
-            }
-        }
+        // // 检查常见的语言代码模式
+        // let quickPatterns = ["@en", "#en", "@zh", "#zh", "@id", "#id", " en ", " zh ", " id "]
+        // for pattern in quickPatterns {
+        //     if content.contains(pattern) {
+        //         return true
+        //     }
+        // }
         
-        return false
+        return true
     }
     
     // 处理被拦截的回车键
@@ -367,8 +374,12 @@ class InputMonitor {
                     AXController.shared.replaceInput(with: translated) {
                         Logger.info("Auto-translation with send completed")
                         
-                        // 等待一小段时间确保内容更新，然后发送回车键
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        // 根据不同应用调整延迟时间
+                        let isWeChat = self?.isWeChatApp() ?? false
+                        let delay = isWeChat ? 0.3 : 0.3  // 微信需要更长的延迟确保内容完全更新
+                        
+                        Logger.info("Waiting \(delay)s before sending Enter key (WeChat: \(isWeChat))")
+                        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                             self?.sendEnterKey()
                         }
                     }
@@ -389,13 +400,161 @@ class InputMonitor {
     private func sendEnterKey() {
         Logger.info("Sending Enter key event")
         
+        // 设置标志防止拦截我们自己发送的Enter键
+        isSendingEnterKey = true
+        enterKeySentTime = Date()
+        
+        // 检查是否为微信，微信需要特殊处理
+        let isWeChat = isWeChatApp()
+        
+        if isWeChat {
+            // 微信需要特殊处理：确保焦点正确且使用适当的事件发送方式
+            sendEnterKeyForWeChat()
+        } else {
+            // 其他应用（包括Discord、钉钉等）使用标准方式
+            sendEnterKeyStandard()
+        }
+        
+        // 延迟清除标志，确保Enter键事件已经处理完毕
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            self.isSendingEnterKey = false
+            Logger.info("Enter key sending flag cleared")
+        }
+    }
+    
+    // 微信专用的Enter键发送
+    private func sendEnterKeyForWeChat() {
+        Logger.info("Sending Enter key for WeChat")
+        
+        // 确保微信窗口获得焦点
+        ensureWeChatFocus { focused in
+            guard focused else {
+                Logger.warn("WeChat: Failed to ensure focus for Enter key")
+                return
+            }
+            
+            // 等待焦点稳定后发送Enter键
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                // 使用最直接有效的方法发送Enter键
+                self.sendWeChatEnterKeyDirect()
+            }
+        }
+    }
+    
+    // 直接发送微信Enter键的优化方法
+    private func sendWeChatEnterKeyDirect() {
+        Logger.info("WeChat: Sending Enter key directly")
+        
+        // 先验证输入框内容是否已更新（可选的安全检查）
+        if let focused = AXController.shared.getFocusedElement(),
+           let currentContent = AXController.shared.getValue(of: focused) {
+            Logger.info("WeChat: Current input content before Enter: '\(currentContent)'")
+        }
+        
+        // 使用AppleScript是最可靠的方法，因为它直接与系统事件交互
+        let script = """
+        tell application "System Events"
+            tell process "WeChat"
+                key code 36
+            end tell
+        end tell
+        """
+        
+        var error: NSDictionary?
+        if let scriptObject = NSAppleScript(source: script) {
+            scriptObject.executeAndReturnError(&error)
+            if error == nil {
+                Logger.info("WeChat: Enter key sent successfully via AppleScript")
+            } else {
+                Logger.warn("WeChat: AppleScript failed: \(error?.description ?? "Unknown error"), trying CGEvent")
+                // 如果AppleScript失败，回退到CGEvent方法
+                self.sendWeChatEnterKeyViaCGEvent()
+            }
+        } else {
+            Logger.warn("WeChat: Failed to create AppleScript, trying CGEvent")
+            self.sendWeChatEnterKeyViaCGEvent()
+        }
+    }
+    
+    // 使用CGEvent发送微信Enter键（备用方法）
+    private func sendWeChatEnterKeyViaCGEvent() {
+        Logger.info("WeChat: Sending Enter key via CGEvent")
+        
+        let source = CGEventSource(stateID: .hidSystemState)
+        if let enterKeyDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Return), keyDown: true),
+           let enterKeyUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Return), keyDown: false) {
+            
+            // 设置事件标志以确保微信能够识别
+            enterKeyDown.flags = []
+            enterKeyUp.flags = []
+            
+            // 发送按下事件
+            enterKeyDown.post(tap: .cghidEventTap)
+            
+            // 稍微延迟后发送释放事件
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                enterKeyUp.post(tap: .cghidEventTap)
+                Logger.info("WeChat: Enter key sent via CGEvent")
+            }
+        } else {
+            Logger.error("WeChat: Failed to create CGEvent Enter key events")
+        }
+    }
+    
+
+    
+    // 标准的Enter键发送
+    private func sendEnterKeyStandard() {
+        Logger.info("Sending Enter key (standard method)")
+        
         let source = CGEventSource(stateID: .hidSystemState)
         if let enterKeyDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Return), keyDown: true),
            let enterKeyUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Return), keyDown: false) {
             
             enterKeyDown.post(tap: .cghidEventTap)
             enterKeyUp.post(tap: .cghidEventTap)
+            Logger.info("Standard: Enter key sent successfully")
         }
+    }
+    
+    // 确保微信应用获得焦点
+    private func ensureWeChatFocus(completion: @escaping (Bool) -> Void) {
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+              let bundleId = frontmostApp.bundleIdentifier,
+              bundleId.contains("wechat") || bundleId.contains("WeChat") else {
+            Logger.warn("WeChat: Not currently the frontmost application")
+            completion(false)
+            return
+        }
+        
+        // 微信已经是前台应用，直接成功
+        Logger.info("WeChat: Already focused")
+        completion(true)
+    }
+    
+    // 检查当前应用是否为微信
+    private func isWeChatApp() -> Bool {
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+              let bundleId = frontmostApp.bundleIdentifier else {
+            return false
+        }
+        
+        // 微信的Bundle ID通常是com.tencent.xinWeChat
+    
+        let wechatBundleIds = [
+            "com.tencent.xinWeChat",  // 官方微信
+            "com.tencent.WeChat",     // 可能的变体
+            "com.tencent.wechat"      // 可能的变体
+        ]
+        
+        let isWeChat = wechatBundleIds.contains(bundleId) || 
+                      bundleId.lowercased().contains("wechat")
+        
+        if isWeChat {
+            Logger.info("WeChat detected with Bundle ID: \(bundleId)")
+        }
+        
+        return isWeChat
     }
     
     // 手动测试触发器检测（用于调试）
@@ -623,5 +782,97 @@ class InputMonitor {
             // 通知 AXController 检查文本选择
             AXController.shared.checkForTextSelectionAfterKeyboardSelection()
         }
+    }
+    
+    // 测试微信Enter键发送功能
+    func testWeChatEnterKey() {
+        Logger.info("=== WeChat Enter Key Test Started ===")
+        
+        let isWeChat = isWeChatApp()
+        Logger.info("WeChat Test - Is WeChat app: \(isWeChat)")
+        
+        if !isWeChat {
+            Logger.warn("WeChat Test - Warning: Not currently in WeChat app")
+            
+            // 显示当前应用信息
+            if let frontmostApp = NSWorkspace.shared.frontmostApplication,
+               let bundleId = frontmostApp.bundleIdentifier {
+                Logger.info("WeChat Test - Current app: \(frontmostApp.localizedName ?? "Unknown") (\(bundleId))")
+            }
+            
+            let alert = NSAlert()
+            alert.messageText = "WeChat Enter Key Test"
+            alert.informativeText = "Please switch to WeChat app first, then run this test again."
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            return
+        }
+        
+        // 提示用户准备测试
+        let alert = NSAlert()
+        alert.messageText = "WeChat Enter Key Test"
+        alert.informativeText = "Please:\n1. Open a WeChat chat window\n2. Type some text in the input field\n3. Click 'Test Enter Key' to simulate sending\n\nThis will test if the Enter key sending works correctly."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Test Enter Key")
+        alert.addButton(withTitle: "Cancel")
+        
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            Logger.info("WeChat Test - Starting Enter key test")
+            sendEnterKey()
+            
+            // 显示测试结果
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                let resultAlert = NSAlert()
+                resultAlert.messageText = "WeChat Enter Key Test"
+                resultAlert.informativeText = "Enter key has been sent. Did the message get sent in WeChat?\n\nCheck the Console.app logs for detailed information."
+                resultAlert.alertStyle = .informational
+                resultAlert.addButton(withTitle: "OK")
+                resultAlert.runModal()
+            }
+        }
+        
+        Logger.info("=== WeChat Enter Key Test Completed ===")
+    }
+    
+    // 测试Enter键死循环问题
+    func testEnterKeyLoop() {
+        Logger.info("=== Enter Key Loop Test Started ===")
+        
+        Logger.info("Current state:")
+        Logger.info("- isSendingEnterKey: \(isSendingEnterKey)")
+        Logger.info("- enterKeySentTime: \(enterKeySentTime?.description ?? "nil")")
+        
+        let alert = NSAlert()
+        alert.messageText = "Enter Key Loop Test"
+        alert.informativeText = "This test will simulate sending an Enter key to check for infinite loops.\n\nWatch the console logs to see if the Enter key sending stops properly."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Test Enter Key")
+        alert.addButton(withTitle: "Cancel")
+        
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            Logger.info("Testing Enter key loop prevention...")
+            
+            // 模拟发送Enter键
+            sendEnterKey()
+            
+            // 延迟显示结果
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                Logger.info("Final state:")
+                Logger.info("- isSendingEnterKey: \(self.isSendingEnterKey)")
+                Logger.info("- enterKeySentTime: \(self.enterKeySentTime?.description ?? "nil")")
+                
+                let resultAlert = NSAlert()
+                resultAlert.messageText = "Enter Key Loop Test"
+                resultAlert.informativeText = "Test completed. Check Console.app for detailed logs.\n\nIf you see repeated 'Sending Enter key event' messages, there's still a loop issue."
+                resultAlert.alertStyle = .informational
+                resultAlert.addButton(withTitle: "OK")
+                resultAlert.runModal()
+            }
+        }
+        
+        Logger.info("=== Enter Key Loop Test Completed ===")
     }
 } 

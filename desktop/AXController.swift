@@ -168,8 +168,7 @@ class AXController {
         for config in configs {
             allTriggers.append(contentsOf: config.triggers)
         }
-        
-        Logger.info("Loaded \(allTriggers.count) configured triggers from \(configs.count) languages")
+         
         return allTriggers
     }
     

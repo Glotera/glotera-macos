@@ -647,8 +647,11 @@ struct TranslationMenuView: View {
         ("de", "Deutsch"),
         ("es", "Español"),
         ("ru", "Русский"),
+        ("id", "Bahasa"),
         ("th", "ไทย"),
-        ("id", "Bahasa")
+        ("vi", "Tiếng Việt"),
+        ("ar", "العربية"),
+        ("hi", "हिन्दी") 
     ]
     
     var body: some View {
