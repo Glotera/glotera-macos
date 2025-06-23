@@ -2,8 +2,8 @@ import Foundation
 
 class TranslatorClient: NSObject {
     static let shared = TranslatorClient()
-//    let endpoint = "https://glotera.ai/api/translate"
-    let endpoint = "http://localhost:1145/api/translate"
+    let endpoint = "https://glotera.ai/api/translate"
+    // let endpoint = "http://localhost:1145/api/translate"
     private let timeoutInterval: TimeInterval = 30.0
     
     // 调试标志
@@ -80,7 +80,7 @@ class TranslatorClient: NSObject {
                     completion(nil)
                     return
                 }
-                Logger.info("Translation successful")
+                Logger.info("Translation successful: \(translated)")
                 completion(translated)
             } catch {
                 Logger.info("Failed to parse JSON response: \(error)")

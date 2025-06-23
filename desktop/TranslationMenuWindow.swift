@@ -188,35 +188,24 @@ class TranslationMenuWindow: NSWindow {
         hide()
         
         if isEditable {
-            // 可编辑元素：使用传统翻译 + 文本替换
+            // 对于可编辑元素，直接使用新的“仅粘贴”方法替换选中文本
             TranslationStatusWindow.shared.showTranslating(near: sourceElement)
             
-            TranslatorClient.shared.translate(text: selectedText, to: language) { [weak self] translated in
+            TranslatorClient.shared.translate(text: selectedText, to: language) { [weak self] translatedText in // <--- 注意这里的变化
                 DispatchQueue.main.async {
-                    if let translated = translated, !translated.isEmpty {
-                        Logger.info("Translation result: \(translated)")
-                        // 翻译成功后立即隐藏状态窗口，然后开始回填
-                        TranslationStatusWindow.shared.hideStatus()
-                        Logger.info("Status window hidden before text replacement")
-                        
-                        // 可编辑元素：替换选中的文本
-                        Logger.info("Replacing text in editable element")
-                        if let element = self?.sourceElement {
-                            self?.replaceSelectedText(in: element, with: translated) {
-                                Logger.info("Text replacement completed")
-                            }
-                        } else {
-                            Logger.info("No source element available for text replacement")
+                    TranslationStatusWindow.shared.hideStatus()
+                    if let translatedText = translatedText, let self = self { // <-- 这里是关键的修正
+                        // 调用新的、只粘贴不全选的方法
+                        AXController.shared.replaceSelectionWithPaste(with: translatedText, for: self.sourceElementPid) {
+                            Logger.info("Selection replaced successfully.")
                         }
                     } else {
-                        Logger.info("Translation failed or empty result")
                         TranslationStatusWindow.shared.showFailure()
                     }
                 }
             }
         } else {
-            // 不可编辑元素：使用流式翻译显示结果浮窗
-            Logger.info("Using stream translation for non-editable element")
+            // 对于不可编辑的元素，显示一个浮动窗口展示翻译结果（保留原逻辑）
             showStreamTranslationResult(original: selectedText, targetLanguage: language)
         }
     }

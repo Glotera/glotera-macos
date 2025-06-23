@@ -177,6 +177,11 @@ class InputMonitor {
     static let shared = InputMonitor()
 
     func handleSpaceKey() { 
+        // 如果当前是终端应用，则直接忽略，不执行任何操作
+        if AXController.shared.isTerminalApp() {
+            Logger.info("Terminal app detected, ignoring space key trigger.")
+            return
+        }
         
         // 添加更详细的诊断信息
         guard let focused = AXController.shared.getFocusedElement() else {
@@ -319,21 +324,37 @@ class InputMonitor {
             return false
         } 
         
-        // 简单检查是否包含语言代码的前缀字符
-        // let content = value.lowercased()
-        // if !content.contains("@") && !content.contains("#") && !content.contains(" ") {
-        //     return false
-        // }
+        // 如果最近通过菜单进行了划词翻译，不拦截回车
+        if let selectionTime = lastSelectionTranslationTime, Date().timeIntervalSince(selectionTime) < 2.0 {
+            return false
+        }
         
-        // // 检查常见的语言代码模式
-        // let quickPatterns = ["@en", "#en", "@zh", "#zh", "@id", "#id", " en ", " zh ", " id "]
-        // for pattern in quickPatterns {
-        //     if content.contains(pattern) {
-        //         return true
-        //     }
-        // }
+        // 如果是终端应用，不拦截回车
+        if AXController.shared.isTerminalApp() {
+            return false
+        }
         
-        return true
+        // 检查当前输入框内容是否有触发词
+        if let focused = AXController.shared.getFocusedElement(),
+           let value = AXController.shared.getValue(of: focused) {
+            // 简单检查是否包含语言代码的前缀字符
+            // let content = value.lowercased()
+            // if !content.contains("@") && !content.contains("#") && !content.contains(" ") {
+            //     return false
+            // }
+            
+            // // 检查常见的语言代码模式
+            // let quickPatterns = ["@en", "#en", "@zh", "#zh", "@id", "#id", " en ", " zh ", " id "]
+            // for pattern in quickPatterns {
+            //     if content.contains(pattern) {
+            //         return true
+            //     }
+            // }
+            
+            return true
+        }
+        
+        return false
     }
     
     // 处理被拦截的回车键

@@ -134,18 +134,19 @@ class AXController {
         let lineBreaks = value.enumerated().compactMap { $0.element == "\n" ? $0.offset : nil }
         if !lineBreaks.isEmpty {
             Logger.info("Newlines found at positions: \(lineBreaks)")
+            Logger.info("Value: \(value)")
         }
         
         // 预处理内容：清理可能的干扰文本
         let cleanedValue = preprocessContent(value) 
-        
+        Logger.info("xxx1")
         // 使用配置管理器获取所有触发器
         let allTriggers = getAllConfiguredTriggers()
         if allTriggers.isEmpty {
             Logger.warn("No configured triggers found, falling back to default patterns")
             return processContentWithDefaultTriggers(cleanedValue)
         }
-        
+        Logger.info("xxx2")
         // 动态生成正则表达式模式
         // let patterns = generateTriggerPatterns(triggers: allTriggers)
         
@@ -156,7 +157,7 @@ class AXController {
                 return result
             }
         } 
-
+        Logger.info("xxx3")
         return nil
     }
     
@@ -668,47 +669,47 @@ class AXController {
         
         // 对于其他应用（如Notion），使用更激进的清理策略
         // 移除常见的Notion界面元素文本
-        let notionInterferencePatterns = [
-            "Add cover",
-            "Add icon",
-            "Add comment",
-            "Untitled",
-            "Type '/' for commands",
-            "Press Enter to continue writing or type '/' for commands",
-            "Empty page",
-            "Start writing...",
-            "Click to edit",
-            "Add a page inside",
-            "New page",
-            "Template",
-            "Import",
-            "Database",
-            "Gallery",
-            "Board",
-            "Timeline",
-            "Calendar",
-            "List"
-        ]
+        // let notionInterferencePatterns = [
+        //     "Add cover",
+        //     "Add icon",
+        //     "Add comment",
+        //     "Untitled",
+        //     "Type '/' for commands",
+        //     "Press Enter to continue writing or type '/' for commands",
+        //     "Empty page",
+        //     "Start writing...",
+        //     "Click to edit",
+        //     "Add a page inside",
+        //     "New page",
+        //     "Template",
+        //     "Import",
+        //     "Database",
+        //     "Gallery",
+        //     "Board",
+        //     "Timeline",
+        //     "Calendar",
+        //     "List"
+        // ]
         
-        // 移除这些干扰文本（不区分大小写）
-        for pattern in notionInterferencePatterns {
-            cleaned = cleaned.replacingOccurrences(of: pattern, with: "", options: .caseInsensitive)
-        }
+        // // 移除这些干扰文本（不区分大小写）
+        // for pattern in notionInterferencePatterns {
+        //     cleaned = cleaned.replacingOccurrences(of: pattern, with: "", options: .caseInsensitive)
+        // }
         
         // 移除表格相关的干扰内容
         // 匹配类似 "Column 1Column 2Column 3" 这样的表格标题
-        cleaned = cleaned.replacingOccurrences(of: #"Column\s*\d+"#, with: "", options: .regularExpression)
+        // cleaned = cleaned.replacingOccurrences(of: #"Column\s*\d+"#, with: "", options: .regularExpression)
         
-        // 只合并连续的空格和制表符，保留换行符
-        cleaned = cleaned.replacingOccurrences(of: #"[ \t]+"#, with: " ", options: .regularExpression)
+        // // 只合并连续的空格和制表符，保留换行符
+        // cleaned = cleaned.replacingOccurrences(of: #"[ \t]+"#, with: " ", options: .regularExpression)
         
-        // 移除行首行尾的空白，但保留换行符
-        let lines = cleaned.components(separatedBy: .newlines)
-        let trimmedLines = lines.map { $0.trimmingCharacters(in: .whitespaces) }
-        cleaned = trimmedLines.joined(separator: "\n")
+        // // 移除行首行尾的空白，但保留换行符
+        // let lines = cleaned.components(separatedBy: .newlines)
+        // let trimmedLines = lines.map { $0.trimmingCharacters(in: .whitespaces) }
+        // cleaned = trimmedLines.joined(separator: "\n")
         
-        // 最终去掉首尾空白
-        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        // // 最终去掉首尾空白
+        // cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
         
         // 如果清理后的内容太短或为空，返回原内容
         if cleaned.isEmpty || cleaned.count < 3 {
@@ -718,7 +719,7 @@ class AXController {
         return cleaned
     }
     
-    // 检查当前应用是否为Discord或其他聊天应用
+    // 检查当前应用是否为Discord、聊天或终端应用
     func isDiscordOrChatApp() -> Bool {
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
               let bundleId = frontmostApp.bundleIdentifier else {
@@ -737,9 +738,36 @@ class AXController {
             "com.tdesktop.Telegram"
         ]
         
-        let result = chatAppBundleIds.contains(bundleId)
-        if result {
+        if chatAppBundleIds.contains(bundleId) {
             Logger.info("Detected chat app: \(frontmostApp.localizedName ?? "Unknown") (\(bundleId))")
+            return true
+        }
+
+        if isTerminalApp() {
+            return true
+        }
+        
+        return false
+    }
+
+    // 新增：检查当前应用是否为终端
+    func isTerminalApp() -> Bool {
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+              let bundleId = frontmostApp.bundleIdentifier else {
+            return false
+        }
+        
+        let terminalBundleIds = [
+            "com.googlecode.iterm2",    // iTerm2
+            "com.apple.Terminal",       // Terminal.app
+            "co.zeit.hyper",            // Hyper
+            "io.alacritty",             // Alacritty
+            "net.kovidgoyal.kitty"      // Kitty
+        ]
+        
+        let result = terminalBundleIds.contains(bundleId)
+        if result {
+            Logger.info("Detected terminal app: \(frontmostApp.localizedName ?? "Unknown") (\(bundleId))")
         }
         return result
     }
@@ -1130,7 +1158,6 @@ class AXController {
     // 精确的Web替换尝试（简化版本）
     private func attemptPreciseWebReplace(element: AXUIElement, originalValue: String, translatedText: String, attempt: Int, completion: @escaping (Bool) -> Void) {
          
-        // 策略：使用JavaScript选择触发器部分，然后粘贴
         if selectTriggerTextViaJS(originalValue: originalValue) {
             Logger.info("Successfully selected trigger text via JavaScript")
             
@@ -1157,69 +1184,12 @@ class AXController {
     
     // 翻译操作完成后检查和恢复 Event Tap
     private func checkAndRecoverEventTapAfterTranslation() {
-        // 延迟检查，给系统时间处理键盘模拟事件
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            Logger.info("Checking Event Tap status after translation...")
-            
-            // 获取 AppDelegate 实例
-            guard let appDelegate = NSApplication.shared.delegate as? AppDelegate else {
-                Logger.warn("Cannot get AppDelegate for Event Tap check")
-                return
-            }
-            
-            // 检查 Event Tap 是否仍然有效
-            if let eventTap = appDelegate.eventTap {
-                let isValid = CFMachPortIsValid(eventTap)
-                let isEnabled = CGEvent.tapIsEnabled(tap: eventTap)
-                let isActive = appDelegate.isEventMonitoringActive
-                 
-                // 分情况处理不同的状态问题
-                if !isValid {
-                    Logger.warn("Event Tap invalid after translation - requesting full restart")
+        // 增加一个小的延迟，确保翻译操作（特别是粘贴）已经完成
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            if let appDelegate = NSApp.delegate as? AppDelegate {
+                if !appDelegate.isEventTapValid() {
+                    Logger.warn("Event tap is invalid after translation, attempting to restart monitoring.")
                     appDelegate.restartEventMonitoring()
-                } else if !isEnabled || !isActive {
-                    Logger.warn("Event Tap disabled after translation - attempting recovery")
-                    
-                    // 尝试多次快速恢复，翻译后的失效可能需要更强力的恢复
-                    // 移到后台线程避免阻塞主线程
-                    DispatchQueue.global(qos: .utility).async {
-                        var recovered = false
-                        for attempt in 1...3 {
-                            if appDelegate.quickEnableEventTap() {
-                                Logger.info("Event Tap recovery successful after translation (attempt \(attempt))")
-                                recovered = true
-                                break
-                            } else {
-                                Logger.warn("Recovery attempt \(attempt) failed")
-                                if attempt < 3 {
-                                    // 递增延迟
-                                    Thread.sleep(forTimeInterval: Double(attempt) * 0.1)
-                                }
-                            }
-                        }
-                        
-                        
-                    }
-                    
-
-                } else {
-                    Logger.info("Event Tap healthy after translation")
-                }
-            } else {
-                Logger.warn("No Event Tap found after translation - system may need restart")
-                appDelegate.restartEventMonitoring()
-            }
-        }
-        
-        // 添加第二次检查，确保恢复成功
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            guard let appDelegate = NSApplication.shared.delegate as? AppDelegate else { return }
-            
-            if !appDelegate.isEventTapValid() {
-                Logger.warn("Event Tap still invalid 1s after translation - final recovery attempt")
-                if !appDelegate.quickEnableEventTap() {
-                    Logger.error("Final recovery failed - Event Tap may remain unstable")
-                    // 不强制重启，让健康检查系统处理
                 }
             }
         }
@@ -2328,7 +2298,62 @@ class AXController {
         
         return false
     }
-    
+
+       // 专用于替换选中文本的粘贴方法（不执行全选）
+    func replaceSelectionWithPaste(with text: String, for pid: pid_t, completion: @escaping () -> Void) {
+        let pasteboard = NSPasteboard.general
+
+        // 1. 设置剪贴板，不再恢复
+        pasteboard.clearContents()
+        guard pasteboard.setString(text, forType: .string) else {
+            Logger.warn("Failed to set clipboard for selection replacement.")
+            completion()
+            return
+        }
+        Logger.info("Clipboard set with text: '\(text)'. Original content will not be restored.")
+
+        // 2. 尝试激活目标应用
+        guard let targetApp = NSRunningApplication(processIdentifier: pid) else {
+            Logger.warn("Failed to find running application with pid \(pid)")
+            completion()
+            return
+        }
+        targetApp.activate(options: [.activateIgnoringOtherApps])
+        
+        // 3. 轮询检查目标应用是否已激活，成功或超时后执行粘贴
+        var attempts = 0
+        let maxAttempts = 40 // 40 * 50ms = 2 seconds timeout
+        
+        Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] timer in
+            guard let self = self else {
+                timer.invalidate()
+                return
+            }
+            
+            // 检查当前激活的应用
+            if NSWorkspace.shared.frontmostApplication?.processIdentifier == pid {
+                timer.invalidate()
+                Logger.info("Target app with pid \(pid) is now active. Pasting.")
+                
+                // 等待一小会儿，让剪贴板在系统级别同步
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    self.simulatePaste()
+                    completion()
+                }
+            } else {
+                attempts += 1
+                if attempts >= maxAttempts {
+                    timer.invalidate()
+                    Logger.warn("Timeout waiting for app with pid \(pid) to activate. Pasting anyway as a fallback.")
+                    
+                    // 即使超时，也尝试粘贴
+                    self.simulatePaste()
+                    completion()
+                }
+            }
+        }
+    }
+     
     deinit {
         stopSelectionMonitoring()
     }
