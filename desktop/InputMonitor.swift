@@ -376,7 +376,7 @@ class InputMonitor {
                         
                         // 根据不同应用调整延迟时间
                         let isWeChat = self?.isWeChatApp() ?? false
-                        let delay = isWeChat ? 0.3 : 0.3  // 微信需要更长的延迟确保内容完全更新
+                        let delay = isWeChat ? 0.05 : 0.05  // 稍微延迟，确保内容完全更新
                         
                         Logger.info("Waiting \(delay)s before sending Enter key (WeChat: \(isWeChat))")
                         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
@@ -434,7 +434,7 @@ class InputMonitor {
             }
             
             // 等待焦点稳定后发送Enter键
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                 // 使用最直接有效的方法发送Enter键
                 self.sendWeChatEnterKeyDirect()
             }
@@ -492,7 +492,7 @@ class InputMonitor {
             enterKeyDown.post(tap: .cghidEventTap)
             
             // 稍微延迟后发送释放事件
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
                 enterKeyUp.post(tap: .cghidEventTap)
                 Logger.info("WeChat: Enter key sent via CGEvent")
             }

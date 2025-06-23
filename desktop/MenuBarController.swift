@@ -9,7 +9,10 @@ class MenuBarController {
     init() {
         Logger.info("MenuBarController initialized")
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "globe", accessibilityDescription: "Translator")
+            if let image = NSImage(named: "StatusIcon") {
+                image.size = NSSize(width: 24, height: 24)
+                button.image = image
+            }
         }
         constructMenu()
     }

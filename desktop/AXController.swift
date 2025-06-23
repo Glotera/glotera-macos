@@ -1368,10 +1368,25 @@ class AXController {
     
     // 获取选中文本属性
     private func getSelectedTextAttribute(of element: AXUIElement) -> String? {
+        let startTime = Date()
+        
         var selectedTextValue: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &selectedTextValue)
         
+        let processingTime = Date().timeIntervalSince(startTime)
+        
+        // 性能监控：如果处理时间过长，记录警告
+        if processingTime > 0.2 {
+            Logger.warn("AXUIElementCopyAttributeValue took \(String(format: "%.3f", processingTime))s - performance warning")
+        }
+        
         if result == .success, let text = selectedTextValue as? String {
+            // 对于极大的选中文本，截断以避免后续处理问题
+            if text.count > 10000 {
+                Logger.warn("Selected text too large (\(text.count) chars), truncating to 10000 chars")
+                let endIndex = text.index(text.startIndex, offsetBy: 10000)
+                return String(text[..<endIndex])
+            }
             return text
         }
         
@@ -1910,12 +1925,19 @@ class AXController {
 
     // 只隐藏菜单，不显示菜单的逻辑
     private func hideMenuIfNoSelection() {
+        let startTime = Date()
+        
         guard let selection = getSelectedText() else {
             // 如果没有选中文本，隐藏菜单并重置状态
             if !lastSelectedText.isEmpty {
                 TranslationMenuWindow.shared.hide()
                 lastSelectedText = ""
                 isMenuShowing = false
+            }
+            
+            let processingTime = Date().timeIntervalSince(startTime)
+            if processingTime > 0.2 {
+                Logger.warn("hideMenuIfNoSelection took \(String(format: "%.3f", processingTime))s - performance warning")
             }
             return
         }
@@ -1926,6 +1948,11 @@ class AXController {
             TranslationMenuWindow.shared.hide()
             lastSelectedText = ""
             isMenuShowing = false
+        }
+        
+        let processingTime = Date().timeIntervalSince(startTime)
+        if processingTime > 0.2 {
+            Logger.warn("hideMenuIfNoSelection took \(String(format: "%.3f", processingTime))s - performance warning")
         }
     }
     
@@ -1946,6 +1973,8 @@ class AXController {
             return
         }
         
+        let startTime = Date()
+        
         guard let selection = getSelectedText() else {
             // 如果没有选中文本，隐藏菜单并重置状态
             if !lastSelectedText.isEmpty {
@@ -1953,7 +1982,17 @@ class AXController {
                 lastSelectedText = ""
                 isMenuShowing = false
             }
+            
+            let processingTime = Date().timeIntervalSince(startTime)
+            if processingTime > 0.2 {
+                Logger.warn("checkSelectedTextAndShowMenu (\(selectionType)) took \(String(format: "%.3f", processingTime))s - performance warning")
+            }
             return
+        }
+        
+        let processingTime = Date().timeIntervalSince(startTime)
+        if processingTime > 0.2 {
+            Logger.warn("checkSelectedTextAndShowMenu (\(selectionType)) AX API took \(String(format: "%.3f", processingTime))s - performance warning")
         }
         
         // 检查是否是刚刚完成的自动翻译结果，避免对翻译结果再次触发菜单
@@ -2358,5 +2397,75 @@ class AXController {
         }
         
         return false
+    }
+    
+    // 处理选中文本并显示菜单（用于异步调用）
+    private func processSelectedTextForMenu(_ selection: (text: String, element: AXUIElement), selectionType: String) {
+        // 如果选中文本监听被暂停，不执行任何操作
+        if isSelectionMonitoringPaused {
+            return
+        }
+        
+        // 检查是否是刚刚完成的自动翻译结果，避免对翻译结果再次触发菜单
+        if isLikelyTranslationResult(selection.text) {
+            Logger.info("Skipping menu for likely translation result: '\(selection.text)'")
+            return
+        }
+        
+        // 过滤掉太短或太长的选中文本，但保留原始文本格式
+        let originalText = selection.text
+        let trimmedForCheck = originalText.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // 检查文本长度限制
+        if trimmedForCheck.count < 3 {
+            if !lastSelectedText.isEmpty {
+                TranslationMenuWindow.shared.hide()
+                lastSelectedText = ""
+                isMenuShowing = false
+            }
+            return
+        }
+        
+        // 防止选中文本过大导致性能问题
+        let maxSelectionLength = 5000  // 限制选中文本最大长度
+        if originalText.count > maxSelectionLength {
+            Logger.warn("Selected text too large (\(originalText.count) chars), skipping menu display")
+            if !lastSelectedText.isEmpty {
+                TranslationMenuWindow.shared.hide()
+                lastSelectedText = ""
+                isMenuShowing = false
+            }
+            return
+        }
+        
+        // 使用原始文本（保留前后空白）进行比较和传递
+        if originalText != lastSelectedText {
+            lastSelectedText = originalText
+            isMenuShowing = true
+            
+            Logger.info("Selected text after \(selectionType) selection: '\(originalText)' (length: \(originalText.count))") 
+            
+            // 标记选中文本翻译开始，通知 InputMonitor
+            InputMonitor.shared.markSelectionTranslationStart()
+            
+            // 获取选中文本的位置和应用信息
+            let mouseLocation = NSEvent.mouseLocation
+            let appInfo = getAppInfo(for: selection.element)
+            
+            // 显示翻译菜单，传递所需信息
+            TranslationMenuWindow.shared.show(
+                for: originalText,
+                from: selection.element,
+                at: mouseLocation,
+                browserInfo: appInfo.isBrowser ? appInfo : nil
+            )
+            
+            // 设置关闭回调
+            TranslationMenuWindow.shared.onMenuClosed = { [weak self] in
+                self?.isMenuShowing = false
+                self?.lastSelectedText = ""
+                Logger.info("Menu closed callback triggered")
+            }
+        }
     }
 } 
