@@ -2,7 +2,7 @@ import Foundation
 
 class TranslatorClient: NSObject {
     static let shared = TranslatorClient()
-    let endpoint = "http://localhost:1145/translate"
+    let endpoint = "http://localhost:1145/api/translate"
     private let timeoutInterval: TimeInterval = 30.0
     
     // 流式请求的会话和回调

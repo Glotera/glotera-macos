@@ -88,7 +88,7 @@ class MenuBarController {
         debugSubMenu.addItem(openConsoleItem)
         
         debugMenu.submenu = debugSubMenu
-        menu.addItem(debugMenu)
+        //menu.addItem(debugMenu)
         
         // Exit menu
         menu.addItem(NSMenuItem.separator())

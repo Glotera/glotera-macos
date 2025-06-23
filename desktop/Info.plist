@@ -1,33 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!--
-   Info.plist
-   desktop
-
-   Created by Bryanzh on 2025/6/5.
-   Copyright (c) 2025 ___ORGANIZATIONNAME___. All rights reserved.
--->
 <plist version="1.0">
 <dict>
-      <key>CFBundleIdentifier</key>
-      <string>glotera.ai.desktop</string>
-
-      <key>CFBundleName</key>
-      <string>Glotera Translate</string>
-
-      <key>CFBundleDisplayName</key>
-      <string>Glotera</string>
-
-      <key>LSUIElement</key>
-      <true/> <!-- 状态栏程序，无 Dock 图标 -->
-
-      <key>NSAppTransportSecurity</key>
-      <dict>
-        <key>NSAllowsArbitraryLoads</key>
-        <true/>
-      </dict>
-
-      <key>NSAccessibilityUsageDescription</key>
-      <string>用于将翻译结果自动插入到输入框中</string>
-    </dict>
+	<key>NSAccessibilityUsageDescription</key>
+	<string>用于将翻译结果自动插入到输入框中</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+</dict>
 </plist>
