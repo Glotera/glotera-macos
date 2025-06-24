@@ -9,6 +9,7 @@ class InputMonitor {
     // 事件统计和业务逻辑相关属性
     private var lastEventTime: Date = Date()
     private var lastSpaceKeyTime: Date = Date()
+    private var lastSpaceTime: Date? // 用于检测双击空格
     var spaceKeyEventCount = 0
     var totalKeyEventCount = 0
     private var lastTranslationTime: Date?
@@ -176,57 +177,91 @@ class InputMonitor {
 
     static let shared = InputMonitor()
 
-    func handleSpaceKey() { 
-        // 如果当前是终端应用，则直接忽略，不执行任何操作
-        if AXController.shared.isTerminalApp() {
-            Logger.info("Terminal app detected, ignoring space key trigger.")
-            return
-        }
+    func handleSpaceKey() {
+        let currentTime = Date()
         
-        // 添加更详细的诊断信息
-        guard let focused = AXController.shared.getFocusedElement() else {
-            Logger.error("No focused element found")
-            return
-        } 
-        
-        // 检查是否为Discord应用
-        let isDiscord = isDiscordApp()
-        if isDiscord {
-            Logger.info("Discord detected - using extended delay for trigger detection")
-        }
-        
-        // 首先尝试标准检测
-        if let result = AXController.shared.detectTriggerAndExtract() { 
-            startTranslation(text: result.text, lang: result.lang)
-            return
-        }
-        
-        Logger.warn("Standard detection failed, trying delayed detection...")
-        // 如果标准检测失败，等待一小段时间后重试（Discord需要更长的延迟）
-        let delayTime = isDiscord ? 0.3 : 0.1
-        DispatchQueue.main.asyncAfter(deadline: .now() + delayTime) {
-            if let result = AXController.shared.detectTriggerAndExtract() {
-                Logger.info("Delayed trigger detected: text=\(result.text), lang=\(result.lang)")
-                self.startTranslation(text: result.text, lang: result.lang)
-            } else {
-                // print("[LOG] No trigger detected in input after delay")
-                // // 添加更多诊断信息
-                // if let value = AXController.shared.getValue(of: focused) {
-                //     print("[LOG] Current input content for diagnosis: '\(value)'")
-                //     print("[LOG] Content length: \(value.count)")
-                    
-                //     // 检查是否包含我们期望的模式
-                //     let patterns = ["@en", "#en", "@zh", "#zh", "@id", "#id"]
-                //     for pattern in patterns {
-                //         if value.lowercased().contains(pattern) {
-                //             print("[LOG] Found pattern '\(pattern)' in content but regex didn't match")
-                //             break
-                //         }
-                //     }
-                // } else {
-                //     print("[LOG] Cannot get value from focused element")
-                // }
+        // 检查是否为双击空格
+        if let lastTime = lastSpaceTime, currentTime.timeIntervalSince(lastTime) < 0.3 {
+            // 这是第二次点击，重置计时器，避免三次或更多次点击连续触发
+            self.lastSpaceTime = nil
+            
+            // 检查是否为AdsPower应用，如果是，则执行特殊逻辑
+            if AXController.shared.isAdsPowerApp() {
+                Logger.info("Double space in AdsPower, using clipboard-based detection.")
+                DispatchQueue.global(qos: .userInitiated).async {
+                    if let result = AXController.shared.detectTriggerViaClipboard() {
+                        // 成功检测到触发词，启动翻译
+                        DispatchQueue.main.async {
+                            self.startTranslation(text: result.text, lang: result.lang)
+                        }
+                    } else {
+                        // 未检测到触发词（误触），发送右箭头键恢复
+                        Logger.info("AdsPower misfire detected. No trigger in clipboard. Recovering.")
+                        DispatchQueue.main.async {
+                             AXController.shared.postRightArrowKey()
+                        }
+                    }
+                }
+                return // AdsPower 逻辑结束
             }
+
+            // --- 以下为非 AdsPower 应用的常规流程 ---
+            Logger.info("Double space in standard app, checking for trigger characters.")
+            
+            // 检查：仅当文本中包含触发字符时才继续
+            guard let content = AXController.shared.getCurrentInputValue(),
+                  (content.contains("@") || content.contains("#")) else {
+                Logger.info("Ignoring double space in standard app: trigger character not found.")
+                return
+            }
+
+            // 如果当前是终端应用，则直接忽略
+            if AXController.shared.isTerminalApp() {
+                Logger.info("Terminal app detected, ignoring space key trigger.")
+                return
+            }
+            
+            // 检查是否为特殊应用（如Discord）
+            let isDiscord = isDiscordApp()
+            
+            // 添加更详细的调试信息
+            if let frontmostApp = NSWorkspace.shared.frontmostApplication {
+                let appName = frontmostApp.localizedName ?? "Unknown"
+                let bundleId = frontmostApp.bundleIdentifier ?? "N/A"
+                Logger.info("Space key triggered in \(appName) (\(bundleId)) - Discord: \(isDiscord)")
+            }
+            
+            // 尝试获取焦点元素
+            guard let _ = AXController.shared.getFocusedElement() else {
+                Logger.error("No focused element found for non-AdsPower app.")
+                return
+            }
+            
+            // 首先尝试标准检测
+            Logger.info("Starting standard trigger detection.")
+            if let result = AXController.shared.detectTriggerAndExtract() { 
+                Logger.info("Standard trigger detected: text='\(result.text)', lang='\(result.lang)'")
+                startTranslation(text: result.text, lang: result.lang)
+                return
+            }
+            
+            Logger.warn("Standard detection failed, trying delayed detection...")
+            // 如果标准检测失败，等待一小段时间后重试 (Discord需要更长的延迟)
+            let delayTime = isDiscord ? 0.3 : 0.1
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + delayTime) {
+                Logger.info("Attempting delayed trigger detection (delay: \(delayTime)s)")
+                if let result = AXController.shared.detectTriggerAndExtract() {
+                    Logger.info("Delayed trigger detected: text='\(result.text)', lang='\(result.lang)'")
+                    self.startTranslation(text: result.text, lang: result.lang)
+                } else {
+                    Logger.info("No trigger detected after delay.")
+                }
+            }
+        } else {
+            // 这是第一次点击，只记录时间
+            self.lastSpaceTime = currentTime
+            Logger.info("Single space detected, waiting for second space.")
         }
     }
     

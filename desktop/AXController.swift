@@ -1,6 +1,7 @@
 import Cocoa
-import ApplicationServices
+import Carbon
 import CoreFoundation
+import ApplicationServices
 
 struct AppInfo {
     let bundleId: String
@@ -16,6 +17,7 @@ class AXController {
     private var isInputDisabled = false
     private var originalValue: String?
     private var disabledElement: AXUIElement?
+    private var lastManuallyFocusedElement: AXUIElement?
     
     // 选中文本监听相关变量
     private var isSelectionMonitoringPaused = false
@@ -103,6 +105,10 @@ class AXController {
             Logger.warn("No focused element found")
             return nil
         }
+        
+        // 存储当前获取到的焦点元素，用于后续回填
+        self.lastManuallyFocusedElement = focused
+        Logger.info("Stored focused element for potential replacement")
         
         // 检查是否在浏览器环境中
         let isWeb = isWebEnvironment()
@@ -990,11 +996,23 @@ class AXController {
     // 替换输入框内容
     func replaceInput(with text: String, completion: (() -> Void)? = nil) {
         Logger.info("Replacing input with translation result")
-        guard let focused = getFocusedElement() else {
+
+        // 新增：针对AdsPower的特殊回填逻辑
+        if isAdsPowerApp() {
+            Logger.info("AdsPower detected. Using dedicated clipboard paste for replacement.")
+            replaceAdsPowerInput(with: text, completion: completion)
+            return
+        }
+        
+        // 优先使用手动触发时保存的焦点元素，如果不存在，再尝试获取当前焦点
+        guard let focused = self.lastManuallyFocusedElement ?? getFocusedElement() else {
             Logger.warn("No focused element to replace")
             completion?()
             return
         }
+        
+        // 清理已保存的元素，避免影响后续非手动触发的操作
+        self.lastManuallyFocusedElement = nil
         
         // 暂停选中文本监听，防止自动翻译回填时触发翻译菜单
         pauseSelectionMonitoring()
@@ -2491,6 +2509,223 @@ class AXController {
                 self?.lastSelectedText = ""
                 Logger.info("Menu closed callback triggered")
             }
+        }
+    }
+
+    // MARK: - Special App Support (AdsPower)
+
+    // 检查当前是否为AdsPower应用
+    func isAdsPowerApp() -> Bool {
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+              let bundleId = frontmostApp.bundleIdentifier else {
+            return false
+        }
+        
+        // AdsPower的Bundle ID列表（不区分大小写）
+        let adsPowerBundleIds = [
+            "com.adspower.global",
+            "com.adspower.sunbrowser"
+        ]
+        
+        for id in adsPowerBundleIds {
+            if bundleId.caseInsensitiveCompare(id) == .orderedSame {
+                Logger.info("Detected AdsPower app: \(frontmostApp.localizedName ?? "Unknown") (\(bundleId))")
+                return true
+            }
+        }
+        
+        return false
+    }
+
+    private func findTrigger(in content: String) -> (text: String, lang: String)? {
+        Logger.info("AdsPower: Finding trigger in content from clipboard.")
+        return processContentForTrigger(content)
+    }
+
+    // 通过剪贴板检测触发器（专为AdsPower设计）
+    func detectTriggerViaClipboard() -> (text: String, lang: String)? {
+        Logger.info("AdsPower: Starting system-wide clipboard-based trigger detection.")
+
+        let pasteboard = NSPasteboard.general
+        let originalContent = saveOriginalPasteboardContent()
+        
+        // Clear clipboard to ensure we detect the new content
+        pasteboard.clearContents()
+        
+        // Send Cmd+A (Select All) globally
+        postSelectAll()
+        
+        // Add a delay for the selection to register
+        Thread.sleep(forTimeInterval: 0.2)
+        
+        var copiedText: String?
+        
+        // Try to copy twice to be robust
+        for i in 1...2 {
+            Logger.info("AdsPower: Attempting global copy, trial #\(i)")
+            
+            // Send Cmd+C (Copy) globally
+            postCopy()
+            
+            // Add a longer delay for the copy action to complete
+            Thread.sleep(forTimeInterval: 0.3)
+
+            // Check clipboard
+            copiedText = pasteboard.string(forType: .string)
+            
+            if let text = copiedText, !text.isEmpty {
+                Logger.info("AdsPower: Found content in clipboard: '\(text)'")
+                break
+            } else {
+                Logger.warn("AdsPower: Clipboard is empty after attempt #\(i).")
+                if i < 2 {
+                    Thread.sleep(forTimeInterval: 0.5) // Extra delay before retry
+                }
+            }
+        }
+        
+        // Restore original clipboard content immediately
+        restorePasteboardContent(originalContent)
+        
+        guard let text = copiedText, !text.isEmpty else {
+            Logger.error("AdsPower: No content found in clipboard after all copy attempts.")
+            return nil
+        }
+        
+        // Check if the copied text contains our trigger
+        return findTrigger(in: text)
+    }
+
+    private func postSelectAll() {
+        let source = CGEventSource(stateID: .hidSystemState)
+        let cmdDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Command), keyDown: true)
+        let aDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_A), keyDown: true)
+        let aUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_A), keyDown: false)
+        let cmdUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Command), keyDown: false)
+        
+        cmdDown?.flags = .maskCommand
+        aDown?.flags = .maskCommand
+        
+        cmdDown?.post(tap: .cghidEventTap)
+        aDown?.post(tap: .cghidEventTap)
+        aUp?.post(tap: .cghidEventTap)
+        cmdUp?.post(tap: .cghidEventTap)
+        
+        Logger.info("AdsPower: Posted global Cmd+A")
+    }
+    
+    private func postCopy() {
+        let source = CGEventSource(stateID: .hidSystemState)
+        let cmdDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Command), keyDown: true)
+        let cDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_C), keyDown: true)
+        let cUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_C), keyDown: false)
+        let cmdUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Command), keyDown: false)
+        
+        cmdDown?.flags = .maskCommand
+        cDown?.flags = .maskCommand
+        
+        cmdDown?.post(tap: .cghidEventTap)
+        cDown?.post(tap: .cghidEventTap)
+        cUp?.post(tap: .cghidEventTap)
+        cmdUp?.post(tap: .cghidEventTap)
+        
+        Logger.info("AdsPower: Posted global Cmd+C")
+    }
+
+    func saveOriginalPasteboardContent() -> Any? {
+        let pasteboard = NSPasteboard.general
+        guard let pasteboardItem = pasteboard.pasteboardItems?.first else { return nil }
+
+        // Store the original content (only handle string for now)
+        if let text = pasteboardItem.string(forType: .string) {
+            return text
+        }
+        
+        // TODO: Handle other types like images if necessary
+        return nil
+    }
+
+    func restorePasteboardContent(_ originalContent: Any?) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        
+        if let text = originalContent as? String {
+            _ = pasteboard.setString(text, forType: .string)
+        }
+        // TODO: Handle other types
+    }
+    
+    // 检查是否为终端应用
+    func isTerminalApp_DUPLICATE() -> Bool {
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+              let bundleId = frontmostApp.bundleIdentifier else {
+            return false
+        }
+        
+        let terminalBundleIds = [
+            "com.googlecode.iterm2",    // iTerm2
+            "com.apple.Terminal",       // Terminal.app
+            "co.zeit.hyper",            // Hyper
+            "io.alacritty",             // Alacritty
+            "net.kovidgoyal.kitty"      // Kitty
+        ]
+        
+        let result = terminalBundleIds.contains(bundleId)
+        if result {
+            Logger.info("Detected terminal app: \(frontmostApp.localizedName ?? "Unknown") (\(bundleId))")
+        }
+        return result
+    }
+    
+    // 新增：获取当前输入框的值
+    func getCurrentInputValue() -> String? {
+        guard let focused = getFocusedElement() else {
+            Logger.warn("No focused element found for getCurrentInputValue")
+            return nil
+        }
+        let isWeb = isWebEnvironment()
+        return getValueWithWebSupport(of: focused, isWeb: isWeb)
+    }
+    
+    // 新增：发送右箭头键以取消全选
+    func postRightArrowKey() {
+        let source = CGEventSource(stateID: .hidSystemState)
+        let rightArrowKeyCode = 124 as CGKeyCode // kVK_RightArrow
+        
+        let downEvent = CGEvent(keyboardEventSource: source, virtualKey: rightArrowKeyCode, keyDown: true)
+        downEvent?.post(tap: .cghidEventTap)
+        
+        let upEvent = CGEvent(keyboardEventSource: source, virtualKey: rightArrowKeyCode, keyDown: false)
+        upEvent?.post(tap: .cghidEventTap)
+        
+        Logger.info("AdsPower Recovery: Posted Right Arrow key to deselect text after misfire.")
+    }
+    
+    // 新增：专为AdsPower设计的回填方法
+    private func replaceAdsPowerInput(with text: String, completion: (() -> Void)?) {
+        // AdsPower的回填非常直接：因为触发时已经全选了，现在只需要粘贴即可。
+        
+        // 1. 保存当前剪贴板
+        let originalContent = saveOriginalPasteboardContent()
+
+        // 2. 将翻译结果放入剪贴板
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        guard pasteboard.setString(text, forType: .string) else {
+            Logger.error("AdsPower Replace: Failed to set clipboard with translation result.")
+            restorePasteboardContent(originalContent)
+            completion?()
+            return
+        }
+
+        // 3. 模拟粘贴
+        simulatePaste()
+        
+        // 4. 延迟恢复剪贴板并调用完成回调
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            self.restorePasteboardContent(originalContent)
+            Logger.info("AdsPower Replace: Clipboard restored.")
+            completion?()
         }
     }
 } 
