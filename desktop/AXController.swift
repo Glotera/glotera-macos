@@ -659,7 +659,11 @@ class AXController {
     
     // 预处理内容：清理可能的干扰文本
     private func preprocessContent(_ content: String) -> String {
-        var cleaned = content
+        // 首先，执行通用清理，移除零宽空格等不可见字符，这对于修复飞书等Electron应用至关重要
+        var cleaned = content.replacingOccurrences(of: "\u{200B}", with: "")
+        if cleaned.count != content.count {
+            Logger.info("Pre-processed content: Removed invisible characters.")
+        }
         
         // 检查当前应用是否为Discord或其他聊天应用
         let isDiscordOrChat = isDiscordOrChatApp()
@@ -2035,53 +2039,36 @@ class AXController {
     
     // 使用剪贴板强力替换内容
     private func forceReplaceWithClipboard(element: AXUIElement, text: String, completion: @escaping () -> Void) {
-        Logger.info("Using clipboard force replace method")
+        Logger.info("Using robust clipboard force replace method for standard apps.")
         
-        // 保存当前剪贴板内容
+        // 1. 保存原始剪贴板内容
         let pasteboard = NSPasteboard.general
-        let originalContent = pasteboard.string(forType: .string) 
+        let originalContent = pasteboard.string(forType: .string)
         
-        // 将新文本放入剪贴板
-        pasteboard.clearContents()
-        let setSuccess = pasteboard.setString(text, forType: .string) 
-        
-        // 验证剪贴板内容是否正确设置
-        let verifyContent = pasteboard.string(forType: .string) 
-        
-        if verifyContent != text {
-            Logger.error("Clipboard content verification failed!")
-            completion()
-            return
-        }
-        
-        // 选择全部内容 (Cmd+A)
+        // 2. 首先执行全选。这可能会被某些应用（如飞书）拦截，它们会自动将被选中的文本复制到剪贴板
         simulateSelectAll()
         
-        // 等待一小段时间确保选择完成
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            // 在粘贴前再次验证剪贴板内容
-            let prepasteContent = pasteboard.string(forType: .string) 
+        // 3. 等待全选操作完成，然后立即设置剪贴板并粘贴，以覆盖应用可能进行的自动复制
+        // simulateSelectAll() 内部有0.2秒延迟，我们等待0.3秒以确保其完成
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            Logger.info("Setting clipboard content right before pasting to avoid app interference.")
             
-            if prepasteContent != text { 
-                pasteboard.clearContents()
-                pasteboard.setString(text, forType: .string)
-                
-                // 再次验证
-                let reVerifyContent = pasteboard.string(forType: .string)
-                Logger.info("Re-verified clipboard content: '\(reVerifyContent ?? "nil")'")
+            // 4. 在粘贴前一刻，才将翻译结果放入剪贴板
+            pasteboard.clearContents()
+            guard pasteboard.setString(text, forType: .string) else {
+                Logger.error("Robust Replace: Failed to set clipboard with translation.")
+                self.restorePasteboardContent(originalContent)
+                completion()
+                return
             }
             
-            // 粘贴新内容 (Cmd+V)
+            // 5. 立即执行粘贴
             self.simulatePaste()
             
-            // 恢复原始剪贴板内容并调用完成回调
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                pasteboard.clearContents()
-                if let original = originalContent {
-                    pasteboard.setString(original, forType: .string)
-                }
-                Logger.info("Clipboard content restored to: '\(originalContent ?? "nil")'")
-                // 翻译操作完成后检查 Event Tap 状态
+            // 6. 安排恢复剪贴板的操作
+            // simulatePaste() 内部有0.2秒延迟，我们等待0.4秒以确保粘贴完成
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                self.restorePasteboardContent(originalContent)
                 self.checkAndRecoverEventTapAfterTranslation()
                 completion()
             }
