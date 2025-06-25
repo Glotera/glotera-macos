@@ -531,7 +531,8 @@ class InputMonitor {
            let currentContent = AXController.shared.getValue(of: focused) {
             Logger.info("WeChat: Current input content before Enter: '\(currentContent)'")
         }
-        
+        return  self.sendWeChatEnterKeyViaCGEvent()
+    
         // 使用AppleScript是最可靠的方法，因为它直接与系统事件交互
         let script = """
         tell application "System Events"
