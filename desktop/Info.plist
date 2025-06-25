@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
 	<key>NSAccessibilityUsageDescription</key>
 	<string>用于将翻译结果自动插入到输入框中</string>
 	<key>NSAppTransportSecurity</key>

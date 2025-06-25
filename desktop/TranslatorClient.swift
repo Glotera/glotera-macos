@@ -1,15 +1,42 @@
 import Foundation
 
+// MARK: - Environment Configuration
+struct TranslatorEnvironment {
+    let apiEndpoint: String
+    let isProduction: Bool
+    let timeoutInterval: TimeInterval
+    let maxRetries: Int
+    
+    static let current: TranslatorEnvironment = {
+        #if DEBUG
+            return TranslatorEnvironment(
+                apiEndpoint: "http://localhost:1145/api/translate",
+                isProduction: false,
+                timeoutInterval: 10.0,
+                maxRetries: 2
+            )
+        #else
+            return TranslatorEnvironment(
+                apiEndpoint: "https://glotera.ai/api/translate", 
+                isProduction: true,
+                timeoutInterval: 30.0,
+                maxRetries: 3
+            )
+        #endif
+    }()
+}
+
 class TranslatorClient: NSObject {
     static let shared = TranslatorClient()
-    let endpoint = "https://glotera.ai/api/translate"
-    // let endpoint = "http://localhost:1145/api/translate"
-    private let timeoutInterval: TimeInterval = 30.0
     
-    // 调试标志
-    private var isProductionEnvironment: Bool {
-        return endpoint.contains("glotera.ai") || endpoint.contains("https://")
-    }
+    // 使用环境配置
+    private let environment = TranslatorEnvironment.current
+    private let translationSemaphore = DispatchSemaphore(value: 1)
+    
+    // 便捷访问属性
+    var endpoint: String { environment.apiEndpoint }
+    private var timeoutInterval: TimeInterval { environment.timeoutInterval }
+    private var isProductionEnvironment: Bool { environment.isProduction }
     
     // 流式请求的会话和回调
     private var streamSession: URLSession?
@@ -24,52 +51,84 @@ class TranslatorClient: NSObject {
     
     override init() {
         super.init()
-    } // 10秒超时
+        
+        // 启动时输出当前环境配置信息
+        Logger.info("TranslatorClient initialized")
+        Logger.info("Environment: \(environment.isProduction ? "PRODUCTION" : "DEVELOPMENT")")
+        Logger.info("API Endpoint: \(environment.apiEndpoint)")
+        Logger.info("Timeout: \(environment.timeoutInterval)s, Max Retries: \(environment.maxRetries)")
+        
+        #if DEBUG
+        Logger.info("🔧 Debug mode: Using local server for fast development")
+        #else
+        Logger.info("🚀 Release mode: Using production server")
+        #endif
+    }
 
-    func translate(text: String, to: String, completion: @escaping (String?) -> Void) {
+    // 翻译文本
+    func translate(text: String, to language: String, completion: @escaping (Result<String, Error>) -> Void) {
+        // 使用信号量进行同步调用
+        translationSemaphore.wait()
+        
         Logger.info("Calling translation API")
-        guard let url = URL(string: endpoint) else { 
-            Logger.info("Invalid URL: \(endpoint)")
-            completion(nil)
-            return 
+        
+        guard let url = URL(string: endpoint) else {
+            Logger.error("Invalid API URL")
+            translationSemaphore.signal()
+            completion(.failure(URLError(.badURL)))
+            return
         }
         
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = timeoutInterval
         
-        let body: [String: Any] = ["text": text, "to": to]
+        // 构建包含环境信息的新请求体
+        let environment = EnvironmentManager.shared.getEnvironmentInfo()
+        let userId = UserManager.shared.getUserId()
+        
+        let requestBody: [String: Any] = [
+            "text": text,
+            "to": language,
+            "stream": false,
+            "user_id": userId,
+            "environment": environment
+        ]
+        
         do {
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            request.httpBody = try JSONSerialization.data(withJSONObject: requestBody, options: [])
         } catch {
-            Logger.info("Failed to serialize request body: \(error)")
-            completion(nil)
+            Logger.error("Failed to serialize request body: \(error)")
+            translationSemaphore.signal()
+            completion(.failure(error))
             return
         }
         
         let task = URLSession.shared.dataTask(with: request) { data, response, error in
+            // 确保在退出时总是释放信号量
+            defer { self.translationSemaphore.signal() }
+
             if let error = error {
                 Logger.info("Translation API error: \(error.localizedDescription)")
-                completion(nil)
+                completion(.failure(error))
                 return
             }
             
             guard let httpResponse = response as? HTTPURLResponse else {
                 Logger.info("Invalid response type")
-                completion(nil)
+                completion(.failure(NSError(domain: "", code: 0, userInfo: nil)))
                 return
             }
             
             guard httpResponse.statusCode == 200 else {
                 Logger.info("Translation API HTTP error: \(httpResponse.statusCode)")
-                completion(nil)
+                completion(.failure(NSError(domain: "", code: httpResponse.statusCode, userInfo: nil)))
                 return
             }
             
             guard let data = data else {
                 Logger.info("No data received from translation API")
-                completion(nil)
+                completion(.failure(NSError(domain: "", code: 0, userInfo: nil)))
                 return
             } 
             
@@ -77,14 +136,14 @@ class TranslatorClient: NSObject {
                 guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                       let translated = json["translated"] as? String else {
                     Logger.info("Failed to parse translation response")
-                    completion(nil)
+                    completion(.failure(NSError(domain: "", code: 0, userInfo: nil)))
                     return
                 }
                 Logger.info("Translation successful: \(translated)")
-                completion(translated)
+                completion(.success(translated))
             } catch {
                 Logger.info("Failed to parse JSON response: \(error)")
-                completion(nil)
+                completion(.failure(error))
             }
         }
         task.resume()
@@ -116,16 +175,20 @@ class TranslatorClient: NSObject {
         config.timeoutIntervalForRequest = timeoutInterval
         config.timeoutIntervalForResource = timeoutInterval * 2
         
-        // 针对生产环境的特殊配置
+        // 根据环境配置网络参数
         if isProductionEnvironment {
-            Logger.info("Configuring for production environment")
+            Logger.info("🌐 Configuring for production environment")
             config.httpMaximumConnectionsPerHost = 1
             config.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
             config.urlCache = nil
-            // 禁用HTTP管道化，强制单个连接
             config.httpShouldUsePipelining = false
-            // 设置较小的缓冲区
-            config.httpMaximumConnectionsPerHost = 1
+            config.timeoutIntervalForRequest = 60.0  // 生产环境延长超时
+        } else {
+            Logger.info("🏠 Configuring for development environment")
+            config.httpMaximumConnectionsPerHost = 5
+            config.requestCachePolicy = .useProtocolCachePolicy
+            config.httpShouldUsePipelining = true
+            config.timeoutIntervalForRequest = 10.0  // 本地环境快速失败
         }
         
         // 创建高优先级队列来处理流式数据，避免串行阻塞
@@ -146,8 +209,18 @@ class TranslatorClient: NSObject {
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         request.setValue("keep-alive", forHTTPHeaderField: "Connection")
         
-        // 添加 stream: true 参数
-        let body: [String: Any] = ["text": text, "to": to, "stream": true]
+        // Build the request body with environment info
+        let environment = EnvironmentManager.shared.getEnvironmentInfo()
+        let userId = UserManager.shared.getUserId()
+        
+        let body: [String: Any] = [
+            "text": text,
+            "to": to,
+            "stream": true,
+            "user_id": userId,
+            "environment": environment
+        ]
+        
         do {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         } catch {

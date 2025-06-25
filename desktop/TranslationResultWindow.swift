@@ -156,7 +156,9 @@ class TranslationResultWindow: NSWindow {
         
         // 确保在主线程更新UI
         if Thread.isMainThread { 
-            resultView.viewModel.updateTranslation(finalResult, isStreaming: false) 
+            resultView.viewModel.updateTranslation(finalResult, isStreaming: false)
+            // 流式翻译完成后清除缓存的应用信息
+            EnvironmentManager.shared.clearTriggerAppInfo()
         } else {
             DispatchQueue.main.async { [weak self] in
                 self?.completeStreamTranslation(finalResult)
@@ -169,6 +171,8 @@ class TranslationResultWindow: NSWindow {
             let errorText = "Translation failed: \(errorMessage)"
             self?.resultView?.viewModel.updateTranslation(errorText, isStreaming: false)
             Logger.info("Stream translation error in window: \(errorMessage)")
+            // 流式翻译错误后也清除缓存的应用信息
+            EnvironmentManager.shared.clearTriggerAppInfo()
         }
     }
     

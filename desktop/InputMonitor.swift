@@ -209,6 +209,7 @@ class InputMonitor {
             Logger.info("Double space in standard app, checking for trigger characters.")
             
             // 检查：仅当文本中包含触发字符时才继续
+            // TODO: 因为用户可以自定义指令，所以不能仅仅检测@#，需要检测所有指令
             guard let content = AXController.shared.getCurrentInputValue(),
                   (content.contains("@") || content.contains("#")) else {
                 Logger.info("Ignoring double space in standard app: trigger character not found.")
@@ -279,6 +280,10 @@ class InputMonitor {
         // 记录翻译时间，用于健康检查的智能调整
         lastTranslationTime = Date()
         
+        // 对于输入框翻译（空格键触发），需要在翻译开始前记录应用信息
+        // 选中文本翻译已在 checkSelectedTextAndShowMenu 中记录了
+        EnvironmentManager.shared.recordTriggerApp()
+        
         // 标记自动翻译开始，用于后续过滤
         AXController.shared.markAutoTranslationStart(withText: text)
         
@@ -292,9 +297,10 @@ class InputMonitor {
         
         
         // 开始翻译（不禁用输入，避免死锁）
-        TranslatorClient.shared.translate(text: text, to: lang) { [weak self] translated in
+        TranslatorClient.shared.translate(text: text, to: lang) { [weak self] result in
             DispatchQueue.main.async {
-                if let translated = translated {
+                switch result {
+                case .success(let translated):
                     Logger.info("Translation result: \(translated)")
                     // 翻译成功后立即隐藏状态窗口，然后开始回填
                     TranslationStatusWindow.shared.hideStatus()
@@ -302,11 +308,15 @@ class InputMonitor {
                     // 回填翻译结果
                     AXController.shared.replaceInput(with: translated) {
                         Logger.info("Auto-translation replacement completed")
+                        // 翻译完成后清除缓存的应用信息
+                        EnvironmentManager.shared.clearTriggerAppInfo()
                     }
-                } else {
-                    Logger.warn("Translation failed")
+                case .failure(let error):
+                    Logger.warn("Translation failed: \(error.localizedDescription)")
                     // 显示失败状态
                     TranslationStatusWindow.shared.showFailure()
+                    // 翻译失败后也清除缓存的应用信息
+                    EnvironmentManager.shared.clearTriggerAppInfo()
                 }
             }
         }
@@ -413,6 +423,10 @@ class InputMonitor {
     
     // 翻译完成后自动发送
     private func startTranslationWithAutoSend(text: String, lang: String) {
+        // 对于输入框翻译（回车键触发），需要在翻译开始前记录应用信息
+        // 选中文本翻译已在 checkSelectedTextAndShowMenu 中记录了
+        EnvironmentManager.shared.recordTriggerApp()
+        
         // 标记自动翻译开始，用于后续过滤
         AXController.shared.markAutoTranslationStart(withText: text)
         
@@ -426,9 +440,10 @@ class InputMonitor {
         
         
         // 开始翻译（不禁用输入，避免死锁）
-        TranslatorClient.shared.translate(text: text, to: lang) { [weak self] translated in
+        TranslatorClient.shared.translate(text: text, to: lang) { [weak self] result in
             DispatchQueue.main.async {
-                if let translated = translated {
+                switch result {
+                case .success(let translated):
                     Logger.info("Translation result: \(translated)")
                     // 翻译成功后立即隐藏状态窗口，然后开始回填
                     TranslationStatusWindow.shared.hideStatus() 
@@ -443,15 +458,19 @@ class InputMonitor {
                         Logger.info("Waiting \(delay)s before sending Enter key (WeChat: \(isWeChat))")
                         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                             self?.sendEnterKey()
+                            // 翻译完成后清除缓存的应用信息
+                            EnvironmentManager.shared.clearTriggerAppInfo()
                         }
                     }
-                } else {
-                    Logger.warn("Translation failed")
+                case .failure(let error):
+                    Logger.warn("Translation failed: \(error.localizedDescription)")
                     // 显示失败状态
                     TranslationStatusWindow.shared.showFailure()
                     // 翻译失败时发送原始内容
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                         self?.sendEnterKey()
+                        // 翻译失败后也清除缓存的应用信息
+                        EnvironmentManager.shared.clearTriggerAppInfo()
                     }
                 }
             }

@@ -188,19 +188,28 @@ class TranslationMenuWindow: NSWindow {
         hide()
         
         if isEditable {
-            // 对于可编辑元素，直接使用新的“仅粘贴”方法替换选中文本
-            TranslationStatusWindow.shared.showTranslating(near: sourceElement, mousePoint: self.lastMousePosition)
+
+            // 对于可编辑元素，直接使用新的"仅粘贴"方法替换选中文本
+            TranslationStatusWindow.shared.showTranslating(near: sourceElement, mousePoint: lastMousePosition)
             
-            TranslatorClient.shared.translate(text: selectedText, to: language) { [weak self] translatedText in // <--- 注意这里的变化
+            TranslatorClient.shared.translate(text: selectedText, to: language) { [weak self] result in
                 DispatchQueue.main.async {
                     TranslationStatusWindow.shared.hideStatus()
-                    if let translatedText = translatedText, let self = self { // <-- 这里是关键的修正
-                        // 调用新的、只粘贴不全选的方法
-                        AXController.shared.replaceSelectionWithPaste(with: translatedText, for: self.sourceElementPid) {
-                            Logger.info("Selection replaced successfully.")
+                    switch result {
+                    case .success(let translatedText):
+                        if let self = self {
+                            // 调用新的、只粘贴不全选的方法
+                            AXController.shared.replaceSelectionWithPaste(with: translatedText, for: self.sourceElementPid) {
+                                Logger.info("Selection replaced successfully.")
+                                // 翻译完成后清除缓存的应用信息
+                                EnvironmentManager.shared.clearTriggerAppInfo()
+                            }
                         }
-                    } else {
+                    case .failure(let error):
+                        Logger.warn("Translation failed: \(error.localizedDescription)")
                         TranslationStatusWindow.shared.showFailure()
+                        // 翻译失败后也清除缓存的应用信息
+                        EnvironmentManager.shared.clearTriggerAppInfo()
                     }
                 }
             }

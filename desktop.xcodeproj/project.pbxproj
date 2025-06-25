@@ -25,6 +25,8 @@
 		3D153861DB83474CB7A5CE30 /* LanguageConfigWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15B044BD9B2D441BAF66FA8D /* LanguageConfigWindow.swift */; };
 		52E75974376A4A2C80038B26 /* LanguageConfigManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F60848B2C5C4E76B8A270AB /* LanguageConfigManager.swift */; };
 		55ACA3925B5740A49F528A02 /* language-iso-639.json in Resources */ = {isa = PBXBuildFile; fileRef = ADA243CF57A742A49C392A18 /* language-iso-639.json */; };
+		60B4B7912E0BA3D800A08883 /* UserManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60B4B7902E0BA3D800A08883 /* UserManager.swift */; };
+		60B4B7922E0BA3D800A08883 /* EnvironmentManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60B4B78F2E0BA3D800A08883 /* EnvironmentManager.swift */; };
 		9BE4ED582E012FC5002AC2AE /* desktopTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BE4ED572E012FC5002AC2AE /* desktopTests.swift */; };
 		9BE4ED622E012FC5002AC2AE /* desktopUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BE4ED612E012FC5002AC2AE /* desktopUITests.swift */; };
 		9BE4ED642E012FC5002AC2AE /* desktopUITestsLaunchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BE4ED632E012FC5002AC2AE /* desktopUITestsLaunchTests.swift */; };
@@ -71,6 +73,8 @@
 /* Begin PBXFileReference section */
 		15B044BD9B2D441BAF66FA8D /* LanguageConfigWindow.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LanguageConfigWindow.swift; sourceTree = "<group>"; };
 		3F60848B2C5C4E76B8A270AB /* LanguageConfigManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LanguageConfigManager.swift; sourceTree = "<group>"; };
+		60B4B78F2E0BA3D800A08883 /* EnvironmentManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnvironmentManager.swift; sourceTree = "<group>"; };
+		60B4B7902E0BA3D800A08883 /* UserManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserManager.swift; sourceTree = "<group>"; };
 		9BE4ED422E012FC2002AC2AE /* Glotera.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Glotera.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		9BE4ED532E012FC5002AC2AE /* desktopTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = desktopTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		9BE4ED572E012FC5002AC2AE /* desktopTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = desktopTests.swift; sourceTree = "<group>"; };
@@ -160,6 +164,8 @@
 		9BE4ED702E012FF1002AC2AE /* desktop */ = {
 			isa = PBXGroup;
 			children = (
+				60B4B78F2E0BA3D800A08883 /* EnvironmentManager.swift */,
+				60B4B7902E0BA3D800A08883 /* UserManager.swift */,
 				9BE4ED7A2E012FF1002AC2AE /* AppDelegate.swift */,
 				9BE4ED762E012FF1002AC2AE /* Assets.xcassets */,
 				9BE4ED782E012FF1002AC2AE /* AXController.swift */,
@@ -351,6 +357,8 @@
 				9BE4ED862E012FF1002AC2AE /* AXController.swift in Sources */,
 				9BE4ED812E012FF1002AC2AE /* InputMonitor.swift in Sources */,
 				9BE4ED832E012FF1002AC2AE /* TranslationStatusWindow.swift in Sources */,
+				60B4B7912E0BA3D800A08883 /* UserManager.swift in Sources */,
+				60B4B7922E0BA3D800A08883 /* EnvironmentManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

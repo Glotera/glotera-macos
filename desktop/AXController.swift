@@ -2013,6 +2013,9 @@ class AXController {
             
             Logger.info("Selected text after \(selectionType) selection: '\(originalText)' (length: \(originalText.count))") 
             
+            // ⭐️ 关键：在弹出翻译菜单之前记录应用信息，这时应用还在前台
+            EnvironmentManager.shared.recordTriggerApp()
+            
             // 标记选中文本翻译开始，通知 InputMonitor
             InputMonitor.shared.markSelectionTranslationStart()
             
