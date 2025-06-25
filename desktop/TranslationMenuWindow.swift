@@ -189,7 +189,7 @@ class TranslationMenuWindow: NSWindow {
         
         if isEditable {
             // 对于可编辑元素，直接使用新的“仅粘贴”方法替换选中文本
-            TranslationStatusWindow.shared.showTranslating(near: sourceElement)
+            TranslationStatusWindow.shared.showTranslating(near: sourceElement, mousePoint: self.lastMousePosition)
             
             TranslatorClient.shared.translate(text: selectedText, to: language) { [weak self] translatedText in // <--- 注意这里的变化
                 DispatchQueue.main.async {

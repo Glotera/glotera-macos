@@ -29,25 +29,50 @@ class TranslationStatusWindow: NSWindow {
         self.contentView = hostingView
     }
     
-    func showTranslating(near element: AXUIElement?) {
+    func showTranslating(near element: AXUIElement?, mousePoint: CGPoint) {
         statusView?.updateStatus(.translating)
         
-        // 获取合适的显示位置
-        let mouseLocation = NSEvent.mouseLocation
-        var statusPoint = mouseLocation
-        statusPoint.y -= 80 // 显示在鼠标位置下方
+        // 1. 初始化位置为鼠标点
+        var statusPoint = mousePoint
         
-        // 确保不超出屏幕边界
+        // 2. 获取状态视图的大小（假设已知或提前设置）
+        // 获取 statusView 的实际大小
+        let viewWidth = self.frame.width // 默认宽度
+        let viewHeight = self.frame.height  // 默认高度
+                
+    
+        
+        // 4. 边界检查 - 确保不超出屏幕左边界
         let screenFrame = NSScreen.main?.visibleFrame ?? NSRect.zero
-        if statusPoint.x + self.frame.width > screenFrame.maxX {
-            statusPoint.x = screenFrame.maxX - self.frame.width - 10
-        }
-        if statusPoint.y < screenFrame.minY {
-            statusPoint.y = screenFrame.minY + 10
+        let minX = screenFrame.minX;
+        let maxX = screenFrame.maxX;
+        let minY = screenFrame.minY;
+        let maxY = screenFrame.maxY;
+        if statusPoint.x < minX {
+            statusPoint.x = minX
         }
         
+        // 5. 边界检查 - 确保不超出屏幕右边界
+        if statusPoint.x + viewWidth > maxX {
+            statusPoint.x = maxX - viewWidth
+        }
+        
+        // 6. 边界检查 - 确保不超出屏幕上边界
+        if statusPoint.y < minY {
+            statusPoint.y = minY
+        }
+        
+        // 垂直位置调整 - 显示在选中文本上方
+        
+        // 7. 边界检查 - 确保不超出屏幕下边界
+        if statusPoint.y + viewHeight > maxY {
+            statusPoint.y = maxY - viewHeight - 100
+        }
+        
+        // 8. 设置状态视图位置
         self.setFrameTopLeftPoint(statusPoint)
-        self.orderFront(nil)  // 不抢夺焦点，避免取消选中状态 
+        self.makeKeyAndOrderFront(nil)
+        
     }
     
     func showSuccess() {
@@ -95,32 +120,39 @@ struct TranslationStatusView: View {
     
     var body: some View {
         HStack(spacing: 12) {
-            // 状态图标
+            // 状态图标 - 改进版，使用固定大小容器
             Group {
                 switch status {
                 case .translating:
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .foregroundColor(.blue)
-                        .rotationEffect(.degrees(rotation))
-                        .onAppear {
-                            withAnimation(.linear(duration: 1.0).repeatForever(autoreverses: false)) {
-                                rotation = 360
-                            }
-                        }
+                    // 创建固定大小的容器，确保旋转不影响布局
+                    ZStack {
+                        // 固定大小的背景（与非旋转状态一致）
+                        Circle()
+                            .fill(Color.clear)
+                            .frame(width: 24, height: 24)
+                        
+                        // 旋转的图标 - 分离到单独的视图中
+                        RotatingIconView(iconName: "arrow.triangle.2.circlepath", color: .blue)
+                    }
+                    
                 case .success:
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(.green)
+                        .frame(width: 24, height: 24)  // 统一大小
+                    
                 case .failure:
                     Image(systemName: "xmark.circle.fill")
                         .foregroundColor(.red)
+                        .frame(width: 24, height: 24)  // 统一大小
                 }
             }
             .font(.system(size: 18))
             
-            // 状态文本
+            // 状态文本 - 固定大小
             Text(statusText)
                 .font(.system(size: 14, weight: .medium))
                 .foregroundColor(.primary)
+                .fixedSize(horizontal: true, vertical: false)  // 只在水平方向自动调整
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -133,6 +165,24 @@ struct TranslationStatusView: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color(NSColor.separatorColor), lineWidth: 0.5)
         )
+    }
+
+    // 单独的旋转图标视图，避免影响父布局
+    struct RotatingIconView: View {
+        let iconName: String
+        let color: Color
+        @State private var rotation: Double = 0
+        
+        var body: some View {
+            Image(systemName: iconName)
+                .foregroundColor(color)
+                .rotationEffect(.degrees(rotation))
+                .animation(.linear(duration: 1.0).repeatForever(autoreverses: false), value: rotation)
+                .onAppear {
+                    rotation = 360
+                }
+                .frame(width: 24, height: 24)  // 确保图标本身有固定大小
+        }
     }
     
     private var statusText: String {

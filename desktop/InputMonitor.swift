@@ -285,8 +285,11 @@ class InputMonitor {
         // 获取当前焦点元素用于定位状态窗口
         let focusedElement = AXController.shared.getFocusedElement()
         
+        // 获取当前焦点元素用于定位状态窗口
+        let mouseLocation = NSEvent.mouseLocation
         // 显示翻译中状态
-        TranslationStatusWindow.shared.showTranslating(near: focusedElement)
+        TranslationStatusWindow.shared.showTranslating(near: focusedElement,mousePoint:mouseLocation)
+        
         
         // 开始翻译（不禁用输入，避免死锁）
         TranslatorClient.shared.translate(text: text, to: lang) { [weak self] translated in
@@ -416,8 +419,11 @@ class InputMonitor {
         // 获取当前焦点元素用于定位状态窗口
         let focusedElement = AXController.shared.getFocusedElement()
         
+        // 获取当前焦点元素用于定位状态窗口
+        let mouseLocation = NSEvent.mouseLocation
         // 显示翻译中状态
-        TranslationStatusWindow.shared.showTranslating(near: focusedElement)
+        TranslationStatusWindow.shared.showTranslating(near: focusedElement,mousePoint:mouseLocation)
+        
         
         // 开始翻译（不禁用输入，避免死锁）
         TranslatorClient.shared.translate(text: text, to: lang) { [weak self] translated in
