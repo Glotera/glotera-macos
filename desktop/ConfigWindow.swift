@@ -1,22 +1,39 @@
 import SwiftUI
 import Cocoa
 
-// 语言配置窗口
-class LanguageConfigWindow: NSWindow {
+// Configuration categories
+enum ConfigCategory: String, CaseIterable {
+    case languageTriggers = "Language Triggers"
+    case keyboardSettings = "Keyboard Settings"
+    
+    var systemImage: String {
+        switch self {
+        case .languageTriggers: return "globe"
+        case .keyboardSettings: return "keyboard"
+        }
+    }
+}
+
+// Language configuration window
+class ConfigWindow: NSWindow {
     
     init() {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 650),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         
-        self.title = "Language Trigger Configuration"
+        self.title = "Glotera Configuration"
         self.center()
         self.isReleasedWhenClosed = false
         
-        // 创建SwiftUI视图
+        // Set minimum and maximum size to prevent unwanted resizing
+        self.minSize = NSSize(width: 800, height: 500)
+        self.maxSize = NSSize(width: 1200, height: 800)
+        
+        // Create SwiftUI view
         let contentView = LanguageConfigView { [weak self] in
             self?.close()
         }
@@ -25,46 +42,168 @@ class LanguageConfigWindow: NSWindow {
     }
     
     func show() {
+        // 多重确保窗口显示在最前面
         self.makeKeyAndOrderFront(nil)
+        self.orderFrontRegardless()
         NSApp.activate(ignoringOtherApps: true)
+        
+        // 确保窗口获得焦点
+        DispatchQueue.main.async {
+            self.makeKey()
+        }
     }
 }
 
-// SwiftUI主视图
+// SwiftUI main view
 struct LanguageConfigView: View {
     @StateObject private var viewModel = LanguageConfigViewModel()
+    @State private var selectedCategory: ConfigCategory = .languageTriggers
     let onClose: () -> Void
     
     var body: some View {
-        VStack(spacing: 0) {
-            // Top toolbar
-            HStack {
-                Text("Language Trigger Configuration")
-                    .font(.title2)
-                    .fontWeight(.semibold)
-                
-                Spacer()
-                
-                Button("Reset to Default") {
-                    viewModel.resetToDefaults()
+        HStack(spacing: 0) {
+            // Left sidebar
+            VStack(spacing: 0) {
+                // Sidebar header
+                HStack {
+                    Text("Configuration")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                    Spacer()
                 }
-                .buttonStyle(.bordered)
+                .padding()
+                .background(Color(NSColor.controlBackgroundColor))
                 
-                Button("Save") {
-                    viewModel.saveConfigs()
-                }
-                .buttonStyle(.borderedProminent)
+                Divider()
                 
-                Button("Close") {
-                    onClose()
+                // Category list
+                VStack(spacing: 2) {
+                    ForEach(ConfigCategory.allCases, id: \.self) { category in
+                        Button(action: {
+                            selectedCategory = category
+                        }) {
+                            HStack {
+                                Image(systemName: category.systemImage)
+                                    .foregroundColor(selectedCategory == category ? .white : .primary)
+                                    .frame(width: 16)
+                                
+                                Text(category.rawValue)
+                                    .foregroundColor(selectedCategory == category ? .white : .primary)
+                                
+                                Spacer()
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(
+                                selectedCategory == category ?
+                                Color.accentColor :
+                                Color.clear
+                            )
+                            .cornerRadius(6)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 8)
+                    }
+                    
+                    Spacer()
                 }
-                .buttonStyle(.bordered)
+                .padding(.top, 8)
             }
-            .padding()
-            .background(Color(NSColor.controlBackgroundColor))
+            .frame(width: 200)
+            .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
             
             Divider()
             
+            // Right content area
+            VStack(spacing: 0) {
+                // Top toolbar
+                HStack {
+                    Text(selectedCategory.rawValue)
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                    
+                    Spacer()
+                    
+                    // Action buttons based on category
+                    if selectedCategory == .languageTriggers {
+                        Button("Reset to Default") {
+                            viewModel.resetToDefaults()
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    
+                    Button("Save") {
+                        viewModel.saveConfigs()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    
+                    Button("Close") {
+                        onClose()
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .padding()
+                .background(Color(NSColor.controlBackgroundColor))
+                
+                Divider()
+                
+                // Content area
+                Group {
+                    switch selectedCategory {
+                    case .languageTriggers:
+                        LanguageTriggersView(viewModel: viewModel)
+                    case .keyboardSettings:
+                        KeyboardSettingsView(viewModel: viewModel)
+                    }
+                }
+                
+                // Bottom status bar
+                HStack {
+                    if viewModel.hasUnsavedChanges {
+                        HStack {
+                            Image(systemName: "circle.fill")
+                                .foregroundColor(.orange)
+                                .font(.caption)
+                            Text("Unsaved changes")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    } else {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                                .font(.caption)
+                            Text("All changes saved")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    Spacer()
+                    
+                    if selectedCategory == .languageTriggers {
+                        Text("\(viewModel.filteredConfigs.count) languages")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+                .background(Color(NSColor.controlBackgroundColor))
+            }
+        }
+        .onAppear {
+            viewModel.loadConfigs()
+        }
+    }
+}
+
+// Language Triggers Configuration View
+struct LanguageTriggersView: View {
+    @ObservedObject var viewModel: LanguageConfigViewModel
+    
+    var body: some View {
+        VStack(spacing: 0) {
             // Search bar
             HStack {
                 Image(systemName: "magnifyingglass")
@@ -98,46 +237,64 @@ struct LanguageConfigView: View {
                 }
             }
             .background(Color(NSColor.textBackgroundColor))
-            
-            // Bottom status bar
-            HStack {
-                if viewModel.hasUnsavedChanges {
-                    HStack {
-                        Image(systemName: "circle.fill")
-                            .foregroundColor(.orange)
-                            .font(.caption)
-                        Text("Unsaved changes")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                } else {
-                    HStack {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
-                            .font(.caption)
-                        Text("All changes saved")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-                
-                Spacer()
-                
-                Text("\(viewModel.filteredConfigs.count) languages")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
-            .background(Color(NSColor.controlBackgroundColor))
-        }
-        .onAppear {
-            viewModel.loadConfigs()
         }
     }
 }
 
-// 单个语言配置行
+// Keyboard Settings Configuration View
+struct KeyboardSettingsView: View {
+    @ObservedObject var viewModel: LanguageConfigViewModel
+    
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Return Key Behavior")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                    
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Toggle("Enable Return Key Interception for Auto Translation", 
+                                   isOn: $viewModel.isReturnKeyInterceptionEnabled)
+                                .onChange(of: viewModel.isReturnKeyInterceptionEnabled) { newValue in
+                                    viewModel.updateReturnKeyInterception(enabled: newValue)
+                                }
+                            
+                            Spacer()
+                        }
+                        
+                        Text("When enabled, pressing Return key in input fields will trigger automatic translation and send the translated text.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding()
+                    .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
+                    .cornerRadius(8)
+                }
+                
+                // Add more keyboard settings here in the future
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Additional Settings")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                    
+                    Text("More keyboard and input settings will be available in future updates.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding()
+                        .background(Color(NSColor.controlBackgroundColor).opacity(0.3))
+                        .cornerRadius(8)
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+    }
+}
+
+// Single language configuration row
 struct LanguageConfigRow: View {
     let config: LanguageConfig
     let onTriggersChanged: ([String]) -> Void
@@ -168,11 +325,11 @@ struct LanguageConfigRow: View {
         }
     }
     
-            var body: some View {
-            VStack(spacing: 0) {
-                // Main row
-                HStack {
-                    // Language information
+    var body: some View {
+        VStack(spacing: 0) {
+            // Main row
+            HStack {
+                // Language information
                 VStack(alignment: .leading, spacing: 2) {
                     HStack {
                         Text(config.name)
@@ -328,8 +485,10 @@ class LanguageConfigViewModel: ObservableObject {
     @Published var configs: [LanguageConfig] = []
     @Published var searchText: String = ""
     @Published var hasUnsavedChanges: Bool = false
+    @Published var isReturnKeyInterceptionEnabled: Bool = true
     
     private var originalConfigs: [LanguageConfig] = []
+    private var originalReturnKeyInterception: Bool = true
     
     var filteredConfigs: [LanguageConfig] {
         if searchText.isEmpty {
@@ -344,10 +503,15 @@ class LanguageConfigViewModel: ObservableObject {
     }
     
     func loadConfigs() {
-        configs = LanguageConfigManager.shared.loadLanguageConfigs()
+                    configs = ConfigManager.shared.loadLanguageConfigs()
         originalConfigs = configs
+        
+        let appSettings = ConfigManager.shared.loadAppSettings()
+        isReturnKeyInterceptionEnabled = appSettings.isReturnKeyInterceptionEnabled
+        originalReturnKeyInterception = isReturnKeyInterceptionEnabled
+        
         hasUnsavedChanges = false
-        Logger.info("Loaded \(configs.count) language configurations for menu bar")
+        Logger.info("Loaded \(configs.count) language configurations and app settings for configuration window")
     }
     
     func updateTriggers(for languageCode: String, triggers: [String]) {
@@ -362,30 +526,52 @@ class LanguageConfigViewModel: ObservableObject {
         }
     }
     
+    func updateReturnKeyInterception(enabled: Bool) {
+        isReturnKeyInterceptionEnabled = enabled
+        checkForChanges()
+    }
+    
     func saveConfigs() {
-        let success = LanguageConfigManager.shared.saveLanguageConfigs(configs)
+        var success = true
+        
+        // Save language configurations
+        if !areConfigsEqual(configs, originalConfigs) {
+            success = ConfigManager.shared.saveLanguageConfigs(configs) && success
+            if success {
+                originalConfigs = configs
+            }
+        }
+        
+        // Save app settings
+        if isReturnKeyInterceptionEnabled != originalReturnKeyInterception {
+            let settings = AppSettings(isReturnKeyInterceptionEnabled: isReturnKeyInterceptionEnabled)
+            success = ConfigManager.shared.saveAppSettings(settings) && success
+            if success {
+                originalReturnKeyInterception = isReturnKeyInterceptionEnabled
+            }
+        }
+        
         if success {
-            originalConfigs = configs
             hasUnsavedChanges = false
-            Logger.info("Language configurations saved successfully")
+            Logger.info("All configurations saved successfully")
             
             // Show save success notification
             DispatchQueue.main.async {
                 let alert = NSAlert()
                 alert.messageText = "Save Successful"
-                alert.informativeText = "Language trigger configuration has been saved"
+                alert.informativeText = "Configuration has been saved successfully"
                 alert.alertStyle = .informational
                 alert.addButton(withTitle: "OK")
                 alert.runModal()
             }
         } else {
-            Logger.info("Failed to save language configurations")
+            Logger.info("Failed to save some configurations")
             
             // Show save failure notification
             DispatchQueue.main.async {
                 let alert = NSAlert()
                 alert.messageText = "Save Failed"
-                alert.informativeText = "Unable to save language trigger configuration. Please check file permissions."
+                alert.informativeText = "Unable to save configuration. Please check file permissions."
                 alert.alertStyle = .warning
                 alert.addButton(withTitle: "OK")
                 alert.runModal()
@@ -396,22 +582,23 @@ class LanguageConfigViewModel: ObservableObject {
     func resetToDefaults() {
         let alert = NSAlert()
         alert.messageText = "Reset to Default Configuration"
-        alert.informativeText = "This will delete all custom configurations and restore default settings. This action cannot be undone."
+        alert.informativeText = "This will delete all custom language trigger configurations and restore default settings. This action cannot be undone."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Reset")
         alert.addButton(withTitle: "Cancel")
         
         let response = alert.runModal()
         if response == .alertFirstButtonReturn {
-            configs = LanguageConfigManager.shared.resetToDefaults()
+            configs = ConfigManager.shared.resetToDefaults()
             originalConfigs = configs
-            hasUnsavedChanges = false
+            checkForChanges()
             Logger.info("Language configurations reset to defaults")
         }
     }
     
     private func checkForChanges() {
-        hasUnsavedChanges = !areConfigsEqual(configs, originalConfigs)
+        hasUnsavedChanges = !areConfigsEqual(configs, originalConfigs) ||
+                           isReturnKeyInterceptionEnabled != originalReturnKeyInterception
     }
     
     private func areConfigsEqual(_ configs1: [LanguageConfig], _ configs2: [LanguageConfig]) -> Bool {

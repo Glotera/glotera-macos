@@ -3,7 +3,7 @@ import UserNotifications
 
 class MenuBarController {
     let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-    private var languageConfigWindow: LanguageConfigWindow?
+    private var languageConfigWindow: ConfigWindow?
     private var statusInfoStorage: [String: String] = [:] // 存储状态信息
 
     init() {
@@ -62,9 +62,7 @@ class MenuBarController {
         showCacheInfoItem.target = self
         debugSubMenu.addItem(showCacheInfoItem)
         
-        let refreshCacheItem = NSMenuItem(title: "Refresh Language Cache", action: #selector(refreshLanguageCache), keyEquivalent: "")
-        refreshCacheItem.target = self
-        debugSubMenu.addItem(refreshCacheItem)
+        // Language cache management is now automatic, no manual refresh needed
         
         let showStatusItem = NSMenuItem(title: "Show Status", action: #selector(showStatus), keyEquivalent: "")
         showStatusItem.target = self
@@ -105,14 +103,17 @@ class MenuBarController {
     @objc func openSettings() {
         Logger.info("Settings menu clicked")
         
-        // 如果窗口已存在，直接显示
+        // 如果窗口已存在，确保它出现在最上层
         if let existingWindow = languageConfigWindow {
-            existingWindow.show()
+            // 多重确保窗口显示在最前面
+            existingWindow.makeKeyAndOrderFront(nil)
+            existingWindow.orderFrontRegardless()
+            NSApp.activate(ignoringOtherApps: true)
             return
         }
         
         // 创建新的语言配置窗口
-        languageConfigWindow = LanguageConfigWindow()
+        languageConfigWindow = ConfigWindow()
         languageConfigWindow?.show()
         
         // 监听窗口关闭事件，释放引用
@@ -185,27 +186,26 @@ class MenuBarController {
     @objc func showLanguageCacheInfo() {
         Logger.info("Language cache info requested")
         
-        let cacheInfo = LanguageConfigManager.shared.getCacheInfo()
+        let configs = ConfigManager.shared.loadLanguageConfigs()
+        let cacheInfo = """
+        Language Configuration Cache Info:
+        - Total configurations: \(configs.count)
+        - Popular languages: \(configs.filter { $0.popular == 1 }.count)
+        - Common languages: \(configs.filter { $0.popular == 2 }.count)
+        - Other languages: \(configs.filter { $0.popular == 3 }.count)
+        - Total triggers: \(configs.flatMap { $0.triggers }.count)
+        
+        Cache Management:
+        - Language configurations are automatically loaded at startup
+        - Cache is updated immediately when configurations are saved
+        - No manual refresh needed
+        """
+        
         Logger.info("Cache info: \(cacheInfo)")
         
         // 显示缓存信息窗口
         DispatchQueue.main.async {
             self.showStatusWindow(statusInfo: cacheInfo)
-        }
-    }
-    
-    @objc func refreshLanguageCache() {
-        Logger.info("Language cache refresh requested")
-        
-        DispatchQueue.global(qos: .userInitiated).async {
-            LanguageConfigManager.shared.refreshCache()
-            
-            DispatchQueue.main.async {
-                self.showNonBlockingNotification(
-                    title: "Cache Refreshed",
-                    message: "Language configuration cache has been refreshed"
-                )
-            }
         }
     }
     
@@ -400,7 +400,7 @@ class MenuBarController {
 
     @objc func openLanguageConfig() {
         if languageConfigWindow == nil {
-            languageConfigWindow = LanguageConfigWindow()
+            languageConfigWindow = ConfigWindow()
         }
         languageConfigWindow?.show()
     }

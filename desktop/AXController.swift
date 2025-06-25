@@ -169,7 +169,7 @@ class AXController {
     
     // 获取所有配置的触发器
     private func getAllConfiguredTriggers() -> [String] {
-        let configs = LanguageConfigManager.shared.loadLanguageConfigs()
+        let configs = ConfigManager.shared.loadLanguageConfigs()
         var allTriggers: [String] = []
         
         for config in configs {
@@ -205,9 +205,9 @@ class AXController {
                         let text = rawText.trimmingCharacters(in: .whitespaces)
                         
                         if !text.isEmpty {
-                            // 根据触发器查找对应的语言代码
-                            if let languageCode = LanguageConfigManager.shared.findLanguageCode(for: trigger) {
-                                return (text: text, lang: languageCode)
+                            // 根据触发器查找对应的语言配置
+                            if let config = ConfigManager.shared.findLanguageConfig(withTrigger: trigger) {
+                                return (text: text, lang: config.code)
                             }
                         }
                     }

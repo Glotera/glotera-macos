@@ -302,7 +302,7 @@ public class Logger {
         }
         
         // 如果包含已知的类名，尝试提取
-        let knownClasses = ["AXController", "InputMonitor", "AppDelegate", "TranslationMenuWindow", "TranslationResultWindow", "MenuBarController", "TranslatorClient", "TranslateAgent", "LanguageConfigManager", "LanguageConfigWindow"]
+        let knownClasses = ["AXController", "InputMonitor", "AppDelegate", "TranslationMenuWindow", "TranslationResultWindow", "MenuBarController", "TranslatorClient", "TranslateAgent", "ConfigManager", "ConfigWindow"]
         
         for className in knownClasses {
             if frame.contains(className) {
