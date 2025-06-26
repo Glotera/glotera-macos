@@ -17,7 +17,7 @@ struct TranslatorEnvironment {
             )
         #else
             return TranslatorEnvironment(
-                apiEndpoint: "https://glotera.ai/api/translate", 
+                apiEndpoint: "https://api.glotera.ai/translate", 
                 isProduction: true,
                 timeoutInterval: 30.0,
                 maxRetries: 3
