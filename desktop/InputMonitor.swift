@@ -356,6 +356,12 @@ class InputMonitor {
             return false
         }
         
+        // 只在聊天软件中启用回车键拦截功能
+        guard isChatApplication() else {
+            Logger.info("Return key interception disabled - not a chat application")
+            return false
+        }
+        
         // 防止拦截我们自己发送的Enter键
         if isSendingEnterKey {
             Logger.info("Ignoring Enter key - we are currently sending one")
@@ -618,6 +624,103 @@ class InputMonitor {
         // 微信已经是前台应用，直接成功
         Logger.info("WeChat: Already focused")
         completion(true)
+    }
+    
+    // 检查当前应用是否为聊天软件
+    private func isChatApplication() -> Bool {
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+              let bundleId = frontmostApp.bundleIdentifier else {
+            return false
+        }
+        
+        // 常见聊天软件的Bundle ID列表
+        let chatAppBundleIds = [
+            // 微信
+            "com.tencent.xinWeChat",
+            "com.tencent.WeChat",
+            "com.tencent.wechat",
+            
+            // Discord
+            "com.hnc.Discord",
+            "com.discord.Discord",
+            
+            // 钉钉
+            "com.alibaba.DingTalkMac",
+            "com.laiwang.DingTalk",
+            
+            // 企业微信
+            "com.tencent.WeWorkMac",
+            "com.tencent.wework",
+            
+            // QQ
+            "com.tencent.qq",
+            "com.tencent.QQ",
+            
+            // Telegram
+            "ru.keepcoder.Telegram",
+            "org.telegram.desktop",
+            
+            // Slack
+            "com.tinyspeck.slackmacgap",
+            
+            // WhatsApp
+            "net.whatsapp.WhatsApp",
+            "WhatsApp",
+            
+            // Skype
+            "com.skype.skype",
+            
+            // Microsoft Teams
+            "com.microsoft.teams",
+            "com.microsoft.teams2",
+            
+            // Zoom Chat
+            "us.zoom.xos",
+            
+            // Line
+            "jp.naver.line.mac",
+            
+            // Messenger
+            "com.facebook.archon.developerID",
+            "com.facebook.Messenger",
+            
+            // Signal
+            "org.whispersystems.signal-desktop",
+            
+            // Element (Matrix)
+            "im.riot.app",
+            "io.element.Element",
+            
+            // Mattermost
+            "Mattermost.Desktop",
+            
+            // Rocket.Chat
+            "chat.rocket.desktop"
+        ]
+        
+        // 检查精确匹配
+        if chatAppBundleIds.contains(bundleId) {
+            Logger.info("Chat app detected (exact match): \(frontmostApp.localizedName ?? "Unknown") (\(bundleId))")
+            return true
+        }
+        
+        // 检查模糊匹配（包含关键词）
+        let chatKeywords = [
+            "wechat", "discord", "dingtalk", "telegram", "slack", 
+            "whatsapp", "skype", "teams", "zoom", "line", 
+            "messenger", "signal", "element", "mattermost", "rocket"
+        ]
+        
+        let bundleIdLower = bundleId.lowercased()
+        for keyword in chatKeywords {
+            if bundleIdLower.contains(keyword) {
+                Logger.info("Chat app detected (keyword match): \(frontmostApp.localizedName ?? "Unknown") (\(bundleId)) - keyword: \(keyword)")
+                return true
+            }
+        }
+        
+        Logger.debug("Not a chat application: \(frontmostApp.localizedName ?? "Unknown") (\(bundleId))")
+        return false
     }
     
     // 检查当前应用是否为微信
@@ -962,5 +1065,44 @@ class InputMonitor {
         }
         
         Logger.info("=== Enter Key Loop Test Completed ===")
+    }
+    
+    // 测试聊天应用检测功能
+    func testChatAppDetection() {
+        Logger.info("=== Chat App Detection Test Started ===")
+        
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+              let bundleId = frontmostApp.bundleIdentifier else {
+            Logger.warn("Chat App Test - No frontmost application found")
+            return
+        }
+        
+        let appName = frontmostApp.localizedName ?? "Unknown"
+        let isChatApp = isChatApplication()
+        let shouldInterceptEnter = shouldInterceptEnter()
+        
+        Logger.info("Chat App Test - Current application: \(appName)")
+        Logger.info("Chat App Test - Bundle ID: \(bundleId)")
+        Logger.info("Chat App Test - Detected as chat app: \(isChatApp)")
+        Logger.info("Chat App Test - Should intercept Enter: \(shouldInterceptEnter)")
+        Logger.info("Chat App Test - Return key interception enabled: \(ConfigManager.shared.isReturnKeyInterceptionEnabled())")
+        
+        // 显示测试结果
+        let alert = NSAlert()
+        alert.messageText = "Chat App Detection Test"
+        alert.informativeText = """
+        Current App: \(appName)
+        Bundle ID: \(bundleId)
+        
+        Is Chat App: \(isChatApp ? "✅ Yes" : "❌ No")
+        Should Intercept Enter: \(shouldInterceptEnter ? "✅ Yes" : "❌ No")
+        
+        Return Key Interception Setting: \(ConfigManager.shared.isReturnKeyInterceptionEnabled() ? "✅ Enabled" : "❌ Disabled")
+        """
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+        
+        Logger.info("=== Chat App Detection Test Completed ===")
     }
 } 
