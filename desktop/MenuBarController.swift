@@ -4,7 +4,10 @@ import UserNotifications
 class MenuBarController {
     let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private var languageConfigWindow: ConfigWindow?
+    private var userGuideWindow: UserGuideWindow?
     private var statusInfoStorage: [String: String] = [:] // 存储状态信息
+    private var userGuideObserver: NSObjectProtocol?
+    private var settingsObserver: NSObjectProtocol?
 
     init() {
         Logger.info("MenuBarController initialized")
@@ -16,14 +19,31 @@ class MenuBarController {
         }
         constructMenu()
     }
+    
+    deinit {
+        Logger.info("MenuBarController deallocating")
+        
+        // 清理所有观察者
+        if let observer = userGuideObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = settingsObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
 
     func constructMenu() {
         let menu = NSMenu()
         
         // Main function menu
-        let settingsItem = NSMenuItem(title: "Settings", action: #selector(openSettings), keyEquivalent: ",")
+        let settingsItem = NSMenuItem(title: "Settings", action: #selector(openSettings), keyEquivalent: "")
         settingsItem.target = self
         menu.addItem(settingsItem)
+
+        menu.addItem(NSMenuItem.separator()) 
+        let userGuideItem = NSMenuItem(title: "User Guide", action: #selector(openUserGuide), keyEquivalent: "")
+        userGuideItem.target = self
+        menu.addItem(userGuideItem)
         
         // Debug menu
         menu.addItem(NSMenuItem.separator())
@@ -116,13 +136,77 @@ class MenuBarController {
         languageConfigWindow = ConfigWindow()
         languageConfigWindow?.show()
         
+        // 清理之前的观察者
+        if let observer = settingsObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        
         // 监听窗口关闭事件，释放引用
-        NotificationCenter.default.addObserver(
+        settingsObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification,
             object: languageConfigWindow,
             queue: .main
         ) { [weak self] _ in
+            Logger.info("Settings window closed, releasing reference")
             self?.languageConfigWindow = nil
+            if let observer = self?.settingsObserver {
+                NotificationCenter.default.removeObserver(observer)
+                self?.settingsObserver = nil
+            }
+        }
+    }
+    
+    @objc func openUserGuide() {
+        Logger.info("User Guide menu clicked")
+        
+        // 如果窗口已存在，确保它出现在最上层
+        if let existingWindow = userGuideWindow {
+            Logger.info("User Guide window already exists, bringing to front")
+            
+            // 确保应用程序激活
+            NSApp.activate(ignoringOtherApps: true)
+            
+            // 将窗口带到前台
+            if let window = existingWindow.window {
+                window.makeKeyAndOrderFront(nil)
+                window.orderFrontRegardless()
+                
+                // 如果窗口被最小化，恢复它
+                if window.isMiniaturized {
+                    window.deminiaturize(nil)
+                }
+                
+                Logger.info("User Guide window brought to front")
+            }
+            return
+        }
+        
+        Logger.info("Creating new User Guide window")
+        
+        // 创建新的用户指南窗口
+        userGuideWindow = UserGuideWindow()
+        userGuideWindow?.showWindow(nil)
+        
+        // 确保新窗口在前台
+        NSApp.activate(ignoringOtherApps: true)
+        
+        // 清理之前的观察者
+        if let observer = userGuideObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        
+        // 监听窗口关闭事件，释放引用
+        userGuideObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: userGuideWindow?.window,
+            queue: .main
+        ) { [weak self] _ in
+            Logger.info("User Guide window closed, releasing reference")
+            self?.userGuideWindow = nil
+            if let observer = self?.userGuideObserver {
+                NotificationCenter.default.removeObserver(observer)
+                self?.userGuideObserver = nil
+            }
         }
     }
     
