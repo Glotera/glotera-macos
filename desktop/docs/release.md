@@ -1,5 +1,9 @@
 # desktop release note
 
+
+v0.1.5 - 20250629
+- 增加了User Guide
+
 v0.1.4 - 20250626
 - 增加了api.glotera.ai的专用域名，和走Cloudflare代理的静态网站分开，减少性能损耗
 - 回车键自动翻译只限于聊天应用，非聊天应用禁用，防止有性能问题影响用户体验
