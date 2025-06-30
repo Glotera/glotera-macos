@@ -196,10 +196,10 @@ class TranslationMenuWindow: NSWindow {
                 DispatchQueue.main.async {
                     TranslationStatusWindow.shared.hideStatus()
                     switch result {
-                    case .success(let translatedText):
+                    case .success(let translationResult):
                         if let self = self {
                             // 调用新的、只粘贴不全选的方法
-                            AXController.shared.replaceSelectionWithPaste(with: translatedText, for: self.sourceElementPid) {
+                            AXController.shared.replaceSelectionWithPaste(with: translationResult.translated, for: self.sourceElementPid) {
                                 Logger.info("Selection replaced successfully.")
                                 // 翻译完成后清除缓存的应用信息
                                 EnvironmentManager.shared.clearTriggerAppInfo()

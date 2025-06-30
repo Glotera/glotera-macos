@@ -32,6 +32,8 @@ class UserManager {
         return newUserId
     }
     
+
+    
     // Optional: A function to get the user ID, which makes the usage clear.
     public func getUserId() -> String {
         return self.userId

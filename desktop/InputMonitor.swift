@@ -300,13 +300,13 @@ class InputMonitor {
         TranslatorClient.shared.translate(text: text, to: lang) { [weak self] result in
             DispatchQueue.main.async {
                 switch result {
-                case .success(let translated):
-                    Logger.info("Translation result: \(translated)")
+                case .success(let translationResult):
+                    Logger.info("Translation result: \(translationResult.translated)")
                     // 翻译成功后立即隐藏状态窗口，然后开始回填
                     TranslationStatusWindow.shared.hideStatus()
                     // print("[LOG] Status window hidden before auto-translation replacement")
                     // 回填翻译结果
-                    AXController.shared.replaceInput(with: translated) {
+                    AXController.shared.replaceInput(with: translationResult.translated) {
                         Logger.info("Auto-translation replacement completed")
                         // 翻译完成后清除缓存的应用信息
                         EnvironmentManager.shared.clearTriggerAppInfo()
@@ -455,12 +455,12 @@ class InputMonitor {
         TranslatorClient.shared.translate(text: text, to: lang) { [weak self] result in
             DispatchQueue.main.async {
                 switch result {
-                case .success(let translated):
-                    Logger.info("Translation result: \(translated)")
+                case .success(let translationResult):
+                    Logger.info("Translation result: \(translationResult.translated)")
                     // 翻译成功后立即隐藏状态窗口，然后开始回填
                     TranslationStatusWindow.shared.hideStatus() 
                     // 回填翻译结果，完成后发送回车键
-                    AXController.shared.replaceInput(with: translated) {
+                    AXController.shared.replaceInput(with: translationResult.translated) {
                         Logger.info("Auto-translation with send completed")
                         
                         // 根据不同应用调整延迟时间

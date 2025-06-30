@@ -17,6 +17,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menuBarController = MenuBarController()
         inputMonitor = InputMonitor()
         
+        // 初始化配额管理器 - 这将设置配额委托
+        _ = QuotaManager.shared
+        
         // Try to setup event monitoring
         setupEventMonitoring()
         

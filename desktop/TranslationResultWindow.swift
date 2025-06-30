@@ -97,7 +97,7 @@ class TranslationResultWindow: NSWindow {
                     self?.updateStreamContent(fullContent)
                 }
             },
-            onComplete: { [weak self] finalResult in
+            onComplete: { [weak self] finalResult, quotaInfo in
                 // 翻译完成
                 isCompleted = true
                 timeoutTimer.invalidate()
@@ -115,8 +115,16 @@ class TranslationResultWindow: NSWindow {
                 
                 Logger.info("Stream translation error: '\(errorMessage)'")
                 DispatchQueue.main.async {
-                    self?.handleStreamError(errorMessage)
+                    // 如果是配额耗尽错误，直接关闭翻译浮窗
+                    if errorMessage.contains("翻译次数已用完") || errorMessage.contains("quota") {
+                        Logger.info("Quota exceeded in stream translation, hiding result window")
+                        self?.hide()
+                    } else {
+                        // 其他错误显示错误信息
+                        self?.handleStreamError(errorMessage)
+                    }
                 }
+                
             }
         )
     }

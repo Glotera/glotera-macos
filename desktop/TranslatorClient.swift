@@ -1,5 +1,86 @@
 import Foundation
 
+// MARK: - Quota Information
+struct QuotaInfo {
+    let isFreeUser: Bool
+    let remainingQuota: Int  // -1 for unlimited
+    let isQuotaExceeded: Bool
+    let isLowQuota: Bool
+    let monthlyUsage: Int
+    let monthlyLimit: Int?
+    
+    init(from json: [String: Any]) {
+        self.isFreeUser = json["is_free_user"] as? Bool ?? true
+        self.remainingQuota = json["remaining_quota"] as? Int ?? 0
+        self.isQuotaExceeded = json["is_quota_exceeded"] as? Bool ?? false
+        self.isLowQuota = json["is_low_quota"] as? Bool ?? false
+        self.monthlyUsage = json["monthly_usage"] as? Int ?? 0
+        self.monthlyLimit = json["monthly_limit"] as? Int
+    }
+    
+    var quotaStatusMessage: String? {
+        guard isFreeUser else { return nil }
+        
+        if isQuotaExceeded {
+            return "翻译次数已用完，请升级到Pro版本以继续使用"
+        } else if isLowQuota {
+            return "翻译次数即将用完，剩余 \(remainingQuota) 次，建议升级到Pro版本"
+        }
+        return nil
+    }
+    
+    var quotaDescription: String {
+        if !isFreeUser {
+            return "Pro用户 - 无限制翻译"
+        } else if isQuotaExceeded {
+            return "免费配额已用完 (\(monthlyUsage)/\(monthlyLimit ?? 200))"
+        } else {
+            return "免费用户 - 本月剩余 \(remainingQuota) 次"
+        }
+    }
+}
+
+// MARK: - Translation Result
+struct TranslationResult {
+    let translated: String
+    let fromLanguage: String?
+    let toLanguage: String?
+    let quotaInfo: QuotaInfo?
+    
+    init(from json: [String: Any]) {
+        self.translated = json["translated"] as? String ?? ""
+        self.fromLanguage = json["from_lang"] as? String
+        self.toLanguage = json["to_lang"] as? String
+        
+        if let quotaData = json["quota_info"] as? [String: Any] {
+            self.quotaInfo = QuotaInfo(from: quotaData)
+        } else {
+            self.quotaInfo = nil
+        }
+    }
+}
+
+// MARK: - Translation Error
+enum TranslationError: Error {
+    case quotaExceeded(QuotaInfo)
+    case networkError(String)
+    case parseError(String)
+    case serverError(Int, String)
+    
+    var localizedDescription: String {
+        switch self {
+        case .quotaExceeded(let quotaInfo):
+            return quotaInfo.quotaStatusMessage ?? "翻译配额已用完"
+        case .networkError(let message):
+            return "网络错误: \(message)"
+        case .parseError(let message):
+            return "数据解析错误: \(message)"
+        case .serverError(let code, let message):
+            return "服务器错误 (\(code)): \(message)"
+        }
+    }
+}
+
 // MARK: - Environment Configuration
 struct TranslatorEnvironment {
     let apiEndpoint: String
@@ -26,8 +107,18 @@ struct TranslatorEnvironment {
     }()
 }
 
+// MARK: - Quota Notification Delegate
+protocol TranslatorQuotaDelegate: AnyObject {
+    func didReceiveQuotaUpdate(_ quotaInfo: QuotaInfo)
+    func didReceiveQuotaWarning(_ quotaInfo: QuotaInfo)
+    func didReceiveQuotaExceededError(_ quotaInfo: QuotaInfo)
+}
+
 class TranslatorClient: NSObject {
     static let shared = TranslatorClient()
+    
+    // 配额委托
+    weak var quotaDelegate: TranslatorQuotaDelegate?
     
     // 使用环境配置
     private let environment = TranslatorEnvironment.current
@@ -45,7 +136,7 @@ class TranslatorClient: NSObject {
     
     private struct StreamCallbacks {
         let onChunk: (String, String) -> Void
-        let onComplete: (String?) -> Void
+        let onComplete: (String?, QuotaInfo?) -> Void
         let onError: (String) -> Void
     }
     
@@ -65,8 +156,10 @@ class TranslatorClient: NSObject {
         #endif
     }
 
-    // 翻译文本
-    func translate(text: String, to language: String, completion: @escaping (Result<String, Error>) -> Void) {
+    // 翻译文本 - 新方法，返回完整结果包含配额信息
+    func translate(text: String, to language: String, completion: @escaping (Result<TranslationResult, TranslationError>) -> Void) {
+        Logger.info("Starting translation: \(text) -> \(language)")
+        
         // 使用信号量进行同步调用
         translationSemaphore.wait()
         
@@ -75,7 +168,7 @@ class TranslatorClient: NSObject {
         guard let url = URL(string: endpoint) else {
             Logger.error("Invalid API URL")
             translationSemaphore.signal()
-            completion(.failure(URLError(.badURL)))
+            completion(.failure(.networkError("Invalid API URL")))
             return
         }
         
@@ -100,7 +193,7 @@ class TranslatorClient: NSObject {
         } catch {
             Logger.error("Failed to serialize request body: \(error)")
             translationSemaphore.signal()
-            completion(.failure(error))
+            completion(.failure(.parseError("Failed to serialize request")))
             return
         }
         
@@ -110,50 +203,111 @@ class TranslatorClient: NSObject {
 
             if let error = error {
                 Logger.info("Translation API error: \(error.localizedDescription)")
-                completion(.failure(error))
+                completion(.failure(.networkError(error.localizedDescription)))
                 return
             }
             
             guard let httpResponse = response as? HTTPURLResponse else {
                 Logger.info("Invalid response type")
-                completion(.failure(NSError(domain: "", code: 0, userInfo: nil)))
-                return
-            }
-            
-            guard httpResponse.statusCode == 200 else {
-                Logger.info("Translation API HTTP error: \(httpResponse.statusCode)")
-                completion(.failure(NSError(domain: "", code: httpResponse.statusCode, userInfo: nil)))
+                completion(.failure(.networkError("Invalid response type")))
                 return
             }
             
             guard let data = data else {
                 Logger.info("No data received from translation API")
-                completion(.failure(NSError(domain: "", code: 0, userInfo: nil)))
+                completion(.failure(.networkError("No data received")))
                 return
-            } 
+            }
             
+            // 处理HTTP状态码
+            if httpResponse.statusCode == 429 {
+                // 配额超限错误
+                do {
+                    if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let quotaData = json["quota_info"] as? [String: Any] {
+                        let quotaInfo = QuotaInfo(from: quotaData)
+                        Logger.info("Quota exceeded for user")
+                        
+                        // 通知配额委托
+                        DispatchQueue.main.async {
+                            self.quotaDelegate?.didReceiveQuotaExceededError(quotaInfo)
+                            TranslationStatusWindow.shared.hideStatus()
+                        }
+                        
+                        completion(.failure(.quotaExceeded(quotaInfo)))
+                        return
+                    }
+                } catch {
+                    Logger.error("Failed to parse quota exceeded response: \(error)")
+                }
+                completion(.failure(.serverError(429, "Quota exceeded")))
+                return
+            }
+            
+            guard httpResponse.statusCode == 200 else {
+                Logger.info("Translation API HTTP error: \(httpResponse.statusCode)")
+                completion(.failure(.serverError(httpResponse.statusCode, "Server error")))
+                return
+            }
+            
+            // 解析成功响应
             do {
-                guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let translated = json["translated"] as? String else {
+                guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                     Logger.info("Failed to parse translation response")
-                    completion(.failure(NSError(domain: "", code: 0, userInfo: nil)))
+                    completion(.failure(.parseError("Invalid JSON response")))
                     return
                 }
-                Logger.info("Translation successful: \(translated)")
-                completion(.success(translated))
+                
+                let result = TranslationResult(from: json)
+                
+                if result.translated.isEmpty {
+                    Logger.info("Empty translation result")
+                    completion(.failure(.parseError("Empty translation result")))
+                    return
+                }
+                
+                Logger.info("Translation successful: \(result.translated)")
+                
+                // 处理配额信息通知
+                if let quotaInfo = result.quotaInfo {
+                    DispatchQueue.main.async {
+                        self.quotaDelegate?.didReceiveQuotaUpdate(quotaInfo)
+                        
+                        // 如果配额较低，发送警告
+                        if quotaInfo.isLowQuota {
+                            self.quotaDelegate?.didReceiveQuotaWarning(quotaInfo)
+                        }
+                    }
+                    
+                    Logger.info("Quota info: \(quotaInfo.quotaDescription)")
+                }
+                
+                completion(.success(result))
             } catch {
                 Logger.info("Failed to parse JSON response: \(error)")
-                completion(.failure(error))
+                completion(.failure(.parseError("JSON parsing failed")))
             }
         }
         task.resume()
+    }
+    
+    // 便捷方法：只返回翻译文本（向后兼容）
+    func translateText(text: String, to language: String, completion: @escaping (Result<String, Error>) -> Void) {
+        translate(text: text, to: language) { result in
+            switch result {
+            case .success(let translationResult):
+                completion(.success(translationResult.translated))
+            case .failure(let error):
+                completion(.failure(error))
+            }
+        }
     }
     
     func translateStream(
         text: String, 
         to: String, 
         onChunk: @escaping (String, String) -> Void,  // (chunk, fullContent)
-        onComplete: @escaping (String?) -> Void,      // finalResult
+        onComplete: @escaping (String?, QuotaInfo?) -> Void,      // (finalResult, quotaInfo)
         onError: @escaping (String) -> Void          // errorMessage
     ) {
         Logger.info("Starting stream translation: text=\(text), to=\(to)")
@@ -234,7 +388,54 @@ class TranslatorClient: NSObject {
         let task = streamSession!.dataTask(with: request)
         task.resume()
         Logger.info("Stream translation request started")
-    }  
+    }
+    
+    // 便捷方法：流式翻译（向后兼容）
+    func translateStreamText(
+        text: String,
+        to: String,
+        onChunk: @escaping (String, String) -> Void,
+        onComplete: @escaping (String?) -> Void,
+        onError: @escaping (String) -> Void
+    ) {
+        translateStream(text: text, to: to, onChunk: onChunk) { result, quotaInfo in
+            onComplete(result)
+        } onError: { error in
+            onError(error)
+        }
+    }
+    
+    // MARK: - Quota Management
+    
+    /// 获取用户配额信息（通过发送一个空的测试请求）
+    func getUserQuota(completion: @escaping (Result<QuotaInfo, TranslationError>) -> Void) {
+        // 使用一个很短的文本进行测试翻译来获取配额信息
+        translate(text: ".", to: "en") { result in
+            switch result {
+            case .success(let translationResult):
+                if let quotaInfo = translationResult.quotaInfo {
+                    completion(.success(quotaInfo))
+                } else {
+                    completion(.failure(.parseError("No quota information available")))
+                }
+            case .failure(let error):
+                // 即使配额超限，我们也可以从错误中获取配额信息
+                if case .quotaExceeded(let quotaInfo) = error {
+                    completion(.success(quotaInfo))
+                } else {
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+    
+    /// 检查是否为免费用户
+    func isFreeUser() -> Bool {
+        let userId = UserManager.shared.getUserId()
+        let uuidRegex = try! NSRegularExpression(pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", options: .caseInsensitive)
+        let range = NSRange(location: 0, length: userId.utf16.count)
+        return uuidRegex.firstMatch(in: userId, options: [], range: range) != nil || userId == "anonymous" || userId.isEmpty
+    }
     
     // 异步处理流式数据，避免阻塞delegate队列
     private func processStreamData(_ dataString: String) {
@@ -301,14 +502,31 @@ class TranslatorClient: NSObject {
                     let capturedCallbacks = self.streamCallbacks
                     let capturedFullContent = fullContent // 捕获值而非引用
                     
+                    // 解析配额信息
+                    var quotaInfo: QuotaInfo?
+                    if let quotaData = json["quota_info"] as? [String: Any] {
+                        quotaInfo = QuotaInfo(from: quotaData)
+                        Logger.info("Stream quota info: \(quotaInfo!.quotaDescription)")
+                        
+                        // 通知配额委托
+                        DispatchQueue.main.async {
+                            self.quotaDelegate?.didReceiveQuotaUpdate(quotaInfo!)
+                            
+                            // 如果配额较低，发送警告
+                            if quotaInfo!.isLowQuota {
+                                self.quotaDelegate?.didReceiveQuotaWarning(quotaInfo!)
+                            }
+                        }
+                    }
+                    
                     if let result = json["result"] as? [String: Any],
                        let translated = result["translated"] as? String {
                         DispatchQueue.main.async {
-                            capturedCallbacks?.onComplete(translated)
+                            capturedCallbacks?.onComplete(translated, quotaInfo)
                         }
                     } else {
                         DispatchQueue.main.async {
-                            capturedCallbacks?.onComplete(capturedFullContent.isEmpty ? nil : capturedFullContent)
+                            capturedCallbacks?.onComplete(capturedFullContent.isEmpty ? nil : capturedFullContent, quotaInfo)
                         }
                     }
                     return
@@ -343,6 +561,15 @@ extension TranslatorClient: URLSessionDataDelegate {
                 self.streamCallbacks?.onError("Invalid response format")
             }
             completionHandler(.cancel)
+            return
+        }
+        
+        if httpResponse.statusCode == 429 {
+            Logger.info("Stream translation quota exceeded: \(httpResponse.statusCode)")
+            
+            // 对于429错误，需要继续接收数据以解析配额信息
+            Logger.info("Allowing data reception to parse quota info from 429 response")
+            completionHandler(.allow)
             return
         }
         
@@ -384,6 +611,113 @@ extension TranslatorClient: URLSessionDataDelegate {
                 self.streamCallbacks?.onError("Network error: \(error.localizedDescription)")
             }
         } else {
+            // 检查HTTP状态码，特别是429配额耗尽的情况
+            if let httpResponse = task.response as? HTTPURLResponse {
+                if httpResponse.statusCode == 429 {
+                    Logger.info("Processing 429 quota exceeded response with buffer: \(streamBuffer)")
+                    
+                    // 尝试解析缓冲区中的配额信息
+                    if !streamBuffer.isEmpty {
+                        do {
+                            if let jsonData = streamBuffer.data(using: .utf8),
+                               let json = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
+                                
+                                // 解析配额信息
+                                if let quotaData = json["quota_info"] as? [String: Any] {
+                                    let quotaInfo = QuotaInfo(from: quotaData)
+                                    Logger.info("Parsed quota info from 429 response: \(quotaInfo.quotaDescription)")
+                                    
+                                    // 通知配额委托配额耗尽
+                                    DispatchQueue.main.async {
+                                        self.quotaDelegate?.didReceiveQuotaExceededError(quotaInfo)
+                                    }
+                                } else {
+                                    // 如果没有配额信息，创建一个默认的配额耗尽信息
+                                    let defaultQuotaJson: [String: Any] = [
+                                        "is_free_user": true,
+                                        "remaining_quota": 0,
+                                        "is_quota_exceeded": true,
+                                        "is_low_quota": false,
+                                        "monthly_usage": 200,
+                                        "monthly_limit": 200
+                                    ]
+                                    let quotaInfo = QuotaInfo(from: defaultQuotaJson)
+                                    Logger.info("Created default quota info for 429 response")
+                                    
+                                    DispatchQueue.main.async {
+                                        self.quotaDelegate?.didReceiveQuotaExceededError(quotaInfo)
+                                    }
+                                }
+                                
+                                // 解析错误消息
+                                let errorMessage = json["error"] as? String ?? "翻译次数已用完，请升级到Pro版本以继续使用"
+                                DispatchQueue.main.async {
+                                    self.streamCallbacks?.onError(errorMessage)
+                                }
+                            } else {
+                                // JSON解析失败，使用默认处理
+                                Logger.error("Failed to parse 429 response JSON, using default quota info")
+                                let defaultQuotaJson: [String: Any] = [
+                                    "is_free_user": true,
+                                    "remaining_quota": 0,
+                                    "is_quota_exceeded": true,
+                                    "is_low_quota": false,
+                                    "monthly_usage": 200,
+                                    "monthly_limit": 200
+                                ]
+                                let quotaInfo = QuotaInfo(from: defaultQuotaJson)
+                                
+                                DispatchQueue.main.async {
+                                    self.quotaDelegate?.didReceiveQuotaExceededError(quotaInfo)
+                                    self.streamCallbacks?.onError("翻译次数已用完，请升级到Pro版本以继续使用")
+                                }
+                            }
+                        } catch {
+                            Logger.error("Error parsing 429 response: \(error)")
+                            // 解析出错，使用默认处理
+                            let defaultQuotaJson: [String: Any] = [
+                                "is_free_user": true,
+                                "remaining_quota": 0,
+                                "is_quota_exceeded": true,
+                                "is_low_quota": false,
+                                "monthly_usage": 200,
+                                "monthly_limit": 200
+                            ]
+                            let quotaInfo = QuotaInfo(from: defaultQuotaJson)
+                            
+                            DispatchQueue.main.async {
+                                self.quotaDelegate?.didReceiveQuotaExceededError(quotaInfo)
+                                self.streamCallbacks?.onError("翻译次数已用完，请升级到Pro版本以继续使用")
+                            }
+                        }
+                    } else {
+                        // 缓冲区为空，使用默认处理
+                        Logger.info("Empty buffer for 429 response, using default quota info")
+                        let defaultQuotaJson: [String: Any] = [
+                            "is_free_user": true,
+                            "remaining_quota": 0,
+                            "is_quota_exceeded": true,
+                            "is_low_quota": false,
+                            "monthly_usage": 200,
+                            "monthly_limit": 200
+                        ]
+                        let quotaInfo = QuotaInfo(from: defaultQuotaJson)
+                        
+                        DispatchQueue.main.async {
+                            self.quotaDelegate?.didReceiveQuotaExceededError(quotaInfo)
+                            self.streamCallbacks?.onError("翻译次数已用完，请升级到Pro版本以继续使用")
+                        }
+                    }
+                    
+                    // 清理并返回，不需要继续处理
+                    streamSession?.invalidateAndCancel()
+                    streamSession = nil
+                    streamCallbacks = nil
+                    streamBuffer = ""
+                    return
+                }
+            }
+            
             // 处理缓冲区中剩余的数据
             if !streamBuffer.isEmpty {
                 var fullContent = ""

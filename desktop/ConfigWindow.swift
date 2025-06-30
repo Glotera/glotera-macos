@@ -561,6 +561,7 @@ class LanguageConfigViewModel: ObservableObject {
                 alert.messageText = "Save Successful"
                 alert.informativeText = "Configuration has been saved successfully"
                 alert.alertStyle = .informational
+                alert.icon = NSImage(named: NSImage.infoName) 
                 alert.addButton(withTitle: "OK")
                 alert.runModal()
             }
@@ -573,6 +574,7 @@ class LanguageConfigViewModel: ObservableObject {
                 alert.messageText = "Save Failed"
                 alert.informativeText = "Unable to save configuration. Please check file permissions."
                 alert.alertStyle = .warning
+                alert.icon = NSImage(named: NSImage.cautionName) 
                 alert.addButton(withTitle: "OK")
                 alert.runModal()
             }
@@ -584,6 +586,7 @@ class LanguageConfigViewModel: ObservableObject {
         alert.messageText = "Reset to Default Configuration"
         alert.informativeText = "This will delete all custom language trigger configurations and restore default settings. This action cannot be undone."
         alert.alertStyle = .warning
+        alert.icon = NSImage(named: NSImage.cautionName) 
         alert.addButton(withTitle: "Reset")
         alert.addButton(withTitle: "Cancel")
         
