@@ -763,14 +763,24 @@ class MenuBarController {
                 menu.addItem(logoutItem)
             }
         } else {
-            // User is not logged in - show login option
-            let loginItem = NSMenuItem(title: "Sign In", action: #selector(signIn), keyEquivalent: "")
-            loginItem.target = self
-            menu.addItem(loginItem)
+            // User is not logged in - show login requirement
+            let signInItem = NSMenuItem(title: "Sign In Required", action: #selector(signIn), keyEquivalent: "")
+            signInItem.target = self
+            menu.addItem(signInItem)
             
-            let anonymousItem = NSMenuItem(title: "Using Anonymous Mode", action: nil, keyEquivalent: "")
-            anonymousItem.isEnabled = false
-            menu.addItem(anonymousItem)
+            let pricingItem = NSMenuItem(title: "Learn About Pricing", action: #selector(openPricing), keyEquivalent: "")
+            pricingItem.target = self
+            menu.addItem(pricingItem)
+            
+            menu.addItem(NSMenuItem.separator())
+            
+            let statusItem = NSMenuItem(title: "⚠️ Login required for translations", action: nil, keyEquivalent: "")
+            statusItem.isEnabled = false
+            menu.addItem(statusItem)
+            
+            let helpItem = NSMenuItem(title: "Free: 200/month • Pro: Unlimited", action: nil, keyEquivalent: "")
+            helpItem.isEnabled = false
+            menu.addItem(helpItem)
         }
         
         // Listen for authentication changes
@@ -808,7 +818,7 @@ class MenuBarController {
         
         let alert = NSAlert()
         alert.messageText = "Sign Out"
-        alert.informativeText = "Are you sure you want to sign out? You will continue to have limited functionality in anonymous mode."
+        alert.informativeText = "Are you sure you want to sign out? You will need to sign in again to use translation features."
         alert.alertStyle = .informational
         alert.addButton(withTitle: "Sign Out")
         alert.addButton(withTitle: "Cancel")
@@ -816,12 +826,13 @@ class MenuBarController {
         let response = alert.runModal()
         
         if response == .alertFirstButtonReturn {
+            // Clear login state
             SessionManager.shared.clearSession()
             Logger.info("User signed out successfully")
             
             showNonBlockingNotification(
                 title: "Signed Out",
-                message: "You have been signed out. You can continue using Glotera in anonymous mode."
+                message: "You have been signed out. Please sign in again to use translation features."
             )
         }
     }
@@ -855,6 +866,19 @@ class MenuBarController {
         }
         
         Logger.info("Opening login page: \(loginURL)")
+        NSWorkspace.shared.open(url)
+    }
+    
+    @objc private func openPricing() {
+        let environmentManager = EnvironmentManager.shared
+        let pricingURL = "\(environmentManager.baseURL)/pricing"
+        
+        guard let url = URL(string: pricingURL) else {
+            Logger.error("Failed to create pricing URL")
+            return
+        }
+        
+        Logger.info("Opening pricing page: \(pricingURL)")
         NSWorkspace.shared.open(url)
     }
 

@@ -488,7 +488,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 accountType: userInfo["account_type"] as? String ?? "email"
             )
             
-            // Store authentication session
+            // Store authentication session in SessionManager
             SessionManager.shared.setAuthSession(token: authToken, user: user)
             
             Logger.info("Authentication successful for user: \(user.email)")

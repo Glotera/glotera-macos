@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 
 // MARK: - Quota Information
 struct QuotaInfo {
@@ -66,6 +67,7 @@ enum TranslationError: Error {
     case networkError(String)
     case parseError(String)
     case serverError(Int, String)
+    case authenticationRequired(String)
     
     var localizedDescription: String {
         switch self {
@@ -77,6 +79,8 @@ enum TranslationError: Error {
             return "数据解析错误: \(message)"
         case .serverError(let code, let message):
             return "服务器错误 (\(code)): \(message)"
+        case .authenticationRequired(let message):
+            return "需要登录: \(message)"
         }
     }
 }
@@ -176,18 +180,21 @@ class TranslatorClient: NSObject {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         
-        // Add authentication header if user is logged in
+        // Add authentication header - now required for all translation requests
         if let authToken = SessionManager.shared.getAuthToken() {
             request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
             Logger.info("Adding authentication header to translation request")
         } else {
-            Logger.info("No authentication token - using anonymous mode")
+            Logger.error("No authentication token available - translation requires login")
+            translationSemaphore.signal()
+            completion(.failure(.networkError("Authentication required")))
+            return
         }
         
         // 构建包含环境信息的新请求体
         let environment = EnvironmentManager.shared.getEnvironmentInfo()
-        // Use authenticated user ID if available, otherwise fall back to anonymous ID
-        let userId = SessionManager.shared.getCurrentUser()?.userId ?? UserManager.shared.getUserId()
+        // Use authenticated user ID (guaranteed to exist due to authentication check above)
+        let userId = SessionManager.shared.getCurrentUser()!.userId
         
         let requestBody: [String: Any] = [
             "text": text,
@@ -321,6 +328,15 @@ class TranslatorClient: NSObject {
     ) {
         Logger.info("Starting stream translation: text=\(text), to=\(to)")
         
+        // Check authentication first - return error if not authenticated
+        guard SessionManager.shared.isAuthenticated else {
+            Logger.warn("Stream translation attempted without authentication - requiring login")
+            DispatchQueue.main.async {
+                onError("Authentication required - please sign in to use translation features")
+            }
+            return
+        }
+        
         guard let url = URL(string: endpoint) else { 
             Logger.info("Invalid URL: \(endpoint)")
             DispatchQueue.main.async {
@@ -368,12 +384,16 @@ class TranslatorClient: NSObject {
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         request.timeoutInterval = timeoutInterval
         
-        // Add authentication header if user is logged in
+        // Add authentication header - now required for stream translation
         if let authToken = SessionManager.shared.getAuthToken() {
             request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
             Logger.info("Adding authentication header to stream translation request")
         } else {
-            Logger.info("No authentication token - using anonymous mode for stream")
+            Logger.error("No authentication token available - stream translation requires login")
+            DispatchQueue.main.async {
+                onError("Authentication required")
+            }
+            return
         }
         
         // 添加流式相关的请求头
@@ -382,8 +402,8 @@ class TranslatorClient: NSObject {
         
         // Build the request body with environment info
         let environment = EnvironmentManager.shared.getEnvironmentInfo()
-        // Use authenticated user ID if available, otherwise fall back to anonymous ID
-        let userId = SessionManager.shared.getCurrentUser()?.userId ?? UserManager.shared.getUserId()
+        // Use authenticated user ID (guaranteed to exist due to authentication check above)
+        let userId = SessionManager.shared.getCurrentUser()!.userId
         
         let body: [String: Any] = [
             "text": text,

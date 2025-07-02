@@ -1,5 +1,10 @@
 # desktop release note
 
+v0.2.0 - 20250702
+- 增加登陆功能，支持Email和Google
+- 非登陆用户禁止使用使用
+- 服务端增加token校验
+- 增加pricing页面
 
 v0.1.5 - 20250629
 - 增加了User Guide

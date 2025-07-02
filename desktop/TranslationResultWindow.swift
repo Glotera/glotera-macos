@@ -119,6 +119,10 @@ class TranslationResultWindow: NSWindow {
                     if errorMessage.contains("翻译次数已用完") || errorMessage.contains("quota") {
                         Logger.info("Quota exceeded in stream translation, hiding result window")
                         self?.hide()
+                    } else if errorMessage.contains("Authentication required") || errorMessage.contains("sign in") {
+                        // 认证错误，直接关闭翻译浮窗，让登录提示显示
+                        Logger.info("Authentication required in stream translation, hiding result window")
+                        self?.hide()
                     } else {
                         // 其他错误显示错误信息
                         self?.handleStreamError(errorMessage)

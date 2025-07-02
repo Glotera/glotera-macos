@@ -8,6 +8,7 @@ class QuotaAlertWindow: NSWindow {
     
     private var isShowingAlert = false
     private var lastAlertTime: Date?
+    private var hasShownFirstTranslationGuidance = false
     
     private init() {
         super.init(
@@ -41,8 +42,73 @@ class QuotaAlertWindow: NSWindow {
         isShowingAlert = true
         
         DispatchQueue.main.async { [weak self] in
-            self?.showWarningDialog(quotaInfo)
+            // Only show for authenticated users since anonymous mode is disabled
+            if SessionManager.shared.isAuthenticated {
+                self?.showWarningDialog(quotaInfo)
+            } else {
+                // Should not happen since login is required, but handle gracefully
+                self?.showLoginRequirement()
+            }
         }
+    }
+    
+    /// Show login requirement when user tries to use features without authentication
+    func showLoginRequirement() {
+        guard !isShowingAlert else {
+            Logger.info("Alert already showing, skipping login requirement")
+            return
+        }
+        
+        isShowingAlert = true
+        
+        DispatchQueue.main.async { [weak self] in
+            self?.showLoginRequiredDialog()
+        }
+    }
+    
+    private func showLoginRequiredDialog() {
+        let alert = NSAlert()
+        alert.messageText = "Sign In Required"
+        alert.informativeText = """
+        Glotera requires you to sign in to use translation features.
+        
+        Choose your plan:
+        • Free Account: 200 translations per month
+        • Pro Account: Unlimited translations for $2.9/month
+        
+        Please sign in to continue.
+        """
+        
+        alert.alertStyle = .critical
+        alert.addButton(withTitle: "Sign In")
+        alert.addButton(withTitle: "Learn About Pricing")
+        alert.addButton(withTitle: "Quit App")
+        
+        // 移除应用图标，并防止系统自动附加默认图标
+        alert.icon = nil
+        alert.icon = NSImage(size: NSSize(width: 1, height: 1))
+        
+        // 确保对话框显示在最前面
+        alert.window.level = .modalPanel
+        
+        let response = alert.runModal()
+        
+        switch response {
+        case .alertFirstButtonReturn:
+            // Sign In
+            self.openLoginPage()
+        case .alertSecondButtonReturn:
+            // Learn About Pricing
+            self.openPricingPage()
+        case .alertThirdButtonReturn:
+            // Quit App
+            Logger.info("User chose to quit app without signing in")
+            NSApplication.shared.terminate(nil)
+        default:
+            break
+        }
+        
+        isShowingAlert = false
     }
     
     /// 显示配额耗尽对话框
@@ -63,7 +129,13 @@ class QuotaAlertWindow: NSWindow {
         isShowingAlert = true
         
         DispatchQueue.main.async { [weak self] in
-            self?.showExceededDialog(quotaInfo)
+            // Only show for authenticated users since anonymous mode is disabled
+            if SessionManager.shared.isAuthenticated {
+                self?.showExceededDialog(quotaInfo)
+            } else {
+                // Should not happen since login is required, but handle gracefully
+                self?.showLoginRequirement()
+            }
         }
     }
     
@@ -143,6 +215,59 @@ class QuotaAlertWindow: NSWindow {
         }
         
         isShowingAlert = false
+    }
+    
+    
+    private func openLoginPage() {
+        let environmentManager = EnvironmentManager.shared
+        let loginURL = "\(environmentManager.baseURL)/login?redirect=glotera://auth/callback"
+        
+        if let url = URL(string: loginURL) {
+            NSWorkspace.shared.open(url)
+            Logger.info("Opening login page: \(loginURL)")
+        } else {
+            Logger.error("Invalid login URL: \(loginURL)")
+            
+            // Backup plan - Show login information
+            let alert = NSAlert()
+            alert.messageText = "Login Information"
+            alert.informativeText = """
+            Please visit the following URL to sign in:
+            \(loginURL)
+            
+            Or contact support for assistance:
+            support@glotera.ai
+            """
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        }
+    }
+    
+    private func openPricingPage() {
+        let environmentManager = EnvironmentManager.shared
+        let pricingURL = "\(environmentManager.baseURL)/pricing"
+        
+        if let url = URL(string: pricingURL) {
+            NSWorkspace.shared.open(url)
+            Logger.info("Opening pricing page: \(pricingURL)")
+        } else {
+            Logger.error("Invalid pricing URL: \(pricingURL)")
+            
+            // Backup plan - Show pricing information
+            let alert = NSAlert()
+            alert.messageText = "Pricing Information"
+            alert.informativeText = """
+            Please visit the following URL to see pricing:
+            \(pricingURL)
+            
+            Pro Plan: $2.9/month for unlimited translations
+            
+            Contact support for assistance:
+            support@glotera.ai
+            """
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        }
     }
     
     private func openUpgradePage() {

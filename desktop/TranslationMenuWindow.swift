@@ -172,6 +172,35 @@ class TranslationMenuWindow: NSWindow {
         return false
     }
     
+    private func showLoginRequiredAlert() {
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = "Login Required"
+            alert.informativeText = "You need to sign in to use Glotera's translation features."
+            alert.addButton(withTitle: "Sign In")
+            alert.addButton(withTitle: "Cancel")
+            alert.alertStyle = .informational
+            
+            let response = alert.runModal()
+            if response == .alertFirstButtonReturn {
+                self.openLoginPage()
+            }
+        }
+    }
+    
+    private func openLoginPage() {
+        let environmentManager = EnvironmentManager.shared
+        let loginURL = "\(environmentManager.baseURL)/login?redirect=glotera://auth/callback"
+        
+        guard let url = URL(string: loginURL) else {
+            Logger.error("Failed to create login URL")
+            return
+        }
+        
+        Logger.info("Opening login page: \(loginURL)")
+        NSWorkspace.shared.open(url)
+    }
+    
     private func translateToLanguage(_ language: String) {
         Logger.info("Translating to language: \(language)")
         
@@ -192,6 +221,14 @@ class TranslationMenuWindow: NSWindow {
             // 对于可编辑元素，直接使用新的"仅粘贴"方法替换选中文本
             TranslationStatusWindow.shared.showTranslating(near: sourceElement, mousePoint: lastMousePosition)
             
+            // Check login status before translation
+            guard SessionManager.shared.isAuthenticated else {
+                Logger.info("User not logged in, showing login prompt")
+                showLoginRequiredAlert()
+                return
+            }
+            
+            // User is logged in, proceed with normal translation
             TranslatorClient.shared.translate(text: selectedText, to: language) { [weak self] result in
                 DispatchQueue.main.async {
                     TranslationStatusWindow.shared.hideStatus()
@@ -207,7 +244,13 @@ class TranslationMenuWindow: NSWindow {
                         }
                     case .failure(let error):
                         Logger.warn("Translation failed: \(error.localizedDescription)")
-                        TranslationStatusWindow.shared.showFailure()
+                        // If token expired, prompt for re-login
+                        if error.localizedDescription.contains("token") || error.localizedDescription.contains("401") {
+                            SessionManager.shared.clearSession()
+                            self?.showLoginRequiredAlert()
+                        } else {
+                            TranslationStatusWindow.shared.showFailure()
+                        }
                         // 翻译失败后也清除缓存的应用信息
                         EnvironmentManager.shared.clearTriggerAppInfo()
                     }
@@ -215,6 +258,14 @@ class TranslationMenuWindow: NSWindow {
             }
         } else {
             // 对于不可编辑的元素，显示一个浮动窗口展示翻译结果（保留原逻辑）
+            // Check login status before stream translation
+            guard SessionManager.shared.isAuthenticated else {
+                Logger.info("User not logged in for stream translation, showing login prompt")
+                showLoginRequiredAlert()
+                return
+            }
+            
+            // User is logged in, proceed with stream translation
             showStreamTranslationResult(original: selectedText, targetLanguage: language)
         }
     }

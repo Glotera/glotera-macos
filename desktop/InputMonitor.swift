@@ -296,6 +296,15 @@ class InputMonitor {
         TranslationStatusWindow.shared.showTranslating(near: focusedElement,mousePoint:mouseLocation)
         
         
+        // Check login status before translation
+        guard SessionManager.shared.isAuthenticated else {
+            Logger.info("User not logged in for space key translation, showing login prompt")
+            TranslationStatusWindow.shared.hideStatus()
+            showLoginRequiredAlert()
+            EnvironmentManager.shared.clearTriggerAppInfo()
+            return
+        }
+        
         // 开始翻译（不禁用输入，避免死锁）
         TranslatorClient.shared.translate(text: text, to: lang) { [weak self] result in
             DispatchQueue.main.async {
@@ -313,8 +322,14 @@ class InputMonitor {
                     }
                 case .failure(let error):
                     Logger.warn("Translation failed: \(error.localizedDescription)")
-                    // 显示失败状态
-                    TranslationStatusWindow.shared.showFailure()
+                    // If token expired, prompt for re-login
+                    if error.localizedDescription.contains("token") || error.localizedDescription.contains("401") {
+                        SessionManager.shared.clearSession()
+                        self?.showLoginRequiredAlert()
+                    } else {
+                        // 显示失败状态
+                        TranslationStatusWindow.shared.showFailure()
+                    }
                     // 翻译失败后也清除缓存的应用信息
                     EnvironmentManager.shared.clearTriggerAppInfo()
                 }
@@ -451,6 +466,19 @@ class InputMonitor {
         TranslationStatusWindow.shared.showTranslating(near: focusedElement,mousePoint:mouseLocation)
         
         
+        // Check login status before translation
+        guard SessionManager.shared.isAuthenticated else {
+            Logger.info("User not logged in for Enter key translation, showing login prompt")
+            TranslationStatusWindow.shared.hideStatus()
+            showLoginRequiredAlert()
+            // Send Enter key to complete the action even without translation
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self.sendEnterKey()
+                EnvironmentManager.shared.clearTriggerAppInfo()
+            }
+            return
+        }
+        
         // 开始翻译（不禁用输入，避免死锁）
         TranslatorClient.shared.translate(text: text, to: lang) { [weak self] result in
             DispatchQueue.main.async {
@@ -476,8 +504,14 @@ class InputMonitor {
                     }
                 case .failure(let error):
                     Logger.warn("Translation failed: \(error.localizedDescription)")
-                    // 显示失败状态
-                    TranslationStatusWindow.shared.showFailure()
+                    // If token expired, prompt for re-login
+                    if error.localizedDescription.contains("token") || error.localizedDescription.contains("401") {
+                        SessionManager.shared.clearSession()
+                        self?.showLoginRequiredAlert()
+                    } else {
+                        // 显示失败状态
+                        TranslationStatusWindow.shared.showFailure()
+                    }
                     // 翻译失败时发送原始内容
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                         self?.sendEnterKey()
@@ -543,8 +577,7 @@ class InputMonitor {
            let currentContent = AXController.shared.getValue(of: focused) {
             Logger.info("WeChat: Current input content before Enter: '\(currentContent)'")
         }
-        return  self.sendWeChatEnterKeyViaCGEvent()
-    
+        
         // 使用AppleScript是最可靠的方法，因为它直接与系统事件交互
         let script = """
         tell application "System Events"
@@ -1104,5 +1137,36 @@ class InputMonitor {
         alert.runModal()
         
         Logger.info("=== Chat App Detection Test Completed ===")
+    }
+    
+    // Show login required alert
+    private func showLoginRequiredAlert() {
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = "Login Required"
+            alert.informativeText = "You need to sign in to use Glotera's translation features."
+            alert.addButton(withTitle: "Sign In")
+            alert.addButton(withTitle: "Cancel")
+            alert.alertStyle = .informational
+            
+            let response = alert.runModal()
+            if response == .alertFirstButtonReturn {
+                self.openLoginPage()
+            }
+        }
+    }
+    
+    // Open login page
+    private func openLoginPage() {
+        let environmentManager = EnvironmentManager.shared
+        let loginURL = "\(environmentManager.baseURL)/login?redirect=glotera://auth/callback"
+        
+        guard let url = URL(string: loginURL) else {
+            Logger.error("Failed to create login URL")
+            return
+        }
+        
+        Logger.info("Opening login page: \(loginURL)")
+        NSWorkspace.shared.open(url)
     }
 } 
