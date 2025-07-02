@@ -30,20 +30,23 @@ class MenuBarController {
     func constructMenu() {
         let menu = NSMenu()
         
+        // Authentication menu 
+        addAuthenticationMenuItems(to: menu)
+        menu.addItem(NSMenuItem.separator()) 
+        
         // Main function menu
-        let settingsItem = NSMenuItem(title: "Settings", action: #selector(openSettings), keyEquivalent: "")
+        let settingsItem = NSMenuItem(title: "Settings", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
-
-        // Authentication menu
         menu.addItem(NSMenuItem.separator())
-        addAuthenticationMenuItems(to: menu)
 
-        menu.addItem(NSMenuItem.separator()) 
         let userGuideItem = NSMenuItem(title: "User Guide", action: #selector(openUserGuide), keyEquivalent: "")
         userGuideItem.target = self
         menu.addItem(userGuideItem)
+        menu.addItem(NSMenuItem.separator())
         
+
+
         // Debug menu
         menu.addItem(NSMenuItem.separator())
         let debugMenu = NSMenuItem(title: "Debug", action: nil, keyEquivalent: "")

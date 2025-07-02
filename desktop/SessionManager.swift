@@ -35,7 +35,13 @@ class SessionManager {
     
     /// Check if user is currently authenticated
     var isAuthenticated: Bool {
-        return getStoredToken() != nil && getCurrentUser() != nil
+        let hasToken = getStoredToken() != nil
+        let hasUser = getCurrentUser() != nil
+        let authenticated = hasToken && hasUser
+        
+        Logger.info("SessionManager: Authentication check - hasToken: \(hasToken), hasUser: \(hasUser), isAuthenticated: \(authenticated)")
+        
+        return authenticated
     }
     
     /// Get current authenticated user
@@ -132,6 +138,14 @@ class SessionManager {
             return
         }
         
+        // First check if token is expired locally (faster than server call)
+        if isTokenExpired(token) {
+            Logger.warn("SessionManager: Token is expired locally, clearing session")
+            clearSession()
+            completion(false)
+            return
+        }
+        
         let environmentManager = EnvironmentManager.shared
         let baseURL = environmentManager.serverURL
         
@@ -144,6 +158,7 @@ class SessionManager {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 10.0  // 10 second timeout to prevent hanging
         
         let requestBody = ["token": token]
         
@@ -161,7 +176,9 @@ class SessionManager {
             DispatchQueue.main.async {
                 if let error = error {
                     Logger.error("SessionManager: Token validation network error: \(error)")
-                    completion(false)
+                    // Don't fail authentication due to network issues - allow offline usage
+                    Logger.info("SessionManager: Allowing offline authentication due to network error")
+                    completion(true)
                     return
                 }
                 
@@ -174,11 +191,16 @@ class SessionManager {
                 if httpResponse.statusCode == 200 {
                     Logger.info("SessionManager: Token validation successful")
                     completion(true)
-                } else {
-                    Logger.warn("SessionManager: Token validation failed with status: \(httpResponse.statusCode)")
-                    // Token is invalid, clear session
+                } else if httpResponse.statusCode == 401 {
+                    Logger.warn("SessionManager: Token validation failed - token is invalid or expired")
+                    // Only clear session for 401 (unauthorized)
                     self?.clearSession()
                     completion(false)
+                } else {
+                    Logger.warn("SessionManager: Token validation failed with status: \(httpResponse.statusCode)")
+                    // For other HTTP errors (500, 503, etc.), don't clear session - might be temporary server issues
+                    Logger.info("SessionManager: Allowing offline authentication due to server error")
+                    completion(true)
                 }
             }
         }.resume()
@@ -224,10 +246,13 @@ class SessionManager {
         if status == errSecSuccess,
            let tokenData = result as? Data,
            let token = String(data: tokenData, encoding: .utf8) {
+            Logger.info("SessionManager: Retrieved token from Keychain successfully")
             return token
         }
         
-        if status != errSecItemNotFound {
+        if status == errSecItemNotFound {
+            Logger.info("SessionManager: No token found in Keychain")
+        } else {
             Logger.error("SessionManager: Failed to retrieve token from Keychain: \(status)")
         }
         
