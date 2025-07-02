@@ -176,9 +176,18 @@ class TranslatorClient: NSObject {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         
+        // Add authentication header if user is logged in
+        if let authToken = SessionManager.shared.getAuthToken() {
+            request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
+            Logger.info("Adding authentication header to translation request")
+        } else {
+            Logger.info("No authentication token - using anonymous mode")
+        }
+        
         // 构建包含环境信息的新请求体
         let environment = EnvironmentManager.shared.getEnvironmentInfo()
-        let userId = UserManager.shared.getUserId()
+        // Use authenticated user ID if available, otherwise fall back to anonymous ID
+        let userId = SessionManager.shared.getCurrentUser()?.userId ?? UserManager.shared.getUserId()
         
         let requestBody: [String: Any] = [
             "text": text,
@@ -359,13 +368,22 @@ class TranslatorClient: NSObject {
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         request.timeoutInterval = timeoutInterval
         
+        // Add authentication header if user is logged in
+        if let authToken = SessionManager.shared.getAuthToken() {
+            request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
+            Logger.info("Adding authentication header to stream translation request")
+        } else {
+            Logger.info("No authentication token - using anonymous mode for stream")
+        }
+        
         // 添加流式相关的请求头
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         request.setValue("keep-alive", forHTTPHeaderField: "Connection")
         
         // Build the request body with environment info
         let environment = EnvironmentManager.shared.getEnvironmentInfo()
-        let userId = UserManager.shared.getUserId()
+        // Use authenticated user ID if available, otherwise fall back to anonymous ID
+        let userId = SessionManager.shared.getCurrentUser()?.userId ?? UserManager.shared.getUserId()
         
         let body: [String: Any] = [
             "text": text,

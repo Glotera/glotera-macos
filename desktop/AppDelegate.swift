@@ -20,6 +20,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 初始化配额管理器 - 这将设置配额委托
         _ = QuotaManager.shared
         
+        // Check authentication status on startup
+        checkAuthenticationStatus()
+        
         // Try to setup event monitoring
         setupEventMonitoring()
         
@@ -417,6 +420,164 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // 如果鼠标移动了，说明用户在活跃使用
         return mouseMoved
+    }
+    
+    // MARK: - URL Scheme Handling
+    
+    func application(_ application: NSApplication, open urls: [URL]) {
+        Logger.info("Application received URL open request with \(urls.count) URLs")
+        
+        guard let url = urls.first else {
+            Logger.error("No URLs provided in open request")
+            return
+        }
+        
+        Logger.info("Processing URL: \(url.absoluteString)")
+        
+        // Check if this is our authentication callback URL
+        if url.scheme == "glotera", url.host == "auth", url.path == "/callback" {
+            handleAuthCallback(url: url)
+        } else {
+            Logger.warn("Unknown URL scheme or path: \(url.absoluteString)")
+        }
+    }
+    
+    private func handleAuthCallback(url: URL) {
+        Logger.info("Handling authentication callback")
+        
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            Logger.error("Failed to parse URL components")
+            showAuthError("Invalid authentication response")
+            return
+        }
+        
+        // Extract token and user_id from query parameters
+        var token: String?
+        var userId: String?
+        
+        if let queryItems = components.queryItems {
+            for item in queryItems {
+                switch item.name {
+                case "token":
+                    token = item.value
+                case "user_id":
+                    userId = item.value
+                default:
+                    break
+                }
+            }
+        }
+        
+        guard let authToken = token, let userIdValue = userId else {
+            Logger.error("Missing token or user_id in authentication callback")
+            showAuthError("Authentication failed: Missing credentials")
+            return
+        }
+        
+        Logger.info("Authentication callback received - User ID: \(userIdValue)")
+        
+        // Parse JWT token to get user information
+        if let userInfo = SessionManager.shared.parseJWTToken(authToken) {
+            Logger.info("JWT parsed successfully")
+            
+            let user = User(
+                userId: userInfo["user_id"] as? String ?? userIdValue,
+                email: userInfo["email"] as? String ?? userIdValue,
+                username: userInfo["username"] as? String ?? "User",
+                userType: userInfo["user_type"] as? String ?? "free",
+                accountType: userInfo["account_type"] as? String ?? "email"
+            )
+            
+            // Store authentication session
+            SessionManager.shared.setAuthSession(token: authToken, user: user)
+            
+            Logger.info("Authentication successful for user: \(user.email)")
+            showAuthSuccess("Welcome back, \(user.username)!")
+            
+        } else {
+            Logger.error("Failed to parse JWT token")
+            showAuthError("Authentication failed: Invalid token format")
+        }
+    }
+    
+    private func showAuthSuccess(_ message: String) {
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = "Login Successful"
+            alert.informativeText = message
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        }
+    }
+    
+    private func showAuthError(_ message: String) {
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = "Login Failed"
+            alert.informativeText = message
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        }
+    }
+    
+    // MARK: - Authentication Status Management
+    
+    private func checkAuthenticationStatus() {
+        if SessionManager.shared.isAuthenticated {
+            Logger.info("User is authenticated on startup")
+            
+            // Validate token with server
+            SessionManager.shared.validateToken { [weak self] isValid in
+                if isValid {
+                    Logger.info("Authentication token validated successfully")
+                    if let user = SessionManager.shared.getCurrentUser() {
+                        Logger.info("Welcome back: \(user.username) (\(user.email))")
+                    }
+                } else {
+                    Logger.warn("Authentication token validation failed")
+                    DispatchQueue.main.async {
+                        self?.promptLogin(reason: "Your session has expired. Please sign in again.")
+                    }
+                }
+            }
+        } else {
+            Logger.info("User is not authenticated on startup")
+            // For now, we'll still allow the app to work in anonymous mode
+            // In the future, you can uncomment this to require login:
+            // promptLogin(reason: "Please sign in to use Glotera.")
+        }
+    }
+    
+    private func promptLogin(reason: String) {
+        let alert = NSAlert()
+        alert.messageText = "Sign In Required"
+        alert.informativeText = reason
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Sign In")
+        alert.addButton(withTitle: "Use Anonymous Mode")
+        
+        let response = alert.runModal()
+        
+        if response == .alertFirstButtonReturn {
+            openLoginPage()
+        } else {
+            Logger.info("User chose to continue in anonymous mode")
+        }
+    }
+    
+    private func openLoginPage() {
+        let environmentManager = EnvironmentManager.shared
+        let loginURL = "\(environmentManager.baseURL)/login?redirect=glotera://auth/callback"
+        
+        guard let url = URL(string: loginURL) else {
+            Logger.error("Failed to create login URL")
+            return
+        }
+        
+        Logger.info("Opening login page: \(loginURL)")
+        NSWorkspace.shared.open(url)
     }
     
     func applicationWillTerminate(_ aNotification: Notification) {

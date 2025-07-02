@@ -41,7 +41,7 @@ plutil -lint Glotera-20250624/Glotera.app/Contents/Info.plist
 xcrun notarytool store-credentials "glotera-profile" \
   --apple-id glotera.ai@gmail.com \
   --team-id 6Q3GB859VC \
-  --password ocij-tdpl-azxx-xxxx
+  --password ocij-tdpl-azxx-zouk
 ```
 
 ## 上传文件进行公证

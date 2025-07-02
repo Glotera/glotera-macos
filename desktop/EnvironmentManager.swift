@@ -9,6 +9,24 @@ class EnvironmentManager {
     private init() {
         Logger.info("EnvironmentManager initialized.")
     }
+    
+    /// Returns the base URL for the web interface
+    var baseURL: String {
+        #if DEBUG
+            return "http://localhost:1145"
+        #else
+            return "https://glotera.ai"
+        #endif
+    }
+    
+    /// Returns the server URL for API requests
+    var serverURL: String {
+        #if DEBUG
+            return "http://localhost:1145"
+        #else
+            return "https://api.glotera.ai"
+        #endif
+    }
 
     /// Gathers all relevant environment information for API requests.
     func getEnvironmentInfo() -> [String: Any] {

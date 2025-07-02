@@ -14,8 +14,8 @@ struct TranslateAgent: App {
 
        var body: some Scene {
            // 可以不显示主窗口，或者只作为配置入口
-           Settings {
-               SettingsView()
-           }
+        //    Settings {
+        //        SettingsView()
+        //    }
        }
 }

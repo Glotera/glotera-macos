@@ -40,6 +40,10 @@ class MenuBarController {
         settingsItem.target = self
         menu.addItem(settingsItem)
 
+        // Authentication menu
+        menu.addItem(NSMenuItem.separator())
+        addAuthenticationMenuItems(to: menu)
+
         menu.addItem(NSMenuItem.separator()) 
         let userGuideItem = NSMenuItem(title: "User Guide", action: #selector(openUserGuide), keyEquivalent: "")
         userGuideItem.target = self
@@ -738,6 +742,121 @@ class MenuBarController {
         }
     }
     
+    // MARK: - Authentication Menu
+    
+    private func addAuthenticationMenuItems(to menu: NSMenu) {
+        if SessionManager.shared.isAuthenticated {
+            // User is logged in - show user info and logout option
+            if let user = SessionManager.shared.getCurrentUser() {
+                let userInfoItem = NSMenuItem(title: "Signed in as \(user.username)", action: nil, keyEquivalent: "")
+                userInfoItem.isEnabled = false
+                menu.addItem(userInfoItem)
+                
+                let userTypeItem = NSMenuItem(title: "Account: \(user.userType.capitalized)", action: nil, keyEquivalent: "")
+                userTypeItem.isEnabled = false
+                menu.addItem(userTypeItem)
+                
+                menu.addItem(NSMenuItem.separator())
+                
+                let logoutItem = NSMenuItem(title: "Sign Out", action: #selector(signOut), keyEquivalent: "")
+                logoutItem.target = self
+                menu.addItem(logoutItem)
+            }
+        } else {
+            // User is not logged in - show login option
+            let loginItem = NSMenuItem(title: "Sign In", action: #selector(signIn), keyEquivalent: "")
+            loginItem.target = self
+            menu.addItem(loginItem)
+            
+            let anonymousItem = NSMenuItem(title: "Using Anonymous Mode", action: nil, keyEquivalent: "")
+            anonymousItem.isEnabled = false
+            menu.addItem(anonymousItem)
+        }
+        
+        // Listen for authentication changes
+        setupAuthenticationObservers()
+    }
+    
+    private func setupAuthenticationObservers() {
+        // Remove existing observers first
+        NotificationCenter.default.removeObserver(self, name: .userDidLogin, object: nil)
+        NotificationCenter.default.removeObserver(self, name: .userDidLogout, object: nil)
+        
+        // Add observers for authentication state changes
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(userDidLogin),
+            name: .userDidLogin,
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(userDidLogout),
+            name: .userDidLogout,
+            object: nil
+        )
+    }
+    
+    @objc private func signIn() {
+        Logger.info("Sign In menu item clicked")
+        openLoginPage()
+    }
+    
+    @objc private func signOut() {
+        Logger.info("Sign Out menu item clicked")
+        
+        let alert = NSAlert()
+        alert.messageText = "Sign Out"
+        alert.informativeText = "Are you sure you want to sign out? You will continue to have limited functionality in anonymous mode."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Sign Out")
+        alert.addButton(withTitle: "Cancel")
+        
+        let response = alert.runModal()
+        
+        if response == .alertFirstButtonReturn {
+            SessionManager.shared.clearSession()
+            Logger.info("User signed out successfully")
+            
+            showNonBlockingNotification(
+                title: "Signed Out",
+                message: "You have been signed out. You can continue using Glotera in anonymous mode."
+            )
+        }
+    }
+    
+    @objc private func userDidLogin(_ notification: Notification) {
+        DispatchQueue.main.async {
+            self.constructMenu()
+            
+            if let user = notification.object as? User {
+                self.showNonBlockingNotification(
+                    title: "Welcome Back!",
+                    message: "Signed in as \(user.username)"
+                )
+            }
+        }
+    }
+    
+    @objc private func userDidLogout(_ notification: Notification) {
+        DispatchQueue.main.async {
+            self.constructMenu()
+        }
+    }
+    
+    private func openLoginPage() {
+        let environmentManager = EnvironmentManager.shared
+        let loginURL = "\(environmentManager.baseURL)/login?redirect=glotera://auth/callback"
+        
+        guard let url = URL(string: loginURL) else {
+            Logger.error("Failed to create login URL")
+            return
+        }
+        
+        Logger.info("Opening login page: \(loginURL)")
+        NSWorkspace.shared.open(url)
+    }
 
 
 } 
