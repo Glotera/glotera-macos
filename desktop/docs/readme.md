@@ -17,25 +17,32 @@
 ```
 
 ## 导出app
+schema 从debug改为release
 Xcode-> Product-> Archive -> Distribute App -> Custom -> Copy App
+
+## Verify Bundle ID and Team Configuration
+Check that your app's bundle ID matches your Apple Developer account:
+```bash
+# Check current bundle ID
+plutil -p Glotera-0.1.4/Glotera.app/Contents/Info.plist | grep CFBundleIdentifier
+# Should show: "CFBundleIdentifier" => "ai.glotera.desktop"
+```
 
 ## 进行签名
 ```bash
-(base) bryanzh@BMA release % codesign -f -o runtime -s "Developer ID Application: Xinbo Zhang (6Q3GB859VC)" -v Glotera-0.1.4/Glotera.app --deep
+(base) bryanzh@BMA release % codesign -f -o runtime -s "Developer ID Application: Xinbo Zhang (6Q3GB859VC)" -v Glotera-0.2.0/Glotera.app --deep
 Glotera-0.1.4/Glotera.app: replacing existing signature
 Glotera-0.1.4/Glotera.app: signed app bundle with Mach-O universal (x86_64 arm64) [ai.glotera.desktop]
+
+-- 进行验证签名
+codesign --verify --verbose=4 Glotera-0.1.4/Glotera.app
 ```
 
 ## 打包成zip文件
 ```bash
-ditto -c -k --keepParent /path/to/Glotera.app glotera-0.1.4.zip
+ditto -c -k --keepParent Glotera-0.1.4/Glotera.app glotera-0.1.4.zip
 ```
-
-## 检查plist是否正确（可选）
-```bash
-plutil -lint Glotera-20250624/Glotera.app/Contents/Info.plist
-```
-
+ 
 ## 生成notarytool keychain profile，避免每次输密码(只需要操作一次)
 ```bash
 xcrun notarytool store-credentials "glotera-profile" \
