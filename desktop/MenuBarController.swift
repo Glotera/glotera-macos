@@ -38,11 +38,18 @@ class MenuBarController {
         let settingsItem = NSMenuItem(title: "Settings", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
+
+        let checkUpdatesItem = NSMenuItem(title: "Check for Updates", action: #selector(checkForUpdates), keyEquivalent: "")
+        checkUpdatesItem.target = self
+        menu.addItem(checkUpdatesItem) 
+
         menu.addItem(NSMenuItem.separator())
 
         let userGuideItem = NSMenuItem(title: "User Guide", action: #selector(openUserGuide), keyEquivalent: "")
         userGuideItem.target = self
         menu.addItem(userGuideItem)
+        
+
         menu.addItem(NSMenuItem.separator())
         
 
@@ -110,8 +117,23 @@ class MenuBarController {
         openConsoleItem.target = self
         debugSubMenu.addItem(openConsoleItem)
         
+        debugSubMenu.addItem(NSMenuItem.separator())
+        
+        // Update testing menu items
+        let testUpdateAvailableItem = NSMenuItem(title: "Test: Update Available", action: #selector(testUpdateAvailable), keyEquivalent: "")
+        testUpdateAvailableItem.target = self
+        debugSubMenu.addItem(testUpdateAvailableItem)
+        
+        let testNoUpdateItem = NSMenuItem(title: "Test: No Update Available", action: #selector(testNoUpdate), keyEquivalent: "")
+        testNoUpdateItem.target = self
+        debugSubMenu.addItem(testNoUpdateItem)
+        
+        let testBetaChannelItem = NSMenuItem(title: "Test: Switch to Beta Channel", action: #selector(testBetaChannel), keyEquivalent: "")
+        testBetaChannelItem.target = self
+        debugSubMenu.addItem(testBetaChannelItem)
+        
         debugMenu.submenu = debugSubMenu
-        //menu.addItem(debugMenu)
+        menu.addItem(debugMenu)
         
         // Exit menu
         menu.addItem(NSMenuItem.separator())
@@ -172,6 +194,16 @@ class MenuBarController {
         
         Logger.info("Opening user guide page: \(userGuideURL)")
         NSWorkspace.shared.open(url)
+    }
+    
+    @objc func checkForUpdates() {
+        Logger.info("Check for Updates menu clicked")
+        
+        // Use UpdateManager to check for updates
+        UpdateManager.shared.checkForUpdates()
+        
+        // Note: In Sparkle 2.7.1, the standard updater shows its own UI
+        // No need for manual notification as Sparkle handles user feedback
     }
     
     @objc func testTrigger() {
@@ -841,6 +873,73 @@ class MenuBarController {
         Logger.info("Opening pricing page: \(pricingURL)")
         NSWorkspace.shared.open(url)
     }
-
+    
+    // MARK: - Update Testing Methods
+    
+    @objc private func testUpdateAvailable() {
+        Logger.info("Testing update available scenario")
+        
+        // Show info about this test
+        showNonBlockingNotification(
+            title: "Testing Update Available",
+            message: "This test simulates checking for updates when a newer version is available. Check console for details."
+        )
+        
+        // Manually check for updates
+        UpdateManager.shared.checkForUpdates()
+    }
+    
+    @objc private func testNoUpdate() {
+        Logger.info("Testing no update available scenario")
+        
+        showNonBlockingNotification(
+            title: "Testing No Update",
+            message: "This test simulates checking for updates when no update is available. Check console for details."
+        )
+        
+        // Check the current appcast to see what version is advertised
+        testAppcastEndpoint()
+    }
+    
+    @objc private func testBetaChannel() {
+        Logger.info("Testing beta channel switch")
+        
+        showNonBlockingNotification(
+            title: "Testing Beta Channel",
+            message: "Switching to beta channel and checking for updates..."
+        )
+        
+        // Switch to beta channel and check
+        UpdateManager.shared.setUpdateChannel("beta")
+        UpdateManager.shared.checkForUpdates()
+    }
+    
+    private func testAppcastEndpoint() {
+        let url = "http://localhost:1145/api/appcast.xml"
+        
+        guard let requestURL = URL(string: url) else {
+            Logger.error("Invalid appcast URL")
+            return
+        }
+        
+        let task = URLSession.shared.dataTask(with: requestURL) { data, response, error in
+            if let error = error {
+                Logger.error("Appcast test failed: \(error.localizedDescription)")
+                return
+            }
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                Logger.info("Appcast HTTP Status: \(httpResponse.statusCode)")
+            }
+            
+            if let data = data {
+                let xmlString = String(data: data, encoding: .utf8) ?? "Unable to decode XML"
+                Logger.info("Appcast XML Response:")
+                Logger.info(String(xmlString.prefix(500))) // First 500 characters
+            }
+        }
+        
+        task.resume()
+    }
 
 } 

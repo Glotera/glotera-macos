@@ -4,15 +4,26 @@
 <dict>
 	<key>CFBundleIconName</key>
 	<string>AppIcon</string>
+	<!-- bundle identifier -->
 	<key>CFBundleIdentifier</key>
 	<string>ai.glotera.desktop</string>
+
+	<!-- bundle version -->
+	<key>CFBundleShortVersionString</key>
+	<string>0.2.0</string>
+	<key>CFBundleVersion</key>
+	<string>2025060301</string>
+
+	<!-- keyboard and mouse action monitor privileges -->
 	<key>NSAccessibilityUsageDescription</key>
-	<string>用于将翻译结果自动插入到输入框中</string>
+	<string>Used to automatically insert the translation result into the input field</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+
+	<!-- login call back scheme -->
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -24,5 +35,24 @@
 			</array>
 		</dict>
 	</array>
+
+	<!-- Sparkle Update Configuration -->
+	<key>SUFeedURL</key>
+	<string>http://localhost:1145/api/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+    <string>SxSMwjBUazcaJ33S7nBAp9uhpmQ3X29UZHOx1jB+MMI=</string>
+	<key>SUAutomaticallyUpdate</key>
+	<false/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUShowReleaseNotes</key>
+	<true/>
+	<key>SUFeedURLForChannel</key>
+	<dict>
+		<key>beta</key>
+		<string>http://localhost:1145/api/appcast.xml?channel=beta</string>
+	</dict>
 </dict>
 </plist>

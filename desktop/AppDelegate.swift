@@ -20,6 +20,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 初始化配额管理器 - 这将设置配额委托
         _ = QuotaManager.shared
         
+        // Initialize update manager and check for updates
+        _ = UpdateManager.shared
+        UpdateManager.shared.performFirstLaunchCheck()
+        
         // Check authentication status on startup
         checkAuthenticationStatus()
         

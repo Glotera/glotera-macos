@@ -25,6 +25,7 @@
 		3D153861DB83474CB7A5CE30 /* ConfigWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15B044BD9B2D441BAF66FA8D /* ConfigWindow.swift */; };
 		52E75974376A4A2C80038B26 /* ConfigManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F60848B2C5C4E76B8A270AB /* ConfigManager.swift */; };
 		55ACA3925B5740A49F528A02 /* language-iso-639.json in Resources */ = {isa = PBXBuildFile; fileRef = ADA243CF57A742A49C392A18 /* language-iso-639.json */; };
+		608349332E16ACC2008EBB87 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 608349322E16ACC2008EBB87 /* Sparkle */; };
 		60B4B7912E0BA3D800A08883 /* UserManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60B4B7902E0BA3D800A08883 /* UserManager.swift */; };
 		60B4B7922E0BA3D800A08883 /* EnvironmentManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60B4B78F2E0BA3D800A08883 /* EnvironmentManager.swift */; };
 		60B4B7942E0BA3D800A08884 /* SessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60B4B7932E0BA3D800A08884 /* SessionManager.swift */; };
@@ -43,6 +44,7 @@
 		9BE4ED882E012FF1002AC2AE /* TranslatorClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BE4ED7B2E012FF1002AC2AE /* TranslatorClient.swift */; };
 		9BE4ED892E012FF1002AC2AE /* Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 9BE4ED7C2E012FF1002AC2AE /* Info.plist */; };
 		9BE4ED8A2E012FF1002AC2AE /* TranslateAgent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BE4ED7D2E012FF1002AC2AE /* TranslateAgent.swift */; };
+		9BE4ED902E012FF1002AC2AE /* UpdateManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BE4ED8F2E012FF1002AC2AE /* UpdateManager.swift */; };
 		A1B2C3D4E5F678901234567A /* Logger.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6789012345678AB /* Logger.swift */; };
 		C3D4E5F67890123456789ABC /* LoggerExample.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E5F67890123456789ABCDE /* LoggerExample.swift */; };
 		QU0TA5AL3RT4W1ND0W567890 /* QuotaAlertWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = QU0TA5AL3RT4W1ND0W123456 /* QuotaAlertWindow.swift */; };
@@ -97,6 +99,7 @@
 		9BE4ED7B2E012FF1002AC2AE /* TranslatorClient.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TranslatorClient.swift; sourceTree = "<group>"; };
 		9BE4ED7C2E012FF1002AC2AE /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		9BE4ED7D2E012FF1002AC2AE /* TranslateAgent.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TranslateAgent.swift; sourceTree = "<group>"; };
+		9BE4ED8F2E012FF1002AC2AE /* UpdateManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = UpdateManager.swift; sourceTree = "<group>"; };
 		ADA243CF57A742A49C392A18 /* language-iso-639.json */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.json; path = "language-iso-639.json"; sourceTree = "<group>"; };
 		B2C3D4E5F6789012345678AB /* Logger.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Logger.swift; sourceTree = "<group>"; };
 		D4E5F67890123456789ABCDE /* LoggerExample.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LoggerExample.swift; sourceTree = "<group>"; };
@@ -108,6 +111,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				608349332E16ACC2008EBB87 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -128,12 +132,20 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		608349312E16ACC2008EBB87 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		9BE4ED392E012FC2002AC2AE = {
 			isa = PBXGroup;
 			children = (
 				9BE4ED702E012FF1002AC2AE /* desktop */,
 				9BE4ED562E012FC5002AC2AE /* desktopTests */,
 				9BE4ED602E012FC5002AC2AE /* desktopUITests */,
+				608349312E16ACC2008EBB87 /* Frameworks */,
 				9BE4ED432E012FC2002AC2AE /* Products */,
 			);
 			sourceTree = "<group>";
@@ -190,6 +202,7 @@
 				9BE4ED772E012FF1002AC2AE /* TranslationResultWindow.swift */,
 				9BE4ED752E012FF1002AC2AE /* TranslationStatusWindow.swift */,
 				9BE4ED7B2E012FF1002AC2AE /* TranslatorClient.swift */,
+				9BE4ED8F2E012FF1002AC2AE /* UpdateManager.swift */,
 			);
 			path = desktop;
 			sourceTree = "<group>";
@@ -285,6 +298,9 @@
 				Base,
 			);
 			mainGroup = 9BE4ED392E012FC2002AC2AE;
+			packageReferences = (
+				60B4B7962E16741300A08883 /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
 			productRefGroup = 9BE4ED432E012FC2002AC2AE /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -367,6 +383,7 @@
 				60B4B7912E0BA3D800A08883 /* UserManager.swift in Sources */,
 				60B4B7922E0BA3D800A08883 /* EnvironmentManager.swift in Sources */,
 				60B4B7942E0BA3D800A08884 /* SessionManager.swift in Sources */,
+				9BE4ED902E012FF1002AC2AE /* UpdateManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -535,7 +552,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2025060301;
 				DEVELOPMENT_TEAM = 6Q3GB859VC;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
@@ -548,7 +565,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 0.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = ai.glotera.desktop;
 				PRODUCT_NAME = Glotera;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -565,7 +582,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2025060301;
 				DEVELOPMENT_TEAM = 6Q3GB859VC;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
@@ -578,7 +595,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 0.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = ai.glotera.desktop;
 				PRODUCT_NAME = Glotera;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -725,6 +742,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		60B4B7962E16741300A08883 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.7.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		608349322E16ACC2008EBB87 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 60B4B7962E16741300A08883 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 9BE4ED3A2E012FC2002AC2AE /* Project object */;
 }

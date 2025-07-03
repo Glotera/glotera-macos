@@ -1,0 +1,255 @@
+import Cocoa
+import Foundation
+
+#if canImport(Sparkle)
+import Sparkle
+#endif
+
+// Update Manager for Sparkle integration
+// Note: Sparkle framework needs to be added to the project for this to compile
+// This implementation provides the structure for when Sparkle is integrated
+
+class UpdateManager: NSObject {
+    static let shared = UpdateManager()
+    
+    private var isSparkleAvailable = false
+    
+    #if canImport(Sparkle)
+    private var updaterController: SPUStandardUpdaterController?
+    #endif
+    
+    override init() {
+        super.init()
+        initializeSparkle()
+    }
+    
+    private func initializeSparkle() {
+        // Check if Sparkle framework is available
+        #if canImport(Sparkle)
+        // Sparkle 2.7.1 initialization with proper constructor
+        self.updaterController = SPUStandardUpdaterController(
+            startingUpdater: true,
+            updaterDelegate: nil,
+            userDriverDelegate: nil
+        )
+        self.isSparkleAvailable = true
+        Logger.info("Sparkle updater initialized successfully")
+        #else
+        Logger.warn("Sparkle framework not available - update checking disabled")
+        self.isSparkleAvailable = false
+        #endif
+    }
+    
+    func checkForUpdates() {
+        guard isSparkleAvailable else {
+            Logger.warn("Cannot check for updates - Sparkle framework not available")
+            // For testing purposes, also check via API
+            checkForUpdatesViaAPI()
+            showSparkleNotAvailableAlert()
+            return
+        }
+        
+        #if canImport(Sparkle)
+            Logger.info("Manually checking for updates...")
+            updaterController?.updater.checkForUpdates()  
+        #endif
+    }
+    
+    func checkForUpdatesInBackground() {
+        guard isSparkleAvailable else {
+            Logger.debug("Background update check skipped - Sparkle not available")
+            return
+        }
+        
+        #if canImport(Sparkle)
+        Logger.debug("Checking for updates in background...")
+        updaterController?.updater.checkForUpdatesInBackground()
+        #endif
+    }
+    
+    func setUpdateChannel(_ channel: String) {
+        guard isSparkleAvailable else {
+            Logger.warn("Cannot set update channel - Sparkle framework not available")
+            return
+        }
+        
+        let baseURL = EnvironmentManager.shared.serverURL
+        let feedURL = channel == "beta" 
+            ? "\(baseURL)/api/appcast.xml?channel=beta"
+            : "\(baseURL)/api/appcast.xml"
+        
+        #if canImport(Sparkle)
+        // In Sparkle 2.7.1, feedURL is read-only and set from Info.plist
+        // For channel switching, we would need to recreate the updater or use different approach
+        Logger.info("Channel switch requested to: \(channel) (URL: \(feedURL))")
+        Logger.warn("Note: Dynamic feed URL changes require updater recreation in Sparkle 2.7.1")
+        // TODO: Implement updater recreation if channel switching is needed
+        #endif
+    }
+    
+    private func showSparkleNotAvailableAlert() {
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = "Update Check Not Available"
+            alert.informativeText = "Automatic updates are not available in this build. Please check the website for the latest version."
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "Visit Website")
+            alert.addButton(withTitle: "Cancel")
+            
+            let response = alert.runModal()
+            if response == .alertFirstButtonReturn {
+                let websiteURL = EnvironmentManager.shared.baseURL
+                if let url = URL(string: websiteURL) {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+        }
+    }
+    
+    // Send analytics about update events
+    private func sendUpdateAnalytics(event: String, currentVersion: String, targetVersion: String? = nil) {
+        let environmentManager = EnvironmentManager.shared
+        guard let url = URL(string: "\(environmentManager.serverURL)/api/app/analytics") else { 
+            Logger.error("Invalid analytics URL")
+            return 
+        }
+        
+        let payload: [String: Any] = [
+            "event_type": event,
+            "app_version": currentVersion,
+            "target_version": targetVersion ?? "",
+            "user_id": UserManager.shared.userId,
+            "os_version": ProcessInfo.processInfo.operatingSystemVersionString,
+            "timestamp": ISO8601DateFormatter().string(from: Date())
+        ]
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+            URLSession.shared.dataTask(with: request) { data, response, error in
+                if let error = error {
+                    Logger.debug("Failed to send update analytics: \(error.localizedDescription)")
+                } else {
+                    Logger.debug("Update analytics sent: \(event)")
+                }
+            }.resume()
+        } catch {
+            Logger.error("Failed to serialize analytics payload: \(error)")
+        }
+    }
+    
+    func getCurrentVersion() -> String {
+        return Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown"
+    }
+    
+    func performFirstLaunchCheck() {
+        // Check for updates on first launch (after a delay)
+        if isFirstLaunch() {
+            Logger.info("First launch detected - will check for updates in 5 seconds")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+                self.checkForUpdatesInBackground()
+            }
+        }
+    }
+    
+    private func isFirstLaunch() -> Bool {
+        let hasLaunchedKey = "HasLaunchedBefore"
+        let hasLaunched = UserDefaults.standard.bool(forKey: hasLaunchedKey)
+        if !hasLaunched {
+            UserDefaults.standard.set(true, forKey: hasLaunchedKey)
+            return true
+        }
+        return false
+    }
+    
+    // MARK: - Direct API Testing (for development without Sparkle)
+    
+    func checkForUpdatesViaAPI() {
+        let currentVersion = getCurrentVersion()
+        let baseURL = EnvironmentManager.shared.serverURL
+        let apiURL = "\(baseURL)/api/app/version/check?version=\(currentVersion)&channel=stable"
+        
+        Logger.info("Testing update API directly: \(apiURL)")
+        
+        guard let url = URL(string: apiURL) else {
+            Logger.error("Invalid API URL: \(apiURL)")
+            return
+        }
+        
+        let task = URLSession.shared.dataTask(with: url) { data, response, error in
+            if let error = error {
+                Logger.error("API test failed: \(error.localizedDescription)")
+                return
+            }
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                Logger.info("API Response Status: \(httpResponse.statusCode)")
+            }
+            
+            if let data = data {
+                do {
+                    if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        Logger.info("API Response: \(json)")
+                        
+                        if let updateAvailable = json["update_available"] as? Bool,
+                           let latestVersion = json["latest_version"] as? String {
+                            
+                            if updateAvailable {
+                                Logger.info("✅ Update available: \(currentVersion) → \(latestVersion)")
+                                
+                                DispatchQueue.main.async {
+                                    self.showUpdateAvailableAlert(currentVersion: currentVersion, 
+                                                                newVersion: latestVersion, 
+                                                                downloadURL: json["download_url"] as? String)
+                                }
+                            } else {
+                                Logger.info("✅ No update available (current: \(currentVersion))")
+                                
+                                DispatchQueue.main.async {
+                                    self.showNoUpdateAlert(currentVersion: currentVersion)
+                                }
+                            }
+                        }
+                    }
+                } catch {
+                    Logger.error("Failed to parse API response: \(error)")
+                }
+            }
+        }
+        
+        task.resume()
+    }
+    
+    private func showUpdateAvailableAlert(currentVersion: String, newVersion: String, downloadURL: String?) {
+        let alert = NSAlert()
+        alert.messageText = "Update Available"
+        alert.informativeText = "Version \(newVersion) is available (current: \(currentVersion)). Download manually from the website."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Download")
+        alert.addButton(withTitle: "Later")
+        
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            let urlString = downloadURL ?? EnvironmentManager.shared.baseURL
+            if let url = URL(string: urlString) {
+                NSWorkspace.shared.open(url)
+            }
+        }
+    }
+    
+    private func showNoUpdateAlert(currentVersion: String) {
+        let alert = NSAlert()
+        alert.messageText = "No Updates Available"
+        alert.informativeText = "You have the latest version (\(currentVersion))"
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+}
+
+// MARK: - Sparkle Delegate (when framework is available)
+// Note: SPUStandardUpdaterController handles most delegate functionality automatically
+// Custom delegate methods can be added here if needed for analytics or custom behavior
