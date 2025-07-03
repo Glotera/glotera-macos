@@ -10,9 +10,9 @@
 
 	<!-- bundle version -->
 	<key>CFBundleShortVersionString</key>
-	<string>0.2.0</string>
+	<string>0.2.1</string>
 	<key>CFBundleVersion</key>
-	<string>2025060301</string>
+	<string>2025070302</string>
 
 	<!-- keyboard and mouse action monitor privileges -->
 	<key>NSAccessibilityUsageDescription</key>
@@ -37,8 +37,7 @@
 	</array>
 
 	<!-- Sparkle Update Configuration -->
-	<key>SUFeedURL</key>
-	<string>http://localhost:1145/api/appcast.xml</string>
+	<!-- SUFeedURL is provided programmatically via SPUUpdaterDelegate.feedURLString(for:) -->
 	<key>SUPublicEDKey</key>
     <string>SxSMwjBUazcaJ33S7nBAp9uhpmQ3X29UZHOx1jB+MMI=</string>
 	<key>SUAutomaticallyUpdate</key>

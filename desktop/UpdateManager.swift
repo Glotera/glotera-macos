@@ -26,14 +26,17 @@ class UpdateManager: NSObject {
     private func initializeSparkle() {
         // Check if Sparkle framework is available
         #if canImport(Sparkle)
-        // Sparkle 2.7.1 initialization with proper constructor
+        let feedURL = EnvironmentManager.shared.baseURL + "/api/appcast.xml"
+        Logger.info("Initializing Sparkle with feed URL: \(feedURL)")
+        
+        // Sparkle 2.7.1 initialization with delegate for custom feed URL
         self.updaterController = SPUStandardUpdaterController(
             startingUpdater: true,
-            updaterDelegate: nil,
+            updaterDelegate: self,
             userDriverDelegate: nil
         )
         self.isSparkleAvailable = true
-        Logger.info("Sparkle updater initialized successfully")
+        Logger.info("Sparkle updater initialized successfully with delegate")
         #else
         Logger.warn("Sparkle framework not available - update checking disabled")
         self.isSparkleAvailable = false
@@ -50,8 +53,8 @@ class UpdateManager: NSObject {
         }
         
         #if canImport(Sparkle)
-            Logger.info("Manually checking for updates...")
-            updaterController?.updater.checkForUpdates()  
+        Logger.info("Manually checking for updates...")
+        updaterController?.updater.checkForUpdates()
         #endif
     }
     
@@ -67,23 +70,26 @@ class UpdateManager: NSObject {
         #endif
     }
     
+    // Store current channel for delegate method
+    private var currentChannel: String = "stable"
+    
     func setUpdateChannel(_ channel: String) {
         guard isSparkleAvailable else {
             Logger.warn("Cannot set update channel - Sparkle framework not available")
             return
         }
         
-        let baseURL = EnvironmentManager.shared.serverURL
-        let feedURL = channel == "beta" 
-            ? "\(baseURL)/api/appcast.xml?channel=beta"
-            : "\(baseURL)/api/appcast.xml"
+        Logger.info("Switching to \(channel) channel")
+        self.currentChannel = channel
         
         #if canImport(Sparkle)
-        // In Sparkle 2.7.1, feedURL is read-only and set from Info.plist
-        // For channel switching, we would need to recreate the updater or use different approach
-        Logger.info("Channel switch requested to: \(channel) (URL: \(feedURL))")
-        Logger.warn("Note: Dynamic feed URL changes require updater recreation in Sparkle 2.7.1")
-        // TODO: Implement updater recreation if channel switching is needed
+        // Recreate updater with new delegate that will return new feed URL
+        self.updaterController = SPUStandardUpdaterController(
+            startingUpdater: true,
+            updaterDelegate: self,
+            userDriverDelegate: nil
+        )
+        Logger.info("Updater recreated with new channel: \(channel)")
         #endif
     }
     
@@ -251,5 +257,45 @@ class UpdateManager: NSObject {
 }
 
 // MARK: - Sparkle Delegate (when framework is available)
-// Note: SPUStandardUpdaterController handles most delegate functionality automatically
-// Custom delegate methods can be added here if needed for analytics or custom behavior
+#if canImport(Sparkle)
+extension UpdateManager: SPUUpdaterDelegate {
+    
+    // Provide custom feed URL based on environment and channel
+    func feedURLString(for updater: SPUUpdater) -> String? {
+        let baseURL = EnvironmentManager.shared.baseURL
+        let feedURL = currentChannel == "beta" 
+            ? "\(baseURL)/api/appcast.xml?channel=beta"
+            : "\(baseURL)/api/appcast.xml"
+        
+        Logger.info("Providing feed URL: \(feedURL) for channel: \(currentChannel)")
+        return feedURL
+    }
+    
+    // Optional: Add analytics delegate methods
+    func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        Logger.info("Update available: \(item.versionString)")
+        sendUpdateAnalytics(event: "update_available", 
+                          currentVersion: getCurrentVersion(),
+                          targetVersion: item.versionString)
+    }
+    
+    func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
+        Logger.debug("No updates available")
+        sendUpdateAnalytics(event: "no_update_available", 
+                          currentVersion: getCurrentVersion())
+    }
+    
+    func updater(_ updater: SPUUpdater, willInstallUpdate item: SUAppcastItem) {
+        Logger.info("Installing update: \(item.versionString)")
+        sendUpdateAnalytics(event: "update_install_started", 
+                          currentVersion: getCurrentVersion(),
+                          targetVersion: item.versionString)
+    }
+    
+    func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
+        Logger.error("Update failed with error: \(error.localizedDescription)")
+        sendUpdateAnalytics(event: "update_failed", 
+                          currentVersion: getCurrentVersion())
+    }
+}
+#endif
