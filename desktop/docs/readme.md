@@ -2,5 +2,13 @@
 ## 使用sparkle自动更新安装包注意事项
 - 需要在Xcode中 File-> Add Package Dependencies 中将sparkle最新的包配置进去
 - 在target -> desktop -> Frameworks,Libraries 中也增加引用
-- 必须使用sparkle发行包中的/bin/generate_keys命令生成公私钥，然后半公钥配置到info.plist文件中，否则可能会把公钥decode失败
-- sparkle在检查版本是否要更新时，是从服务端获取appcast.xml中的 sparkle:version 来比较，而不是sparkle:shortVersionString，所以在Info.plist中需要配置version，一定是一个整数，越新的版本整数越数，这样在进行比较的时候才知道是否需要更新，shortVersionString只是用户展示用的  
+- 必须使用sparkle发行包中的/bin/generate_keys命令生成eddsa公私钥
+  - 然后将公钥配置到info.plist文件中，否则可能会出现公钥decode失败
+  - 私钥不要上传到git库，妥善保管，在打包时需要用私钥进行签名
+- sparkle在检查版本是否要更新时，比较的版本是bundleVersion
+  - 对应服务端获appcast.xml中的 sparkle:version
+  - Xcode general UI中的build, Build Settings中的 Current Project Version，info.plist中的CFBundleVersion
+  - 我们看到0.2.x这样的版本号对应appcast.xml中的 sparkle:shortVersionString，Xcode general UI中的version，Build Settings中的Short Marketing Version， info.plist中的CFBundleShortVersionString
+  - 0.2.x 这个一般是展示给用户看的，所以也叫MARKTETING_VERSION
+  - Xcode中general UI中配置的优先级要高于info.plist文件中配置的，编译后会覆盖
+  - Xcode中general UI中修改好之后，经常不会直接生效，需要重启一个Xcode  

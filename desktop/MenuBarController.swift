@@ -874,7 +874,8 @@ class MenuBarController {
         NSWorkspace.shared.open(url)
     }
     
-    // MARK: - Update Testing Methods
+    #if DEBUG
+    // MARK: - Update Testing Methods (Debug Only)
     
     @objc private func testUpdateAvailable() {
         Logger.info("Testing update available scenario")
@@ -941,5 +942,6 @@ class MenuBarController {
         
         task.resume()
     }
+    #endif
 
 } 

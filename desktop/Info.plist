@@ -6,13 +6,13 @@
 	<string>AppIcon</string>
 	<!-- bundle identifier -->
 	<key>CFBundleIdentifier</key>
-	<string>ai.glotera.desktop</string>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 
 	<!-- bundle version -->
 	<key>CFBundleShortVersionString</key>
-	<string>0.2.1</string>
+	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
-	<string>2025070302</string>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
 
 	<!-- keyboard and mouse action monitor privileges -->
 	<key>NSAccessibilityUsageDescription</key>

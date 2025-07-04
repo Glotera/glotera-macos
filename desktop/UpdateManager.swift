@@ -46,9 +46,6 @@ class UpdateManager: NSObject {
     func checkForUpdates() {
         guard isSparkleAvailable else {
             Logger.warn("Cannot check for updates - Sparkle framework not available")
-            // For testing purposes, also check via API
-            checkForUpdatesViaAPI()
-            showSparkleNotAvailableAlert()
             return
         }
         
@@ -93,24 +90,6 @@ class UpdateManager: NSObject {
         #endif
     }
     
-    private func showSparkleNotAvailableAlert() {
-        DispatchQueue.main.async {
-            let alert = NSAlert()
-            alert.messageText = "Update Check Not Available"
-            alert.informativeText = "Automatic updates are not available in this build. Please check the website for the latest version."
-            alert.alertStyle = .informational
-            alert.addButton(withTitle: "Visit Website")
-            alert.addButton(withTitle: "Cancel")
-            
-            let response = alert.runModal()
-            if response == .alertFirstButtonReturn {
-                let websiteURL = EnvironmentManager.shared.baseURL
-                if let url = URL(string: websiteURL) {
-                    NSWorkspace.shared.open(url)
-                }
-            }
-        }
-    }
     
     // Send analytics about update events
     private func sendUpdateAnalytics(event: String, currentVersion: String, targetVersion: String? = nil) {
@@ -148,7 +127,7 @@ class UpdateManager: NSObject {
     }
     
     func getCurrentVersion() -> String {
-        return Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown"
+        return Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "Unknown"
     }
     
     func performFirstLaunchCheck() {
@@ -171,89 +150,6 @@ class UpdateManager: NSObject {
         return false
     }
     
-    // MARK: - Direct API Testing (for development without Sparkle)
-    
-    func checkForUpdatesViaAPI() {
-        let currentVersion = getCurrentVersion()
-        let baseURL = EnvironmentManager.shared.serverURL
-        let apiURL = "\(baseURL)/api/app/version/check?version=\(currentVersion)&channel=stable"
-        
-        Logger.info("Testing update API directly: \(apiURL)")
-        
-        guard let url = URL(string: apiURL) else {
-            Logger.error("Invalid API URL: \(apiURL)")
-            return
-        }
-        
-        let task = URLSession.shared.dataTask(with: url) { data, response, error in
-            if let error = error {
-                Logger.error("API test failed: \(error.localizedDescription)")
-                return
-            }
-            
-            if let httpResponse = response as? HTTPURLResponse {
-                Logger.info("API Response Status: \(httpResponse.statusCode)")
-            }
-            
-            if let data = data {
-                do {
-                    if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                        Logger.info("API Response: \(json)")
-                        
-                        if let updateAvailable = json["update_available"] as? Bool,
-                           let latestVersion = json["latest_version"] as? String {
-                            
-                            if updateAvailable {
-                                Logger.info("✅ Update available: \(currentVersion) → \(latestVersion)")
-                                
-                                DispatchQueue.main.async {
-                                    self.showUpdateAvailableAlert(currentVersion: currentVersion, 
-                                                                newVersion: latestVersion, 
-                                                                downloadURL: json["download_url"] as? String)
-                                }
-                            } else {
-                                Logger.info("✅ No update available (current: \(currentVersion))")
-                                
-                                DispatchQueue.main.async {
-                                    self.showNoUpdateAlert(currentVersion: currentVersion)
-                                }
-                            }
-                        }
-                    }
-                } catch {
-                    Logger.error("Failed to parse API response: \(error)")
-                }
-            }
-        }
-        
-        task.resume()
-    }
-    
-    private func showUpdateAvailableAlert(currentVersion: String, newVersion: String, downloadURL: String?) {
-        let alert = NSAlert()
-        alert.messageText = "Update Available"
-        alert.informativeText = "Version \(newVersion) is available (current: \(currentVersion)). Download manually from the website."
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "Download")
-        alert.addButton(withTitle: "Later")
-        
-        let response = alert.runModal()
-        if response == .alertFirstButtonReturn {
-            let urlString = downloadURL ?? EnvironmentManager.shared.baseURL
-            if let url = URL(string: urlString) {
-                NSWorkspace.shared.open(url)
-            }
-        }
-    }
-    
-    private func showNoUpdateAlert(currentVersion: String) {
-        let alert = NSAlert()
-        alert.messageText = "No Updates Available"
-        alert.informativeText = "You have the latest version (\(currentVersion))"
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
-    }
 }
 
 // MARK: - Sparkle Delegate (when framework is available)
@@ -273,7 +169,7 @@ extension UpdateManager: SPUUpdaterDelegate {
     
     // Optional: Add analytics delegate methods
     func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
-        Logger.info("Update available: \(item.versionString)")
+        Logger.info("Update available: current version: \(getCurrentVersion()), target version: \(item.versionString)")
         sendUpdateAnalytics(event: "update_available", 
                           currentVersion: getCurrentVersion(),
                           targetVersion: item.versionString)
@@ -293,7 +189,7 @@ extension UpdateManager: SPUUpdaterDelegate {
     }
     
     func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
-        Logger.error("Update failed with error: \(error.localizedDescription)")
+        Logger.error("Update failed with error: \(error.localizedDescription), current version: \(getCurrentVersion())")
         sendUpdateAnalytics(event: "update_failed", 
                           currentVersion: getCurrentVersion())
     }
