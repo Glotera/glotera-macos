@@ -53,7 +53,7 @@ class MenuBarController {
         menu.addItem(NSMenuItem.separator())
         
 
-
+        #if DEBUG
         // Debug menu
         menu.addItem(NSMenuItem.separator())
         let debugMenu = NSMenuItem(title: "Debug", action: nil, keyEquivalent: "")
@@ -134,6 +134,7 @@ class MenuBarController {
         
         debugMenu.submenu = debugSubMenu
         menu.addItem(debugMenu)
+        #endif
         
         // Exit menu
         menu.addItem(NSMenuItem.separator())
