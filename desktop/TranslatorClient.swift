@@ -1,6 +1,82 @@
 import Foundation
 import AppKit
 
+// MARK: - Rate Limiting and Connection Management
+
+class RateLimiter {
+    private let maxConcurrentRequests: Int
+    private let requestsPerSecond: Double
+    private let concurrentQueue = DispatchQueue(label: "rateLimiter", attributes: .concurrent)
+    private let semaphore: DispatchSemaphore
+    private var lastRequestTime: TimeInterval = 0
+    private let minInterval: TimeInterval
+    
+    init(maxConcurrentRequests: Int, requestsPerSecond: Double) {
+        self.maxConcurrentRequests = maxConcurrentRequests
+        self.requestsPerSecond = requestsPerSecond
+        self.semaphore = DispatchSemaphore(value: maxConcurrentRequests)
+        self.minInterval = 1.0 / requestsPerSecond
+    }
+    
+    func execute(_ block: @escaping () -> Void) {
+        concurrentQueue.async {
+            self.semaphore.wait()
+            
+            // Rate limiting: ensure minimum interval between requests
+            let now = Date().timeIntervalSince1970
+            let timeSinceLastRequest = now - self.lastRequestTime
+            
+            if timeSinceLastRequest < self.minInterval {
+                let delay = self.minInterval - timeSinceLastRequest
+                Thread.sleep(forTimeInterval: delay)
+            }
+            
+            self.lastRequestTime = Date().timeIntervalSince1970
+            
+            // Execute the actual request
+            block()
+            
+            // Release the semaphore when done
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.1) {
+                self.semaphore.signal()
+            }
+        }
+    }
+}
+
+class ConnectionPool {
+    private let maxConnections: Int
+    private var sessions: [URLSession] = []
+    private let sessionQueue = DispatchQueue(label: "connectionPool", attributes: .concurrent)
+    private var currentIndex = 0
+    
+    init(maxConnections: Int) {
+        self.maxConnections = maxConnections
+        createSessions()
+    }
+    
+    private func createSessions() {
+        for _ in 0..<maxConnections {
+            let config = URLSessionConfiguration.default
+            config.timeoutIntervalForRequest = 30.0
+            config.timeoutIntervalForResource = 60.0
+            config.httpMaximumConnectionsPerHost = 2
+            config.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+            
+            let session = URLSession(configuration: config)
+            sessions.append(session)
+        }
+    }
+    
+    func getSession() -> URLSession {
+        return sessionQueue.sync {
+            let session = sessions[currentIndex]
+            currentIndex = (currentIndex + 1) % maxConnections
+            return session
+        }
+    }
+}
+
 // MARK: - Quota Information
 struct QuotaInfo {
     let isFreeUser: Bool
@@ -126,7 +202,11 @@ class TranslatorClient: NSObject {
     
     // 使用环境配置
     private let environment = TranslatorEnvironment.current
-    private let translationSemaphore = DispatchSemaphore(value: 1)
+    
+    // Rate limiting and connection management
+    private let rateLimiter = RateLimiter(maxConcurrentRequests: 3, requestsPerSecond: 5)
+    private let connectionPool = ConnectionPool(maxConnections: 5)
+    private let translationQueue = OperationQueue()
     
     // 便捷访问属性
     var endpoint: String { environment.apiEndpoint }
@@ -147,11 +227,17 @@ class TranslatorClient: NSObject {
     override init() {
         super.init()
         
+        // Configure translation queue for optimal performance
+        translationQueue.maxConcurrentOperationCount = 3
+        translationQueue.qualityOfService = .userInitiated
+        translationQueue.name = "TranslationQueue"
+        
         // 启动时输出当前环境配置信息
-        Logger.info("TranslatorClient initialized")
+        Logger.info("TranslatorClient initialized with rate limiting")
         Logger.info("Environment: \(environment.isProduction ? "PRODUCTION" : "DEVELOPMENT")")
         Logger.info("API Endpoint: \(environment.apiEndpoint)")
         Logger.info("Timeout: \(environment.timeoutInterval)s, Max Retries: \(environment.maxRetries)")
+        Logger.info("Rate Limiting: 3 concurrent, 5 req/sec")
         
         #if DEBUG
         Logger.info("🔧 Debug mode: Using local server for fast development")
@@ -164,14 +250,18 @@ class TranslatorClient: NSObject {
     func translate(text: String, to language: String, completion: @escaping (Result<TranslationResult, TranslationError>) -> Void) {
         Logger.info("Starting translation: \(text) -> \(language)")
         
-        // 使用信号量进行同步调用
-        translationSemaphore.wait()
-        
+        // Use rate limiter instead of blocking semaphore
+        rateLimiter.execute {
+            self.performTranslation(text: text, to: language, completion: completion)
+        }
+    }
+    
+    // Actual translation implementation
+    private func performTranslation(text: String, to language: String, completion: @escaping (Result<TranslationResult, TranslationError>) -> Void) {
         Logger.info("Calling translation API")
         
         guard let url = URL(string: endpoint) else {
             Logger.error("Invalid API URL")
-            translationSemaphore.signal()
             completion(.failure(.networkError("Invalid API URL")))
             return
         }
@@ -186,7 +276,6 @@ class TranslatorClient: NSObject {
             Logger.info("Adding authentication header to translation request")
         } else {
             Logger.error("No authentication token available - translation requires login")
-            translationSemaphore.signal()
             completion(.failure(.networkError("Authentication required")))
             return
         }
@@ -208,14 +297,13 @@ class TranslatorClient: NSObject {
             request.httpBody = try JSONSerialization.data(withJSONObject: requestBody, options: [])
         } catch {
             Logger.error("Failed to serialize request body: \(error)")
-            translationSemaphore.signal()
             completion(.failure(.parseError("Failed to serialize request")))
             return
         }
         
-        let task = URLSession.shared.dataTask(with: request) { data, response, error in
-            // 确保在退出时总是释放信号量
-            defer { self.translationSemaphore.signal() }
+        // Use connection pool for better performance
+        let session = connectionPool.getSession()
+        let task = session.dataTask(with: request) { data, response, error in
 
             if let error = error {
                 Logger.info("Translation API error: \(error.localizedDescription)")
