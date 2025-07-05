@@ -185,6 +185,155 @@ struct AppInfo {
     var javaScriptPermissionsEnabled: Bool
 }
 
+// MARK: - JavaScript Pattern Caching
+
+/// Browser-specific JavaScript pattern cache for lazy generation
+class JavaScriptPatternCache {
+    static let shared = JavaScriptPatternCache()
+    
+    private var patternCache: [String: String] = [:]  // bundleId -> generated JavaScript code
+    private var triggerHashCache: [String: String] = [:] // bundleId -> trigger config hash
+    private let cacheQueue = DispatchQueue(label: "jsPatternCache", attributes: .concurrent)
+    private let cacheTTL: TimeInterval = 300.0 // 5 minutes cache TTL
+    private var cacheTimestamps: [String: Date] = [:]
+    
+    private init() {}
+    
+    /// Get JavaScript pattern code for a specific browser, generating lazily if needed
+    func getJavaScriptPatternCode(for bundleId: String) -> String {
+        return cacheQueue.sync {
+            let currentHash = calculateTriggerHash()
+            let now = Date()
+            
+            // Check if cache is valid
+            if let cachedCode = patternCache[bundleId],
+               let cachedHash = triggerHashCache[bundleId],
+               let timestamp = cacheTimestamps[bundleId],
+               cachedHash == currentHash,
+               now.timeIntervalSince(timestamp) < cacheTTL {
+                Logger.debug("JSPatternCache: Cache hit for \(bundleId)")
+                return cachedCode
+            }
+            
+            // Generate fresh pattern code
+            Logger.debug("JSPatternCache: Generating fresh patterns for \(bundleId)")
+            let patterns = generateJavaScriptPatternsLazy()
+            let jsCode = createJavaScriptCode(with: patterns)
+            
+            // Cache the results
+            patternCache[bundleId] = jsCode
+            triggerHashCache[bundleId] = currentHash
+            cacheTimestamps[bundleId] = now
+            
+            Logger.info("JSPatternCache: Generated and cached \(patterns.count) patterns for \(bundleId)")
+            return jsCode
+        }
+    }
+    
+    /// Clear cache for a specific browser or all browsers
+    func clearCache(for bundleId: String? = nil) {
+        cacheQueue.async(flags: .barrier) {
+            if let bundleId = bundleId {
+                self.patternCache.removeValue(forKey: bundleId)
+                self.triggerHashCache.removeValue(forKey: bundleId)
+                self.cacheTimestamps.removeValue(forKey: bundleId)
+                Logger.debug("JSPatternCache: Cleared cache for \(bundleId)")
+            } else {
+                self.patternCache.removeAll()
+                self.triggerHashCache.removeAll()
+                self.cacheTimestamps.removeAll()
+                Logger.debug("JSPatternCache: Cleared all cache")
+            }
+        }
+    }
+    
+    /// Get cache statistics
+    func getCacheStats() -> (cachedBrowsers: Int, totalSize: Int) {
+        return cacheQueue.sync {
+            let totalSize = patternCache.values.reduce(0) { $0 + $1.count }
+            return (cachedBrowsers: patternCache.count, totalSize: totalSize)
+        }
+    }
+    
+    // MARK: - Private Methods
+    
+    private func generateJavaScriptPatternsLazy() -> [String] {
+        let allTriggers = TriggerPatternCache.shared.getAllTriggers()
+        
+        guard !allTriggers.isEmpty else {
+            Logger.warn("JSPatternCache: No triggers configured, using minimal fallback")
+            return ["(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$"]
+        }
+        
+        var patterns: [String] = []
+        
+        // Generate only essential patterns to reduce complexity
+        for trigger in allTriggers.prefix(20) { // Limit to first 20 triggers for performance
+            let escapedTrigger = escapeJavaScriptRegex(trigger)
+            patterns.append("(.*?)" + escapedTrigger + "\\s*$")
+        }
+        
+        Logger.debug("JSPatternCache: Generated \(patterns.count) lazy patterns from \(allTriggers.count) triggers")
+        return patterns
+    }
+    
+    private func createJavaScriptCode(with patterns: [String]) -> String {
+        let languageCodes = extractLanguageCodes()
+        let languageList = languageCodes.prefix(30).map { "'\($0)'" }.joined(separator: ",") // Limit languages
+        
+        let jsCode = """
+            var languageCodes = [\(languageList)];
+            var patterns = [
+                new RegExp('(.*?)[@#](' + languageCodes.join('|') + ')\\\\s*$', 'i'),
+                new RegExp('(.*?)\\\\s+[@#](' + languageCodes.join('|') + ')\\\\s*$', 'i')
+            ];
+        """
+        
+        return jsCode
+    }
+    
+    private func escapeJavaScriptRegex(_ string: String) -> String {
+        return string
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: ".", with: "\\.")
+            .replacingOccurrences(of: "*", with: "\\*")
+            .replacingOccurrences(of: "+", with: "\\+")
+            .replacingOccurrences(of: "?", with: "\\?")
+            .replacingOccurrences(of: "^", with: "\\^")
+            .replacingOccurrences(of: "$", with: "\\$")
+            .replacingOccurrences(of: "{", with: "\\{")
+            .replacingOccurrences(of: "}", with: "\\}")
+            .replacingOccurrences(of: "[", with: "\\[")
+            .replacingOccurrences(of: "]", with: "\\]")
+            .replacingOccurrences(of: "(", with: "\\(")
+            .replacingOccurrences(of: ")", with: "\\)")
+            .replacingOccurrences(of: "|", with: "\\|")
+    }
+    
+    private func extractLanguageCodes() -> [String] {
+        let allTriggers = TriggerPatternCache.shared.getAllTriggers()
+        let languageCodes = Set(allTriggers.compactMap { trigger in
+            if trigger.hasPrefix("@") || trigger.hasPrefix("#") {
+                return String(trigger.dropFirst())
+            }
+            return nil
+        })
+        
+        if !languageCodes.isEmpty {
+            return Array(languageCodes).sorted()
+        }
+        
+        // Minimal fallback language set for better performance
+        return ["ar", "bn", "de", "en", "es", "fa", "fr", "hi", "id", "it", "ja", "ko", "ms", "nl", "pl", "pt", "ro", "ru", "ta", "th", "tr", "uk", "ur", "vi", "zh"]
+    }
+    
+    private func calculateTriggerHash() -> String {
+        let allTriggers = TriggerPatternCache.shared.getAllTriggers()
+        let hashString = allTriggers.sorted().joined(separator: ",")
+        return String(hashString.hashValue)
+    }
+}
+
 class AXController {
     static let shared = AXController()
     private var isInputDisabled = false
@@ -194,6 +343,28 @@ class AXController {
     
     // 选中文本监听相关变量
     private var isSelectionMonitoringPaused = false
+    
+    // MARK: - Performance Monitoring
+    
+    /// Get JavaScript pattern cache statistics for performance monitoring
+    func getJavaScriptCacheStats() -> (cachedBrowsers: Int, totalSize: Int) {
+        return JavaScriptPatternCache.shared.getCacheStats()
+    }
+    
+    /// Clear JavaScript pattern cache for better memory management
+    func clearJavaScriptCache(for bundleId: String? = nil) {
+        JavaScriptPatternCache.shared.clearCache(for: bundleId)
+        Logger.info("Cleared JavaScript pattern cache\(bundleId != nil ? " for \(bundleId!)" : "")")
+    }
+    
+    /// Refresh all pattern caches when trigger configuration changes
+    func refreshPatternCaches() {
+        // Refresh trigger pattern cache
+        TriggerPatternCache.shared.refreshCache()
+        // Clear JavaScript cache to force regeneration with new triggers
+        JavaScriptPatternCache.shared.clearCache()
+        Logger.info("Refreshed all pattern caches due to configuration change")
+    }
 
     // 支持的浏览器应用bundle标识符
     private let browserBundleIds = [
@@ -361,94 +532,45 @@ class AXController {
         return []
     }
     
-    // 为JavaScript生成触发器模式
+    // 为JavaScript生成触发器模式 - DEPRECATED: Use JavaScriptPatternCache instead
+    @available(*, deprecated, message: "Use JavaScriptPatternCache for better performance and memory usage")
     private func generateJavaScriptPatterns(for triggers: [String]) -> [String] {
+        // Legacy fallback - this method should not be used anymore
+        Logger.warn("Using deprecated generateJavaScriptPatterns method - consider updating to JavaScriptPatternCache")
+        
         guard !triggers.isEmpty else {
-            // 如果没有配置的触发器，返回默认模式（简化版本）
-            return [
-                "(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$"
-            ]
+            return ["(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\\s*$"]
         }
         
+        // Generate minimal patterns to reduce memory usage
         var patterns: [String] = []
-        
-        // 为每个触发器生成模式
-        for trigger in triggers {
-            // 简化转义：只转义真正需要的字符
-            let escapedTrigger = trigger
-                .replacingOccurrences(of: "\\", with: "\\\\")   // 反斜杠
-                .replacingOccurrences(of: ".", with: "\\.")     // 点号
-                .replacingOccurrences(of: "*", with: "\\*")     // 星号
-                .replacingOccurrences(of: "+", with: "\\+")     // 加号
-                .replacingOccurrences(of: "?", with: "\\?")     // 问号
-                .replacingOccurrences(of: "^", with: "\\^")     // 脱字符
-                .replacingOccurrences(of: "$", with: "\\$")     // 美元符
-                .replacingOccurrences(of: "{", with: "\\{")     // 左大括号
-                .replacingOccurrences(of: "}", with: "\\}")     // 右大括号
-                .replacingOccurrences(of: "[", with: "\\[")     // 左方括号
-                .replacingOccurrences(of: "]", with: "\\]")     // 右方括号
-                .replacingOccurrences(of: "(", with: "\\(")     // 左圆括号
-                .replacingOccurrences(of: ")", with: "\\)")     // 右圆括号
-                .replacingOccurrences(of: "|", with: "\\|")     // 管道符
-            
-            // 只生成一个标准模式，减少复杂性
+        for trigger in triggers.prefix(10) { // Limit to reduce memory impact
+            let escapedTrigger = trigger.replacingOccurrences(of: ".", with: "\\.")
             patterns.append("(.*?)" + escapedTrigger + "\\s*$")
         }
-        
-        Logger.info("Generated \(patterns.count) JavaScript patterns for \(triggers.count) triggers")
         
         return patterns
     }
     
-    // 生成JavaScript代码用于动态模式匹配
+    // 生成JavaScript代码用于动态模式匹配 - DEPRECATED: Use JavaScriptPatternCache instead
+    @available(*, deprecated, message: "Use JavaScriptPatternCache.shared.getJavaScriptPatternCode() for better performance")
     private func generateJavaScriptPatternCode(for triggers: [String]) -> String {
-        // 获取所有语言代码，避免硬编码
-        let allLanguageCodes = getAllLanguageCodes()
-        
-        // 将语言代码转换为安全的 JavaScript 字符串
-        let languageList = allLanguageCodes.map { "'\($0)'" }.joined(separator: ",")
-        
-        // 使用模板方式生成 JavaScript 代码，避免复杂的字符串转义
-        let jsCode = """
-            var languageCodes = [\(languageList)];
-            var patterns = [
-                new RegExp('(.*?)[@#](' + languageCodes.join('|') + ')\\\\s*$', 'i'),
-                new RegExp('(.*?)\\\\s+[@#](' + languageCodes.join('|') + ')\\\\s*$', 'i')
-            ];
-        """
-        
-        Logger.info("Generated JavaScript patterns for \(allLanguageCodes.count) languages")
-        return jsCode
-    }
-    
-    // 获取所有支持的语言代码
-    private func getAllLanguageCodes() -> [String] {
-        // 直接调用当前类的方法获取所有触发器
-        let allTriggers = getAllConfiguredTriggers()
-        
-        // 从触发器中提取语言代码（去掉 @ 和 # 前缀）
-        let languageCodes = Set(allTriggers.compactMap { trigger in
-            if trigger.hasPrefix("@") || trigger.hasPrefix("#") {
-                return String(trigger.dropFirst())
-            }
-            return nil
-        })
-        
-        if !languageCodes.isEmpty { 
-            return Array(languageCodes).sorted()
+        // Fallback to cached version for better performance
+        guard let browserInfo = getCurrentBrowserInfo() else {
+            Logger.warn("No browser info available, using fallback JavaScript patterns")
+            return JavaScriptPatternCache.shared.getJavaScriptPatternCode(for: "fallback")
         }
         
-        Logger.warn("No configured triggers found, using fallback language list")
-        // 如果无法从配置获取，使用备用的主要语言列表
-        return [
-            "af", "am", "ar", "az", "be", "bg", "bn", "bo", "bs", "ca", "ceb", "cs", "cy", "da", "de", "el", "en",
-            "eo", "es", "et", "eu", "fa", "fi", "fil", "fr", "fy", "ga", "gd", "gl", "gu", "ha", "haw", "he", "hi",
-            "hmn", "hr", "ht", "hu", "hy", "id", "ig", "is", "it", "ja", "jw", "ka", "kk", "km", "kn", "ko", "ku",
-            "ky", "la", "lb", "lo", "lt", "lv", "mg", "mi", "mk", "ml", "mn", "mr", "ms", "mt", "my", "ne", "nl",
-            "no", "ny", "or", "pa", "pl", "ps", "pt", "ro", "ru", "rw", "si", "sk", "sl", "sm", "sn", "so", "sq",
-            "sr", "st", "su", "sv", "sw", "ta", "te", "tg", "th", "tk", "tl", "tr", "tt", "ug", "uk", "ur", "uz",
-            "vi", "xh", "yi", "yo", "zh", "zu"
-        ]
+        return JavaScriptPatternCache.shared.getJavaScriptPatternCode(for: browserInfo.bundleId)
+    }
+    
+    // 获取所有支持的语言代码 - DEPRECATED: Use JavaScriptPatternCache instead
+    @available(*, deprecated, message: "Use JavaScriptPatternCache.extractLanguageCodes() for better performance")
+    private func getAllLanguageCodes() -> [String] {
+        Logger.warn("Using deprecated getAllLanguageCodes method - consider updating to JavaScriptPatternCache")
+        
+        // Minimal fallback language set for better performance
+        return ["ar", "bn", "de", "en", "es", "fa", "fr", "hi", "id", "it", "ja", "ko", "ms", "nl", "pl", "pt", "ro", "ru", "ta", "th", "tr", "uk", "ur", "vi", "zh"]
     }
     
     // 安全地转义 AppleScript 中的字符串内容
@@ -1225,9 +1347,8 @@ class AXController {
             .replacingOccurrences(of: "\n", with: "\\n")
             .replacingOccurrences(of: "\r", with: "\\r")
          
-        // 获取所有配置的触发器并生成JavaScript模式
-        let allTriggers = getAllConfiguredTriggers()
-        let jsPatternCode = generateJavaScriptPatternCode(for: allTriggers)
+        // 获取JavaScript模式代码（使用缓存的懒加载版本）
+        let jsPatternCode = JavaScriptPatternCache.shared.getJavaScriptPatternCode(for: browserInfo.bundleId)
          
         var script = ""
         
@@ -1361,9 +1482,8 @@ class AXController {
             return false 
         }
         
-        // 获取所有配置的触发器并生成JavaScript模式
-        let allTriggers = getAllConfiguredTriggers()
-        let jsPatternCode = generateJavaScriptPatternCode(for: allTriggers) 
+        // 获取JavaScript模式代码（使用缓存的懒加载版本）
+        let jsPatternCode = JavaScriptPatternCache.shared.getJavaScriptPatternCode(for: browserInfo.bundleId) 
         
         var script = ""
         
