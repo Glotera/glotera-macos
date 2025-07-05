@@ -173,7 +173,7 @@ struct TranslatorEnvironment {
             return TranslatorEnvironment(
                 apiEndpoint: "http://localhost:1145/api/translate",
                 isProduction: false,
-                timeoutInterval: 10.0,
+                timeoutInterval: 30.0,
                 maxRetries: 2
             )
         #else
@@ -217,6 +217,7 @@ class TranslatorClient: NSObject {
     private var streamSession: URLSession?
     private var streamBuffer = ""
     private var streamCallbacks: StreamCallbacks?
+    private var streamProcessor: StreamBatchProcessor?
     
     private struct StreamCallbacks {
         let onChunk: (String, String) -> Void
@@ -437,6 +438,17 @@ class TranslatorClient: NSObject {
         streamCallbacks = StreamCallbacks(onChunk: onChunk, onComplete: onComplete, onError: onError)
         streamBuffer = ""
         
+        // Initialize stream processor with callbacks
+        streamProcessor = StreamBatchProcessor()
+        streamProcessor?.setCallbacks(
+            StreamProcessorCallbacks(
+                onChunk: onChunk,
+                onComplete: onComplete,
+                onError: onError
+            ),
+            quotaDelegate: quotaDelegate
+        )
+        
         // 创建专用的流式会话
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = timeoutInterval
@@ -565,6 +577,23 @@ class TranslatorClient: NSObject {
     
     // 异步处理流式数据，避免阻塞delegate队列
     private func processStreamData(_ dataString: String) {
+        // Use StreamBatchProcessor for optimized processing
+        if let processor = streamProcessor {
+            processor.addRawData(dataString)
+            
+            // Log performance statistics periodically
+            let stats = processor.getPerformanceStats()
+            if stats.processed > 0 && stats.processed % 10 == 0 {
+                Logger.debug("Stream processing stats: processed=\(stats.processed), dropped=\(stats.dropped), buffer=\(String(format: "%.1f", stats.bufferUtilization * 100))%, avgTime=\(String(format: "%.3f", stats.avgProcessingTime * 1000))ms")
+            }
+        } else {
+            // Fallback to legacy processing if processor not available
+            processStreamDataLegacy(dataString)
+        }
+    }
+    
+    // Legacy stream processing for fallback
+    private func processStreamDataLegacy(_ dataString: String) {
         // 线程安全地更新缓冲区
         objc_sync_enter(self)
         streamBuffer += dataString
@@ -856,6 +885,7 @@ extension TranslatorClient: URLSessionDataDelegate {
         streamSession?.invalidateAndCancel()
         streamSession = nil
         streamCallbacks = nil
+        streamProcessor = nil
         streamBuffer = "" 
     }
 } 
