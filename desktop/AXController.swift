@@ -3,6 +3,179 @@ import Carbon
 import CoreFoundation
 import ApplicationServices
 
+// MARK: - Trigger Cache Optimization
+
+/// Compiled regex pattern with metadata for efficient trigger detection
+struct CompiledTriggerPattern {
+    let regex: NSRegularExpression
+    let trigger: String
+    let languageCode: String
+    let patternType: PatternType
+    
+    enum PatternType: String, CaseIterable {
+        case standard = "standard"           // (.*?)trigger\s*$
+        case strictStart = "strictStart"     // ^(.*?)trigger\s*$  
+        case spaceDelimited = "spaceDelimited" // (.*?)\s+trigger\s*$
+        case multiline = "multiline"         // (?s)(.*?)trigger\s*$
+    }
+}
+
+/// High-performance trigger cache for compiled regex patterns
+class TriggerPatternCache {
+    static let shared = TriggerPatternCache()
+    
+    private var compiledPatterns: [String: [CompiledTriggerPattern]] = [:]
+    private var triggerToLanguageMap: [String: String] = [:]
+    private var lastConfigurationHash: String = ""
+    private let cacheQueue = DispatchQueue(label: "triggerCache", attributes: .concurrent)
+    
+    // Performance metrics
+    private var cacheHits: Int = 0
+    private var cacheMisses: Int = 0
+    
+    private init() {
+        refreshCache()
+    }
+    
+    func detectTrigger(in content: String) -> (text: String, lang: String)? {
+        return cacheQueue.sync {
+            // Check if cache needs refresh
+            let currentHash = calculateConfigurationHash()
+            if currentHash != lastConfigurationHash {
+                Logger.info("Configuration changed, refreshing trigger cache")
+                refreshCacheInternal()
+            }
+            
+            // Fast path: try cached patterns for each trigger
+            for (_, patterns) in compiledPatterns {
+                if let result = checkPatternsForTrigger(patterns, in: content) {
+                    cacheHits += 1
+                    return result
+                }
+            }
+            
+            cacheMisses += 1
+            return nil
+        }
+    }
+    
+    func getAllTriggers() -> [String] {
+        return cacheQueue.sync {
+            return Array(triggerToLanguageMap.keys)
+        }
+    }
+    
+    func refreshCache() {
+        cacheQueue.async(flags: .barrier) {
+            self.refreshCacheInternal()
+        }
+    }
+    
+    func getPerformanceMetrics() -> (hits: Int, misses: Int, hitRatio: Double) {
+        return cacheQueue.sync {
+            let total = cacheHits + cacheMisses
+            let hitRatio = total > 0 ? Double(cacheHits) / Double(total) : 0.0
+            return (cacheHits, cacheMisses, hitRatio)
+        }
+    }
+    
+    private func refreshCacheInternal() {
+        let startTime = CFAbsoluteTimeGetCurrent()
+        
+        compiledPatterns.removeAll()
+        triggerToLanguageMap.removeAll()
+        
+        let configs = ConfigManager.shared.loadLanguageConfigs()
+        var patternCount = 0
+        
+        for config in configs {
+            for trigger in config.triggers {
+                triggerToLanguageMap[trigger] = config.code
+                let patterns = compileAllPatterns(for: trigger, languageCode: config.code)
+                compiledPatterns[trigger] = patterns
+                patternCount += patterns.count
+            }
+        }
+        
+        lastConfigurationHash = calculateConfigurationHash()
+        
+        let endTime = CFAbsoluteTimeGetCurrent()
+        let compilationTime = (endTime - startTime) * 1000
+        
+        Logger.info("TriggerCache: Compiled \(patternCount) patterns for \(triggerToLanguageMap.count) triggers in \(String(format: "%.2f", compilationTime))ms")
+    }
+    
+    private func compileAllPatterns(for trigger: String, languageCode: String) -> [CompiledTriggerPattern] {
+        let escapedTrigger = NSRegularExpression.escapedPattern(for: trigger)
+        var patterns: [CompiledTriggerPattern] = []
+        
+        let patternTemplates: [(String, CompiledTriggerPattern.PatternType)] = [
+            (#"(.*?)"# + escapedTrigger + #"\s*$"#, .standard),
+            (#"^(.*?)"# + escapedTrigger + #"\s*$"#, .strictStart),
+            (#"(.*?)\s+"# + escapedTrigger + #"\s*$"#, .spaceDelimited),
+            (#"(?s)(.*?)"# + escapedTrigger + #"\s*$"#, .multiline)
+        ]
+        
+        for (patternString, patternType) in patternTemplates {
+            do {
+                let regex = try NSRegularExpression(
+                    pattern: patternString,
+                    options: [.caseInsensitive, .dotMatchesLineSeparators]
+                )
+                
+                let compiledPattern = CompiledTriggerPattern(
+                    regex: regex,
+                    trigger: trigger,
+                    languageCode: languageCode,
+                    patternType: patternType
+                )
+                
+                patterns.append(compiledPattern)
+            } catch {
+                Logger.error("Failed to compile pattern for trigger '\(trigger)': \(error)")
+            }
+        }
+        
+        return patterns
+    }
+    
+    private func checkPatternsForTrigger(_ patterns: [CompiledTriggerPattern], in content: String) -> (text: String, lang: String)? {
+        let nsContent = content as NSString
+        let range = NSRange(location: 0, length: nsContent.length)
+        
+        for pattern in patterns {
+            let matches = pattern.regex.matches(in: content, options: [], range: range)
+            
+            if let match = matches.first, match.numberOfRanges >= 2 {
+                let textRange = match.range(at: 1)
+                
+                if textRange.location != NSNotFound {
+                    let rawText = nsContent.substring(with: textRange)
+                    let text = rawText.trimmingCharacters(in: .whitespaces)
+                    
+                    if !text.isEmpty {
+                        return (text: text, lang: pattern.languageCode)
+                    }
+                }
+            }
+        }
+        
+        return nil
+    }
+    
+    private func calculateConfigurationHash() -> String {
+        let configs = ConfigManager.shared.loadLanguageConfigs()
+        var hashString = ""
+        
+        for config in configs.sorted(by: { $0.code < $1.code }) {
+            hashString += config.code
+            hashString += config.triggers.sorted().joined(separator: ",")
+        }
+        
+        return String(hashString.hashValue)
+    }
+}
+
 struct AppInfo {
     let bundleId: String
     let appName: String
@@ -133,7 +306,7 @@ class AXController {
         return processContentForTrigger(value)
     }
     
-    // 处理内容以检测触发器
+    // 处理内容以检测触发器 - 优化版本使用缓存
     private func processContentForTrigger(_ value: String) -> (text: String, lang: String)? {
          
         // 显示换行符位置以便调试
@@ -144,78 +317,42 @@ class AXController {
         }
         
         // 预处理内容：清理可能的干扰文本
-        let cleanedValue = preprocessContent(value) 
-        Logger.info("xxx1")
-        // 使用配置管理器获取所有触发器
-        let allTriggers = getAllConfiguredTriggers()
+        let cleanedValue = preprocessContent(value)
+        
+        // 使用高性能缓存触发器检测
+        if let result = TriggerPatternCache.shared.detectTrigger(in: cleanedValue) {
+            Logger.info("Cached trigger detected: text='\(result.text)', lang='\(result.lang)'")
+            return result
+        }
+        
+        // 如果缓存检测失败，检查是否有配置的触发器
+        let allTriggers = TriggerPatternCache.shared.getAllTriggers()
         if allTriggers.isEmpty {
             Logger.warn("No configured triggers found, falling back to default patterns")
             return processContentWithDefaultTriggers(cleanedValue)
         }
-        Logger.info("xxx2")
-        // 动态生成正则表达式模式
-        // let patterns = generateTriggerPatterns(triggers: allTriggers)
         
-        // 检查每个触发器
-        for trigger in allTriggers {
-            if let result = checkForTrigger(trigger, in: cleanedValue) {
-                Logger.info("Trigger found: '\(trigger)' -> text='\(result.text)', lang='\(result.lang)'")
-                return result
-            }
-        } 
-        Logger.info("xxx3")
+        Logger.debug("No trigger detected in content")
+        
+        // Periodically log cache performance metrics
+        let metrics = TriggerPatternCache.shared.getPerformanceMetrics()
+        if (metrics.hits + metrics.misses) % 100 == 0 && metrics.hits + metrics.misses > 0 {
+            Logger.info("TriggerCache metrics: \(metrics.hits) hits, \(metrics.misses) misses, \(String(format: "%.1f", metrics.hitRatio * 100))% hit ratio")
+        }
+        
         return nil
     }
     
-    // 获取所有配置的触发器
+    // 获取所有配置的触发器 - 优化版本使用缓存
     private func getAllConfiguredTriggers() -> [String] {
-        let configs = ConfigManager.shared.loadLanguageConfigs()
-        var allTriggers: [String] = []
-        
-        for config in configs {
-            allTriggers.append(contentsOf: config.triggers)
-        }
-         
-        return allTriggers
+        return TriggerPatternCache.shared.getAllTriggers()
     }
     
-    // 检查特定触发器是否匹配
+    // 检查特定触发器是否匹配 - 已弃用，使用缓存版本
+    @available(*, deprecated, message: "Use TriggerPatternCache.shared.detectTrigger() for better performance")
     private func checkForTrigger(_ trigger: String, in content: String) -> (text: String, lang: String)? {
-        // 转义特殊字符
-        let escapedTrigger = NSRegularExpression.escapedPattern(for: trigger)
-        
-        // 生成多种匹配模式
-        let patterns = [
-            #"(.*?)"# + escapedTrigger + #"\s*$"#,      // 标准模式
-            #"^(.*?)"# + escapedTrigger + #"\s*$"#,     // 严格开头模式
-            #"(.*?)\s+"# + escapedTrigger + #"\s*$"#,   // 空格分隔
-            #"(?s)(.*?)"# + escapedTrigger + #"\s*$"#   // 多行支持
-        ]
-        
-        for pattern in patterns {
-            if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) {
-                let nsContent = content as NSString
-                let results = regex.matches(in: content, options: [], range: NSRange(location: 0, length: nsContent.length))
-                
-                if let match = results.first, match.numberOfRanges >= 2 {
-                    let textRange = match.range(at: 1)
-                    
-                    if textRange.location != NSNotFound {
-                        let rawText = nsContent.substring(with: textRange)
-                        let text = rawText.trimmingCharacters(in: .whitespaces)
-                        
-                        if !text.isEmpty {
-                            // 根据触发器查找对应的语言配置
-                            if let config = ConfigManager.shared.findLanguageConfig(withTrigger: trigger) {
-                                return (text: text, lang: config.code)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        return nil
+        // Fallback to cache-based detection for legacy compatibility
+        return TriggerPatternCache.shared.detectTrigger(in: content)
     }
     
     // 生成触发器模式（保留用于兼容性，但现在不使用）
@@ -1730,6 +1867,9 @@ class AXController {
     // 开始监听选中文本变化
     func startSelectionMonitoring() {
         Logger.info("Starting selection monitoring (keyboard-event-safe)")
+        
+        // Initialize trigger pattern cache for optimized trigger detection
+        TriggerPatternCache.shared.refreshCache()
         
         // 延迟启动鼠标监听，确保键盘监听优先建立
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {

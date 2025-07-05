@@ -15,6 +15,10 @@ class InputMonitor {
     private var lastTranslationTime: Date?
     private var lastSelectionTranslationTime: Date?
     
+    // MARK: - App Detection Caching
+    private var cachedAppInfo: (bundleId: String, isChat: Bool, isWeChat: Bool, isDiscord: Bool, timestamp: Date)?
+    private let appCacheTTL: TimeInterval = 30.0 // Cache app detection for 30 seconds
+    
     // 防止死循环的标志
     private var isSendingEnterKey = false
     private var enterKeySentTime: Date?
@@ -26,6 +30,15 @@ class InputMonitor {
         regex = try! NSRegularExpression(pattern: triggerPattern, options: .caseInsensitive)
         // 获取 AppDelegate 引用
         appDelegate = NSApp.delegate as? AppDelegate
+        
+        // Set up app switching observer to clear cache
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(applicationDidActivate),
+            name: NSWorkspace.didActivateApplicationNotification,
+            object: nil
+        )
+        
         startHealthCheck()
     }
     
@@ -222,15 +235,13 @@ class InputMonitor {
                 return
             }
             
-            // 检查是否为特殊应用（如Discord）
-            let isDiscord = isDiscordApp()
-            
-            // 添加更详细的调试信息
-            if let frontmostApp = NSWorkspace.shared.frontmostApplication {
-                let appName = frontmostApp.localizedName ?? "Unknown"
-                let bundleId = frontmostApp.bundleIdentifier ?? "N/A"
-                Logger.info("Space key triggered in \(appName) (\(bundleId)) - Discord: \(isDiscord)")
+            // 使用缓存的应用检测结果
+            guard let appDetection = getCachedAppDetection() else {
+                Logger.warn("Failed to get app detection info")
+                return
             }
+            
+            Logger.info("Space key triggered - Discord: \(appDetection.isDiscord), Chat: \(appDetection.isChat)")
             
             // 尝试获取焦点元素
             guard let _ = AXController.shared.getFocusedElement() else {
@@ -248,7 +259,7 @@ class InputMonitor {
             
             Logger.warn("Standard detection failed, trying delayed detection...")
             // 如果标准检测失败，等待一小段时间后重试 (Discord需要更长的延迟)
-            let delayTime = isDiscord ? 0.3 : 0.1
+            let delayTime = appDetection.isDiscord ? 0.3 : 0.1
             
             DispatchQueue.main.asyncAfter(deadline: .now() + delayTime) {
                 Logger.info("Attempting delayed trigger detection (delay: \(delayTime)s)")
@@ -266,13 +277,41 @@ class InputMonitor {
         }
     }
     
-    // 检查当前应用是否为Discord
-    private func isDiscordApp() -> Bool {
+    // 获取缓存的应用检测结果或执行新检测
+    private func getCachedAppDetection() -> (isChat: Bool, isWeChat: Bool, isDiscord: Bool)? {
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
               let bundleId = frontmostApp.bundleIdentifier else {
-            return false
+            return nil
         }
         
+        // Check if cached data is still valid
+        if let cached = cachedAppInfo,
+           cached.bundleId == bundleId,
+           Date().timeIntervalSince(cached.timestamp) < appCacheTTL {
+            return (isChat: cached.isChat, isWeChat: cached.isWeChat, isDiscord: cached.isDiscord)
+        }
+        
+        // Perform fresh detection
+        let isChat = performChatAppDetection(bundleId: bundleId)
+        let isWeChat = performWeChatAppDetection(bundleId: bundleId)
+        let isDiscord = performDiscordAppDetection(bundleId: bundleId)
+        
+        // Cache the results
+        cachedAppInfo = (bundleId: bundleId, isChat: isChat, isWeChat: isWeChat, isDiscord: isDiscord, timestamp: Date())
+        
+        return (isChat: isChat, isWeChat: isWeChat, isDiscord: isDiscord)
+    }
+    
+    // 检查当前应用是否为Discord（优化版本）
+    private func isDiscordApp() -> Bool {
+        guard let detection = getCachedAppDetection() else {
+            return false
+        }
+        return detection.isDiscord
+    }
+    
+    // 实际执行Discord检测的方法
+    private func performDiscordAppDetection(bundleId: String) -> Bool {
         return bundleId == "com.hnc.Discord" || bundleId == "com.discord.Discord"
     }
     
@@ -491,8 +530,8 @@ class InputMonitor {
                     AXController.shared.replaceInput(with: translationResult.translated) {
                         Logger.info("Auto-translation with send completed")
                         
-                        // 根据不同应用调整延迟时间
-                        let isWeChat = self?.isWeChatApp() ?? false
+                        // 根据不同应用调整延迟时间 - 使用缓存的检测结果
+                        let isWeChat = self?.getCachedAppDetection()?.isWeChat ?? false
                         let delay = isWeChat ? 0.05 : 0.05  // 稍微延迟，确保内容完全更新
                         
                         Logger.info("Waiting \(delay)s before sending Enter key (WeChat: \(isWeChat))")
@@ -531,8 +570,8 @@ class InputMonitor {
         isSendingEnterKey = true
         enterKeySentTime = Date()
         
-        // 检查是否为微信，微信需要特殊处理
-        let isWeChat = isWeChatApp()
+        // 检查是否为微信，微信需要特殊处理 - 使用缓存的检测结果
+        let isWeChat = getCachedAppDetection()?.isWeChat ?? false
         
         if isWeChat {
             // 微信需要特殊处理：确保焦点正确且使用适当的事件发送方式
@@ -659,13 +698,16 @@ class InputMonitor {
         completion(true)
     }
     
-    // 检查当前应用是否为聊天软件
+    // 检查当前应用是否为聊天软件（优化版本）
     private func isChatApplication() -> Bool {
-        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
-              let bundleId = frontmostApp.bundleIdentifier else {
+        guard let detection = getCachedAppDetection() else {
             return false
         }
-        
+        return detection.isChat
+    }
+    
+    // 实际执行聊天应用检测的方法
+    private func performChatAppDetection(bundleId: String) -> Bool {
         // 常见聊天软件的Bundle ID列表
         let chatAppBundleIds = [
             // 微信
@@ -733,7 +775,7 @@ class InputMonitor {
         
         // 检查精确匹配
         if chatAppBundleIds.contains(bundleId) {
-            Logger.info("Chat app detected (exact match): \(frontmostApp.localizedName ?? "Unknown") (\(bundleId))")
+            Logger.debug("Chat app detected (exact match): \(bundleId)")
             return true
         }
         
@@ -747,24 +789,25 @@ class InputMonitor {
         let bundleIdLower = bundleId.lowercased()
         for keyword in chatKeywords {
             if bundleIdLower.contains(keyword) {
-                Logger.info("Chat app detected (keyword match): \(frontmostApp.localizedName ?? "Unknown") (\(bundleId)) - keyword: \(keyword)")
+                Logger.debug("Chat app detected (keyword match): \(bundleId) - keyword: \(keyword)")
                 return true
             }
         }
         
-        Logger.debug("Not a chat application: \(frontmostApp.localizedName ?? "Unknown") (\(bundleId))")
+        Logger.debug("Not a chat application: \(bundleId)")
         return false
     }
     
-    // 检查当前应用是否为微信
+    // 检查当前应用是否为微信（优化版本）
     private func isWeChatApp() -> Bool {
-        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
-              let bundleId = frontmostApp.bundleIdentifier else {
+        guard let detection = getCachedAppDetection() else {
             return false
         }
-        
-        // 微信的Bundle ID通常是com.tencent.xinWeChat
+        return detection.isWeChat
+    }
     
+    // 实际执行微信检测的方法
+    private func performWeChatAppDetection(bundleId: String) -> Bool {
         let wechatBundleIds = [
             "com.tencent.xinWeChat",  // 官方微信
             "com.tencent.WeChat",     // 可能的变体
@@ -775,7 +818,7 @@ class InputMonitor {
                       bundleId.lowercased().contains("wechat")
         
         if isWeChat {
-            Logger.info("WeChat detected with Bundle ID: \(bundleId)")
+            Logger.debug("WeChat detected with Bundle ID: \(bundleId)")
         }
         
         return isWeChat
@@ -990,7 +1033,26 @@ class InputMonitor {
         totalKeyEventCount = 0
         lastEventTime = Date()
         lastSpaceKeyTime = Date()
-        Logger.info("Event counters reset")
+        // Clear app detection cache when resetting
+        cachedAppInfo = nil
+        Logger.info("Event counters and app cache reset")
+    }
+    
+    // 清除应用检测缓存（当应用切换时手动调用）
+    func clearAppDetectionCache() {
+        cachedAppInfo = nil
+        Logger.debug("App detection cache cleared")
+    }
+    
+    // Application switching observer
+    @objc private func applicationDidActivate(_ notification: Notification) {
+        // Clear app detection cache when user switches applications
+        clearAppDetectionCache()
+        Logger.debug("Application switched - app detection cache cleared")
+    }
+    
+    deinit {
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
     }
     
     // 强制触发业务逻辑检查
