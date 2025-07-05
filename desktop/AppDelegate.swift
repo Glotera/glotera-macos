@@ -11,6 +11,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var isEventMonitoringActive = false
     private var lastRestartTime: Date?
     private var lastMouseLocation: NSPoint?
+    
+    // Optimized monitoring state
+    private var monitoringTimer: Timer?
+    private var lastFailureTime: Date?
+    private var consecutiveFailures = 0
+    private var isInAdaptiveMode = false
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         Logger.info("AppDelegate did finish launching")
@@ -48,8 +54,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 添加应用生命周期监听
         setupApplicationLifecycleMonitoring()
         
-        // 启动主动 Event Tap 监控
-        startEventTapMonitoring()
+        // Note: Adaptive monitoring will start automatically after successful event tap setup
     }
     
     // 添加 Event Tap 状态检查方法
@@ -99,21 +104,37 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Logger.info("Application lifecycle monitoring setup complete")
     }
     
-    // 启动主动 Event Tap 监控
+    // 启动优化的 Event Tap 监控
     private func startEventTapMonitoring() {
-        // 每30秒检查一次 Event Tap 状态，主动预防问题
-        let monitorTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
-            self?.proactiveEventTapCheck()
-        }
-        
-        // 保存 timer 引用，以便应用退出时清理
-        RunLoop.main.add(monitorTimer, forMode: .common)
-        Logger.info("Event tap proactive monitoring started (30s interval)")
+        startAdaptiveMonitoring()
     }
     
-    // 统一的 Event Tap 健康检查
-    private func proactiveEventTapCheck() {
-        guard let eventTap = eventTap else { return }
+    // Adaptive monitoring with dynamic intervals
+    private func startAdaptiveMonitoring() {
+        // Start with 60s interval (reduced from 30s for better battery life)
+        let initialInterval: TimeInterval = 60.0
+        scheduleNextMonitoringCheck(interval: initialInterval)
+        Logger.info("Event tap adaptive monitoring started (60s initial interval)")
+    }
+    
+    private func scheduleNextMonitoringCheck(interval: TimeInterval) {
+        // Invalidate existing timer
+        monitoringTimer?.invalidate()
+        
+        // Schedule next check
+        monitoringTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+            self?.performAdaptiveEventTapCheck()
+        }
+        
+        RunLoop.main.add(monitoringTimer!, forMode: .common)
+    }
+    
+    // Optimized adaptive Event Tap health check
+    private func performAdaptiveEventTapCheck() {
+        guard let eventTap = eventTap else { 
+            scheduleNextMonitoringCheck(interval: 60.0)
+            return 
+        }
         
         let isValid = CFMachPortIsValid(eventTap)
         let isEnabled = CGEvent.tapIsEnabled(tap: eventTap)
@@ -123,40 +144,101 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let timeSinceSelectionTranslation = inputMonitor.getTimeSinceLastSelectionTranslation()
         let isRecentSelectionTranslation = timeSinceSelectionTranslation < 60.0 // 60秒内
         
+        var nextInterval: TimeInterval = 60.0 // Default interval
+        
         // 如果发现问题征兆，主动修复
         if !isEnabled || !isValid || !isActive {
-            // 如果刚进行了选中文本翻译，跳过检查
+            
+            // 如果刚进行了选中文本翻译，跳过检查但缩短下次检查间隔
             if isRecentSelectionTranslation {
                 Logger.debug("Skipping Event Tap check - recent selection translation (\(String(format: "%.1f", timeSinceSelectionTranslation))s ago)")
-                return
-            }
-            
-            Logger.warn("Event Tap check detected issue - Valid: \(isValid), Enabled: \(isEnabled), Active: \(isActive)")
-            
-            // 尝试快速恢复
-            if quickEnableEventTap() {
-                Logger.info("Event Tap recovery successful")
+                nextInterval = 30.0 // Check again sooner
             } else {
-                Logger.warn("Event Tap recovery failed, scheduling full restart")
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                    self.restartEventMonitoringInternal()
+                recordFailure()
+                Logger.warn("Event Tap check detected issue - Valid: \(isValid), Enabled: \(isEnabled), Active: \(isActive)")
+                
+                // 尝试快速恢复
+                if quickEnableEventTap() {
+                    Logger.info("Event Tap recovery successful")
+                    recordRecovery()
+                } else {
+                    Logger.warn("Event Tap recovery failed, scheduling full restart")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                        self.restartEventMonitoringInternal()
+                    }
+                    nextInterval = 30.0 // Check more frequently after failure
                 }
             }
         } else {
-            // 每10次检查输出一次正常状态
-            let currentTime = Int(Date().timeIntervalSince1970)
-            if currentTime % 300 == 0 { // 大约每5分钟输出一次
-                Logger.debug("Event Tap health check: OK")
+            // System is healthy
+            recordHealthyState()
+            nextInterval = calculateOptimalInterval()
+            
+            // Reduced logging frequency
+            if consecutiveFailures == 0 && !isInAdaptiveMode {
+                let currentTime = Int(Date().timeIntervalSince1970)
+                if currentTime % 600 == 0 { // Every 10 minutes instead of 5
+                    Logger.debug("Event Tap health check: OK (stable)")
+                }
+            }
+        }
+        
+        // Schedule next check with adaptive interval
+        scheduleNextMonitoringCheck(interval: nextInterval)
+    }
+    
+    // Track failures for adaptive monitoring
+    private func recordFailure() {
+        lastFailureTime = Date()
+        consecutiveFailures += 1
+        isInAdaptiveMode = true
+        Logger.debug("Recorded failure #\(consecutiveFailures)")
+    }
+    
+    // Track recovery for adaptive monitoring
+    private func recordRecovery() {
+        Logger.debug("System recovered after \(consecutiveFailures) failures")
+        consecutiveFailures = max(0, consecutiveFailures - 2) // Reduce failure count on recovery
+        if consecutiveFailures == 0 {
+            isInAdaptiveMode = false
+        }
+    }
+    
+    // Track healthy state
+    private func recordHealthyState() {
+        if consecutiveFailures > 0 {
+            consecutiveFailures = max(0, consecutiveFailures - 1)
+            if consecutiveFailures == 0 {
+                isInAdaptiveMode = false
+                Logger.debug("System returned to stable state")
             }
         }
     }
     
-    @objc private func applicationDidBecomeActive() {
-        Logger.info("Application became active - checking event monitoring")
-        // 应用变为活跃时检查事件监听状态
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            self.verifyEventMonitoring()
+    // Calculate optimal monitoring interval based on system stability
+    private func calculateOptimalInterval() -> TimeInterval {
+        if consecutiveFailures == 0 {
+            // System is stable - use longer intervals to save CPU/battery
+            return 120.0 // 2 minutes for stable system
+        } else if consecutiveFailures <= 2 {
+            // Minor issues - moderate frequency
+            return 60.0 // 1 minute
+        } else {
+            // Frequent issues - higher frequency monitoring
+            return 30.0 // 30 seconds
         }
+    }
+    
+    // Trigger immediate monitoring check (on-demand)
+    private func triggerImmediateMonitoringCheck() {
+        Logger.debug("Triggering immediate monitoring check")
+        performAdaptiveEventTapCheck()
+    }
+    
+    @objc private func applicationDidBecomeActive() {
+        Logger.info("Application became active - triggering immediate monitoring check")
+        // 应用变为活跃时立即检查事件监听状态
+        triggerImmediateMonitoringCheck()
     }
     
     @objc private func applicationDidResignActive() {
@@ -164,10 +246,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @objc private func systemDidWakeUp() {
-        Logger.info("System woke up - restarting event monitoring")
-        // 系统唤醒后重新启动事件监听
+        Logger.info("System woke up - triggering immediate monitoring check")
+        // 系统唤醒后立即检查并可能重启事件监听
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-            self.restartEventMonitoringInternal()
+            self.triggerImmediateMonitoringCheck()
         }
     }
     
@@ -245,6 +327,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 标记为非活跃状态
         isEventMonitoringActive = false
         
+        // 清理优化的监控定时器
+        monitoringTimer?.invalidate()
+        monitoringTimer = nil
+        Logger.info("Monitoring timer invalidated")
+        
         // 清理 RunLoop Source
         if let runLoopSource = runLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
@@ -306,6 +393,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             retryTimer?.invalidate()
             retryTimer = nil
             
+            // Start adaptive monitoring after successful setup
+            startAdaptiveMonitoring()
+            
             Logger.info("Event monitoring setup complete")
         } else {
             Logger.error("Failed to create event tap - this usually indicates:")
@@ -325,6 +415,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if isEventMonitoringActive {
                 Logger.info("Event monitoring setup successful after retry")
                 timer.invalidate() // Stop retrying once successful
+                // Start monitoring after successful retry
+                startAdaptiveMonitoring()
             }
         } else if isEventMonitoringActive {
             // 更智能的健康检查 - 减少误报
