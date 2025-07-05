@@ -49,6 +49,7 @@
 		A1B2C3D4E5F678901234567A /* Logger.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6789012345678AB /* Logger.swift */; };
 		C3D4E5F67890123456789ABC /* LoggerExample.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E5F67890123456789ABCDE /* LoggerExample.swift */; };
 		2369A0760EA64CA18E875A83 /* StreamBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B45302DE637A47119CC26C78 /* StreamBuffer.swift */; };
+		98AA1C8369C74BEAA4D3EB3B /* PerformanceTelemetry.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF66A75F38EB4DF48E1475C8 /* PerformanceTelemetry.swift */; };
 		QU0TA5AL3RT4W1ND0W567890 /* QuotaAlertWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = QU0TA5AL3RT4W1ND0W123456 /* QuotaAlertWindow.swift */; };
 /* End PBXBuildFile section */
 
@@ -107,6 +108,7 @@
 		B2C3D4E5F6789012345678AB /* Logger.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Logger.swift; sourceTree = "<group>"; };
 		D4E5F67890123456789ABCDE /* LoggerExample.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LoggerExample.swift; sourceTree = "<group>"; };
 		B45302DE637A47119CC26C78 /* StreamBuffer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = StreamBuffer.swift; sourceTree = "<group>"; };
+		FF66A75F38EB4DF48E1475C8 /* PerformanceTelemetry.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PerformanceTelemetry.swift; sourceTree = "<group>"; };
 		QU0TA5AL3RT4W1ND0W123456 /* QuotaAlertWindow.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = QuotaAlertWindow.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -208,6 +210,7 @@
 				9BE4ED752E012FF1002AC2AE /* TranslationStatusWindow.swift */,
 				9BE4ED7B2E012FF1002AC2AE /* TranslatorClient.swift */,
 				B45302DE637A47119CC26C78 /* StreamBuffer.swift */,
+				FF66A75F38EB4DF48E1475C8 /* PerformanceTelemetry.swift */,
 				9BE4ED8F2E012FF1002AC2AE /* UpdateManager.swift */,
 			);
 			path = desktop;
@@ -382,6 +385,7 @@
 				9BE4ED852E012FF1002AC2AE /* TranslationResultWindow.swift in Sources */,
 				9BE4ED882E012FF1002AC2AE /* TranslatorClient.swift in Sources */,
 				2369A0760EA64CA18E875A83 /* StreamBuffer.swift in Sources */,
+				98AA1C8369C74BEAA4D3EB3B /* PerformanceTelemetry.swift in Sources */,
 				9BE4ED822E012FF1002AC2AE /* TranslationMenuWindow.swift in Sources */,
 				9BE4ED8A2E012FF1002AC2AE /* TranslateAgent.swift in Sources */,
 				9BE4ED862E012FF1002AC2AE /* AXController.swift in Sources */,

@@ -97,6 +97,7 @@ class SessionManager {
         // First check cached validation result
         if let cachedEntry = authCache.getCachedEntry() {
             Logger.debug("SessionManager: ✅ Cache hit - using cached authentication result: \(cachedEntry.isValid)")
+            PerformanceTelemetry.shared.recordAuthCacheHit(true)
             return cachedEntry.isValid
         }
         
@@ -107,6 +108,7 @@ class SessionManager {
             let authenticated = hasToken && hasUser
             
             authCache.updateFastCheck()
+            PerformanceTelemetry.shared.recordAuthCacheHit(false)
             Logger.debug("SessionManager: Fast auth check - hasToken: \(hasToken), hasUser: \(hasUser), isAuthenticated: \(authenticated)")
             
             return authenticated
@@ -246,7 +248,10 @@ class SessionManager {
     
     /// Validate current token with server
     func validateToken(completion: @escaping (Bool) -> Void) {
+        let timer = PerformanceTelemetry.shared.startTiming("auth.validation")
+        
         guard let token = getAuthToken() else {
+            timer.finish(success: false)
             completion(false)
             return
         }
@@ -289,6 +294,8 @@ class SessionManager {
             DispatchQueue.main.async {
                 if let error = error {
                     Logger.error("SessionManager: Token validation network error: \(error)")
+                    timer.addContext("error_type", "network")
+                    timer.finish(success: false)
                     // Don't fail authentication due to network issues - allow offline usage
                     Logger.info("SessionManager: Allowing offline authentication due to network error")
                     completion(true)
@@ -297,20 +304,29 @@ class SessionManager {
                 
                 guard let httpResponse = response as? HTTPURLResponse else {
                     Logger.error("SessionManager: Invalid response type")
+                    timer.addContext("error_type", "invalid_response")
+                    timer.finish(success: false)
                     completion(false)
                     return
                 }
                 
+                timer.addContext("status_code", httpResponse.statusCode)
+                
                 if httpResponse.statusCode == 200 {
                     Logger.info("SessionManager: Token validation successful")
+                    timer.finish(success: true)
                     completion(true)
                 } else if httpResponse.statusCode == 401 {
                     Logger.warn("SessionManager: Token validation failed - token is invalid or expired")
+                    timer.addContext("error_type", "unauthorized")
+                    timer.finish(success: false)
                     // Only clear session for 401 (unauthorized)
                     self?.clearSession()
                     completion(false)
                 } else {
                     Logger.warn("SessionManager: Token validation failed with status: \(httpResponse.statusCode)")
+                    timer.addContext("error_type", "server_error")
+                    timer.finish(success: false)
                     // For other HTTP errors (500, 503, etc.), don't clear session - might be temporary server issues
                     Logger.info("SessionManager: Allowing offline authentication due to server error")
                     completion(true)

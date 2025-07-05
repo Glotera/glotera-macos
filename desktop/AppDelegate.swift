@@ -29,6 +29,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Initialize simple memory manager for translation windows
         _ = SimpleMemoryManager.shared
         
+        // Initialize performance telemetry
+        _ = PerformanceTelemetry.shared
+        
         // Initialize update manager and check for updates
         _ = UpdateManager.shared
         UpdateManager.shared.performFirstLaunchCheck()

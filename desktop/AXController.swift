@@ -38,7 +38,10 @@ class TriggerPatternCache {
     }
     
     func detectTrigger(in content: String) -> (text: String, lang: String)? {
-        return cacheQueue.sync {
+        let timer = PerformanceTelemetry.shared.startTiming("trigger.detection")
+        timer.addContext("content_length", content.count)
+        
+        let result = cacheQueue.sync { () -> (text: String, lang: String)? in
             // Check if cache needs refresh
             let currentHash = calculateConfigurationHash()
             if currentHash != lastConfigurationHash {
@@ -50,13 +53,27 @@ class TriggerPatternCache {
             for (_, patterns) in compiledPatterns {
                 if let result = checkPatternsForTrigger(patterns, in: content) {
                     cacheHits += 1
+                    recordPerformanceCounter("trigger.cache.hit")
+                    timer.addContext("cache_hit", true)
                     return result
                 }
             }
             
             cacheMisses += 1
+            recordPerformanceCounter("trigger.cache.miss")
+            timer.addContext("cache_hit", false)
             return nil
         }
+        
+        timer.finish(success: result != nil)
+        if let result = result {
+            timer.addContext("detected_language", result.lang)
+            recordPerformanceCounter("trigger.detection.success")
+        } else {
+            recordPerformanceCounter("trigger.detection.failure")
+        }
+        
+        return result
     }
     
     func getAllTriggers() -> [String] {

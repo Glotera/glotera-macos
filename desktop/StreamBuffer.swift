@@ -153,11 +153,15 @@ class StreamBatchProcessor {
         let success = buffer.write(chunk)
         if !success {
             droppedChunks += 1
+            PerformanceTelemetry.shared.recordCounter("stream.chunk_dropped")
             Logger.warn("StreamBatchProcessor: Dropped chunk (total dropped: \(droppedChunks))")
+        } else {
+            PerformanceTelemetry.shared.recordCounter("stream.chunk_added")
         }
         
         // Trigger immediate processing for high-priority events
         if chunk.type.priority <= 1 { // error or end events
+            PerformanceTelemetry.shared.recordCounter("stream.priority_processing_triggered")
             triggerImmediateProcessing()
         }
     }
@@ -182,6 +186,39 @@ class StreamBatchProcessor {
     }
     
     func getPerformanceStats() -> (processed: Int, dropped: Int, bufferUtilization: Double, avgProcessingTime: TimeInterval) {
+        // Record telemetry metrics
+        PerformanceTelemetry.shared.recordMetric(PerformanceMetric(
+            name: "stream.processed_chunks",
+            value: Double(processedChunks),
+            unit: .count,
+            timestamp: Date(),
+            context: nil
+        ))
+        
+        PerformanceTelemetry.shared.recordMetric(PerformanceMetric(
+            name: "stream.dropped_chunks",
+            value: Double(droppedChunks),
+            unit: .count,
+            timestamp: Date(),
+            context: nil
+        ))
+        
+        PerformanceTelemetry.shared.recordMetric(PerformanceMetric(
+            name: "stream.buffer_utilization",
+            value: buffer.utilization,
+            unit: .percentage,
+            timestamp: Date(),
+            context: nil
+        ))
+        
+        PerformanceTelemetry.shared.recordMetric(PerformanceMetric(
+            name: "stream.avg_processing_time",
+            value: averageProcessingTime * 1000, // Convert to ms
+            unit: .milliseconds,
+            timestamp: Date(),
+            context: nil
+        ))
+        
         return (processedChunks, droppedChunks, buffer.utilization, averageProcessingTime)
     }
     
@@ -224,6 +261,15 @@ class StreamBatchProcessor {
             // Update performance metrics
             let processingTime = CFAbsoluteTimeGetCurrent() - startTime
             averageProcessingTime = (averageProcessingTime * 0.9) + (processingTime * 0.1)
+            
+            // Record telemetry for batch processing
+            PerformanceTelemetry.shared.recordMetric(PerformanceMetric(
+                name: "stream.batch_processing_time",
+                value: processingTime * 1000, // Convert to ms
+                unit: .milliseconds,
+                timestamp: Date(),
+                context: nil
+            ))
         }
         
         let chunks = buffer.readBatch()
@@ -248,6 +294,7 @@ class StreamBatchProcessor {
         
         for chunk in currentBatch {
             processedChunks += 1
+            PerformanceTelemetry.shared.recordCounter("stream.chunk_processed")
             
             switch chunk.type {
             case .chunk:

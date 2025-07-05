@@ -291,9 +291,29 @@ class TranslatorClient: NSObject {
     func translate(text: String, to language: String, completion: @escaping (Result<TranslationResult, TranslationError>) -> Void) {
         Logger.info("Starting translation: \(text) -> \(language)")
         
+        // Record translation attempt
+        recordPerformanceCounter("translation.attempt")
+        recordPerformanceCounter("translation.text_length", value: Double(text.count))
+        
+        let timer = PerformanceTelemetry.shared.startTiming("translation.total")
+        timer.addContext("text_length", text.count)
+        timer.addContext("target_language", language)
+        
         // Use rate limiter instead of blocking semaphore
         rateLimiter.execute {
-            self.performTranslation(text: text, to: language, completion: completion)
+            self.performTranslation(text: text, to: language) { result in
+                switch result {
+                case .success(let translationResult):
+                    timer.addContext("result_length", translationResult.translated.count)
+                    timer.finish(success: true)
+                    recordPerformanceCounter("translation.success")
+                case .failure(let error):
+                    timer.addContext("error_type", String(describing: error))
+                    timer.finish(success: false)
+                    recordPerformanceCounter("translation.failure")
+                }
+                completion(result)
+            }
         }
     }
     
@@ -466,17 +486,38 @@ class TranslatorClient: NSObject {
     ) {
         Logger.info("Starting stream translation: text=\(text), to=\(to)")
         
+        // Record stream translation attempt
+        recordPerformanceCounter("translation.stream.attempt")
+        recordPerformanceCounter("translation.stream.text_length", value: Double(text.count))
+        
+        let timer = PerformanceTelemetry.shared.startTiming("translation.stream.total")
+        timer.addContext("text_length", text.count)
+        timer.addContext("target_language", to)
+        
         // Check authentication first using cached validation
         AuthenticationHelper.shared.ensureAuthenticated { isAuthenticated in
             guard isAuthenticated else {
                 Logger.warn("Stream translation attempted without authentication - requiring login")
+                timer.finish(success: false)
+                recordPerformanceCounter("translation.stream.auth_failure")
                 DispatchQueue.main.async {
                     onError("Authentication required - please sign in to use translation features")
                 }
                 return
             }
             
-            self.performStreamTranslation(text: text, to: to, onChunk: onChunk, onComplete: onComplete, onError: onError)
+            self.performStreamTranslation(text: text, to: to, 
+                onChunk: onChunk, 
+                onComplete: { result, quotaInfo in
+                    timer.finish(success: true)
+                    recordPerformanceCounter("translation.stream.success")
+                    onComplete(result, quotaInfo)
+                }, 
+                onError: { error in
+                    timer.finish(success: false)
+                    recordPerformanceCounter("translation.stream.failure")
+                    onError(error)
+                })
         }
     }
     
