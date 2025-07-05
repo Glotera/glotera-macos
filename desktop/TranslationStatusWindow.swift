@@ -21,6 +21,8 @@ class TranslationStatusWindow: NSWindow {
         self.isMovableByWindowBackground = false
         
         setupContent()
+        
+        // TranslationStatusWindow is a singleton, no registration needed
     }
     
     private func setupContent() {
@@ -73,6 +75,8 @@ class TranslationStatusWindow: NSWindow {
         self.setFrameTopLeftPoint(statusPoint)
         self.makeKeyAndOrderFront(nil)
         
+        // No interaction recording needed for singleton status window
+        
     }
     
     func showSuccess() {
@@ -95,7 +99,10 @@ class TranslationStatusWindow: NSWindow {
     }
     
     func hideStatus() {
-        self.orderOut(nil) 
+        self.orderOut(nil)
+        
+        // Note: Don't unregister TranslationStatusWindow as it's a singleton
+        // that may be reused frequently. MemoryManager will handle cleanup if needed.
     }
     
     // 防止状态窗口抢夺焦点

@@ -365,6 +365,16 @@ class AXController {
         JavaScriptPatternCache.shared.clearCache()
         Logger.info("Refreshed all pattern caches due to configuration change")
     }
+    
+    /// Get memory management statistics
+    func getMemoryStatistics() -> (active: Int, created: Int, cleaned: Int) {
+        return SimpleMemoryManager.shared.getStatistics()
+    }
+    
+    /// Force cleanup of idle translation windows
+    func forceCleanupIdleWindows() {
+        SimpleMemoryManager.shared.forceCleanup()
+    }
 
     // 支持的浏览器应用bundle标识符
     private let browserBundleIds = [

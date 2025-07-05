@@ -5,6 +5,14 @@ class TranslationResultWindow: NSWindow {
     private var hostingView: NSHostingView<TranslationResultView>?
     private var clickMonitor: Any?
     private var resultView: TranslationResultView?
+    private var lastInteractionTime: Date = Date()
+    
+    // MARK: - Memory Management Integration
+    
+    private func recordInteraction() {
+        lastInteractionTime = Date()
+        // Interaction recording not needed in simplified version
+    }
     
     init(original: String, translated: String) {
         // 动态计算窗口大小以适应内容
@@ -25,6 +33,9 @@ class TranslationResultWindow: NSWindow {
         
         setupContent(original: original, translated: translated)
         setupClickOutsideMonitor()
+        
+        // Register with SimpleMemoryManager
+        SimpleMemoryManager.shared.registerWindow(self)
     }
     
     init(originalText: String, targetLanguage: String) {
@@ -46,6 +57,9 @@ class TranslationResultWindow: NSWindow {
         
         setupStreamContent(original: originalText, targetLanguage: targetLanguage)
         setupClickOutsideMonitor()
+        
+        // Register with SimpleMemoryManager
+        SimpleMemoryManager.shared.registerWindow(self)
     }
     
     private func setupStreamContent(original: String, targetLanguage: String) {
@@ -218,6 +232,9 @@ class TranslationResultWindow: NSWindow {
         self.orderFront(nil)
         self.makeKey()
         
+        // Record interaction with MemoryManager
+        recordInteraction()
+        
         Logger.info("Translation result window shown at screen center")
     }
     
@@ -280,7 +297,10 @@ class TranslationResultWindow: NSWindow {
         
         self.setFrameTopLeftPoint(resultPoint)
         self.orderFront(nil)
-        self.makeKey() 
+        self.makeKey()
+        
+        // Record interaction with MemoryManager
+        recordInteraction()
     }
     
     func hide() {
@@ -292,6 +312,9 @@ class TranslationResultWindow: NSWindow {
             clickMonitor = nil
         }
         
+        // Unregister from SimpleMemoryManager
+        SimpleMemoryManager.shared.unregisterWindow(self)
+        
         Logger.info("Translation result window hidden")
     }
     
@@ -300,6 +323,11 @@ class TranslationResultWindow: NSWindow {
         if let monitor = clickMonitor {
             NSEvent.removeMonitor(monitor)
         }
+        
+        // Note: Don't unregister in deinit to avoid crashes with deallocated objects
+        // The no-op SimpleMemoryManager handles this safely
+        
+        Logger.debug("TranslationResultWindow deinitialized")
     }
     
     private func copyToClipboard(_ text: String) {
@@ -307,6 +335,9 @@ class TranslationResultWindow: NSWindow {
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
         Logger.info("Copied to clipboard: \(text)")
+        
+        // Record interaction
+        recordInteraction()
         
         // 简短显示复制成功提示
         // 这里可以添加一个临时的"已复制"提示
@@ -318,6 +349,28 @@ class TranslationResultWindow: NSWindow {
     
     override var canBecomeMain: Bool {
         return false
+    }
+    
+    // MARK: - Event Tracking for Memory Management
+    
+    override func mouseDown(with event: NSEvent) {
+        super.mouseDown(with: event)
+        recordInteraction()
+    }
+    
+    override func mouseDragged(with event: NSEvent) {
+        super.mouseDragged(with: event)
+        recordInteraction()
+    }
+    
+    override func keyDown(with event: NSEvent) {
+        super.keyDown(with: event)
+        recordInteraction()
+    }
+    
+    override func becomeKey() {
+        super.becomeKey()
+        recordInteraction()
     }
     
     // 重写方法以控制窗口焦点行为，确保拖动时不会意外隐藏

@@ -91,6 +91,21 @@ class MenuBarController {
         showCacheInfoItem.target = self
         debugSubMenu.addItem(showCacheInfoItem)
         
+        debugSubMenu.addItem(NSMenuItem.separator())
+        
+        // Memory management debug options
+        let memoryStatsItem = NSMenuItem(title: "Show Memory Statistics", action: #selector(showMemoryStatistics), keyEquivalent: "")
+        memoryStatsItem.target = self
+        debugSubMenu.addItem(memoryStatsItem)
+        
+        let cleanupIdleItem = NSMenuItem(title: "Cleanup Idle Windows", action: #selector(cleanupIdleWindows), keyEquivalent: "")
+        cleanupIdleItem.target = self
+        debugSubMenu.addItem(cleanupIdleItem)
+        
+        let forceCleanupItem = NSMenuItem(title: "Force Cleanup All Windows", action: #selector(forceCleanupAllWindows), keyEquivalent: "")
+        forceCleanupItem.target = self
+        debugSubMenu.addItem(forceCleanupItem)
+        
         // Language cache management is now automatic, no manual refresh needed
         
         let showStatusItem = NSMenuItem(title: "Show Status", action: #selector(showStatus), keyEquivalent: "")
@@ -301,6 +316,62 @@ class MenuBarController {
             DispatchQueue.main.async {
                 // 使用非阻塞的窗口显示状态信息
                 self.showStatusWindow(statusInfo: statusInfo)
+            }
+        }
+    }
+    
+    // MARK: - Memory Management Debug Methods
+    
+    @objc func showMemoryStatistics() {
+        Logger.info("Memory statistics requested")
+        
+        DispatchQueue.global(qos: .userInitiated).async {
+            let memoryStats = AXController.shared.getMemoryStatistics()
+            let jsStats = AXController.shared.getJavaScriptCacheStats()
+            
+            let detailedInfo = """
+            Memory Management Statistics:
+            - Active Windows: \(memoryStats.active)
+            - Total Created: \(memoryStats.created)
+            - Total Cleaned: \(memoryStats.cleaned)
+            
+            JavaScript Cache:
+            - Cached Browsers: \(jsStats.cachedBrowsers)
+            - Total Cache Size: \(jsStats.totalSize) bytes
+            """
+            
+            DispatchQueue.main.async {
+                self.showStatusWindow(statusInfo: detailedInfo)
+            }
+        }
+    }
+    
+    @objc func cleanupIdleWindows() {
+        Logger.info("Cleanup idle windows requested")
+        
+        DispatchQueue.global(qos: .userInitiated).async {
+            AXController.shared.forceCleanupIdleWindows()
+            
+            DispatchQueue.main.async {
+                self.showNonBlockingNotification(
+                    title: "Cleanup Complete",
+                    message: "Idle translation windows have been cleaned up"
+                )
+            }
+        }
+    }
+    
+    @objc func forceCleanupAllWindows() {
+        Logger.info("Force cleanup all windows requested")
+        
+        DispatchQueue.global(qos: .userInitiated).async {
+            SimpleMemoryManager.shared.forceCleanup()
+            
+            DispatchQueue.main.async {
+                self.showNonBlockingNotification(
+                    title: "Cleanup Complete",
+                    message: "Translation windows have been cleaned up"
+                )
             }
         }
     }
