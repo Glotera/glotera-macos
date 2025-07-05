@@ -1,6 +1,46 @@
 import Foundation
 import AppKit
 
+// MARK: - Authentication Optimization
+
+class AuthenticationHelper {
+    static let shared = AuthenticationHelper()
+    private init() {}
+    
+    private let authQueue = DispatchQueue(label: "authHelper", attributes: .concurrent)
+    private var pendingAuthRequests: [String: [(Bool) -> Void]] = [:]
+    
+    /// Batch authentication check for translation requests
+    func ensureAuthenticated(completion: @escaping (Bool) -> Void) {
+        // Fast path: check cached authentication
+        if SessionManager.shared.isAuthenticated {
+            completion(true)
+            return
+        }
+        
+        // Use cached token validation with batching
+        SessionManager.shared.validateTokenCached { isValid in
+            completion(isValid)
+        }
+    }
+    
+    /// Get authenticated request headers (cached)
+    func getAuthenticatedHeaders(completion: @escaping ([String: String]?) -> Void) {
+        SessionManager.shared.getValidatedAuthToken { token in
+            guard let token = token else {
+                completion(nil)
+                return
+            }
+            
+            let headers = [
+                "Content-Type": "application/json",
+                "Authorization": "Bearer \(token)"
+            ]
+            completion(headers)
+        }
+    }
+}
+
 // MARK: - Rate Limiting and Connection Management
 
 class RateLimiter {
@@ -267,24 +307,32 @@ class TranslatorClient: NSObject {
             return
         }
         
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        
-        // Add authentication header - now required for all translation requests
-        if let authToken = SessionManager.shared.getAuthToken() {
-            request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
-            Logger.info("Adding authentication header to translation request")
-        } else {
-            Logger.error("No authentication token available - translation requires login")
-            completion(.failure(.networkError("Authentication required")))
-            return
-        }
-        
-        // 构建包含环境信息的新请求体
-        let environment = EnvironmentManager.shared.getEnvironmentInfo()
-        // Use authenticated user ID (guaranteed to exist due to authentication check above)
-        let userId = SessionManager.shared.getCurrentUser()!.userId
+        // Use cached authentication helper
+        AuthenticationHelper.shared.getAuthenticatedHeaders { [weak self] headers in
+            guard let self = self, let headers = headers else {
+                Logger.error("No valid authentication headers available - translation requires login")
+                completion(.failure(.authenticationRequired("Authentication required")))
+                return
+            }
+            
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            
+            // Set headers from authentication helper
+            for (key, value) in headers {
+                request.setValue(value, forHTTPHeaderField: key)
+            }
+            
+            Logger.debug("Adding cached authentication header to translation request")
+            
+            // 构建包含环境信息的新请求体
+            let environment = EnvironmentManager.shared.getEnvironmentInfo()
+            // Use authenticated user ID (guaranteed to exist due to authentication check above)
+            guard let userId = SessionManager.shared.getCurrentUser()?.userId else {
+                Logger.error("No authenticated user available")
+                completion(.failure(.authenticationRequired("No authenticated user")))
+                return
+            }
         
         let requestBody: [String: Any] = [
             "text": text,
@@ -394,6 +442,7 @@ class TranslatorClient: NSObject {
             }
         }
         task.resume()
+        }  // Close authentication callback
     }
     
     // 便捷方法：只返回翻译文本（向后兼容）
@@ -417,14 +466,27 @@ class TranslatorClient: NSObject {
     ) {
         Logger.info("Starting stream translation: text=\(text), to=\(to)")
         
-        // Check authentication first - return error if not authenticated
-        guard SessionManager.shared.isAuthenticated else {
-            Logger.warn("Stream translation attempted without authentication - requiring login")
-            DispatchQueue.main.async {
-                onError("Authentication required - please sign in to use translation features")
+        // Check authentication first using cached validation
+        AuthenticationHelper.shared.ensureAuthenticated { isAuthenticated in
+            guard isAuthenticated else {
+                Logger.warn("Stream translation attempted without authentication - requiring login")
+                DispatchQueue.main.async {
+                    onError("Authentication required - please sign in to use translation features")
+                }
+                return
             }
-            return
+            
+            self.performStreamTranslation(text: text, to: to, onChunk: onChunk, onComplete: onComplete, onError: onError)
         }
+    }
+    
+    private func performStreamTranslation(
+        text: String,
+        to: String,
+        onChunk: @escaping (String, String) -> Void,
+        onComplete: @escaping (String?, QuotaInfo?) -> Void,
+        onError: @escaping (String) -> Void
+    ) {
         
         guard let url = URL(string: endpoint) else { 
             Logger.info("Invalid URL: \(endpoint)")
@@ -484,17 +546,17 @@ class TranslatorClient: NSObject {
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         request.timeoutInterval = timeoutInterval
         
-        // Add authentication header - now required for stream translation
-        if let authToken = SessionManager.shared.getAuthToken() {
-            request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
-            Logger.info("Adding authentication header to stream translation request")
-        } else {
+        // Add authentication header using cached token
+        guard let authToken = SessionManager.shared.getAuthToken() else {
             Logger.error("No authentication token available - stream translation requires login")
             DispatchQueue.main.async {
                 onError("Authentication required")
             }
             return
         }
+        
+        request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
+        Logger.debug("Adding cached authentication header to stream translation request")
         
         // 添加流式相关的请求头
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
@@ -503,7 +565,13 @@ class TranslatorClient: NSObject {
         // Build the request body with environment info
         let environment = EnvironmentManager.shared.getEnvironmentInfo()
         // Use authenticated user ID (guaranteed to exist due to authentication check above)
-        let userId = SessionManager.shared.getCurrentUser()!.userId
+        guard let userId = SessionManager.shared.getCurrentUser()?.userId else {
+            Logger.error("No authenticated user available for stream translation")
+            DispatchQueue.main.async {
+                onError("Authentication required")
+            }
+            return
+        }
         
         let body: [String: Any] = [
             "text": text,
