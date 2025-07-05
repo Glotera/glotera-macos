@@ -5,6 +5,112 @@ import ApplicationServices
 
 // MARK: - Trigger Cache Optimization
 
+/// Compiled AppleScript template for performance optimization
+struct CompiledAppleScript {
+    let script: NSAppleScript
+    let templateKey: String
+    let browserType: String
+    let createdAt: Date
+    
+    var isExpired: Bool {
+        Date().timeIntervalSince(createdAt) > AppleScriptTemplateCache.cacheExpirationTime
+    }
+}
+
+/// High-performance AppleScript template cache
+class AppleScriptTemplateCache {
+    static let shared = AppleScriptTemplateCache()
+    static let cacheExpirationTime: TimeInterval = 300 // 5 minutes
+    
+    private var compiledScripts: [String: CompiledAppleScript] = [:]
+    private let cacheQueue = DispatchQueue(label: "appleScriptCache", attributes: .concurrent)
+    private var cacheHits: Int = 0
+    private var cacheMisses: Int = 0
+    private var compilationTime: TimeInterval = 0
+    
+    private init() {}
+    
+    /// Get or create a compiled AppleScript from template
+    func getCompiledScript(templateKey: String, browserType: String, generator: () -> String) -> NSAppleScript? {
+        let timer = PerformanceTelemetry.shared.startTiming("applescript.cache_lookup")
+        timer.addContext("template_key", templateKey)
+        timer.addContext("browser_type", browserType)
+        
+        // Check cache first
+        let result = cacheQueue.sync { () -> NSAppleScript? in
+            let fullKey = "\(browserType)_\(templateKey)"
+            
+            if let cached = compiledScripts[fullKey], !cached.isExpired {
+                cacheHits += 1
+                recordPerformanceCounter("applescript.cache.hit")
+                timer.addContext("cache_hit", true)
+                return cached.script
+            }
+            
+            // Cache miss - compile new script
+            cacheMisses += 1
+            recordPerformanceCounter("applescript.cache.miss")
+            timer.addContext("cache_hit", false)
+            
+            let compileTimer = PerformanceTelemetry.shared.startTiming("applescript.compilation")
+            let scriptSource = generator()
+            
+            guard let script = NSAppleScript(source: scriptSource) else {
+                compileTimer.finish(success: false)
+                return nil
+            }
+            
+            let compilationDuration = compileTimer.finish(success: true).duration
+            compilationTime = (compilationTime * 0.9) + (compilationDuration * 0.1)
+            
+            // Cache the compiled script
+            let compiledScript = CompiledAppleScript(
+                script: script,
+                templateKey: templateKey,
+                browserType: browserType,
+                createdAt: Date()
+            )
+            
+            compiledScripts[fullKey] = compiledScript
+            
+            // Periodically clean expired entries
+            if compiledScripts.count > 20 {
+                cleanExpiredScripts()
+            }
+            
+            return script
+        }
+        
+        timer.finish(success: result != nil)
+        return result
+    }
+    
+    /// Clear all cached scripts
+    func clearCache() {
+        cacheQueue.async(flags: .barrier) {
+            self.compiledScripts.removeAll()
+            Logger.info("AppleScript cache cleared")
+        }
+    }
+    
+    /// Get cache performance metrics
+    func getPerformanceMetrics() -> (hits: Int, misses: Int, hitRatio: Double, avgCompilationTime: TimeInterval) {
+        return cacheQueue.sync {
+            let total = cacheHits + cacheMisses
+            let hitRatio = total > 0 ? Double(cacheHits) / Double(total) : 0.0
+            return (cacheHits, cacheMisses, hitRatio, compilationTime)
+        }
+    }
+    
+    private func cleanExpiredScripts() {
+        let expired = compiledScripts.filter { $0.value.isExpired }
+        for (key, _) in expired {
+            compiledScripts.removeValue(forKey: key)
+        }
+        Logger.debug("Cleaned \(expired.count) expired AppleScript cache entries")
+    }
+}
+
 /// Compiled regex pattern with metadata for efficient trigger detection
 struct CompiledTriggerPattern {
     let regex: NSRegularExpression
@@ -1204,8 +1310,13 @@ class AXController {
             return nil
         }
         
-        // 使用同步执行，但添加简单的错误处理
-        if let appleScript = NSAppleScript(source: script) {
+        // Use cached AppleScript compilation for better performance
+        let templateKey = "get_web_content"
+        if let appleScript = AppleScriptTemplateCache.shared.getCompiledScript(
+            templateKey: templateKey,
+            browserType: browserInfo.bundleId,
+            generator: { script }
+        ) {
             var error: NSDictionary?
             let result = appleScript.executeAndReturnError(&error)
             
@@ -1390,7 +1501,14 @@ class AXController {
         }
         
         Logger.info("Executing AppleScript...")
-        if let appleScript = NSAppleScript(source: script) {
+        
+        // Use cached AppleScript compilation for better performance
+        let templateKey = "replace_text_\(escapedText)_\(jsPatternCode.hashValue)"
+        if let appleScript = AppleScriptTemplateCache.shared.getCompiledScript(
+            templateKey: templateKey,
+            browserType: browserInfo.bundleId,
+            generator: { script }
+        ) {
             var error: NSDictionary?
             let result = appleScript.executeAndReturnError(&error)
             
@@ -1621,7 +1739,14 @@ class AXController {
         }
         
         Logger.info("Executing selection AppleScript...")
-        if let appleScript = NSAppleScript(source: script) {
+        
+        // Use cached AppleScript compilation for better performance
+        let templateKey = "select_trigger_text_\(originalValue.hashValue)"
+        if let appleScript = AppleScriptTemplateCache.shared.getCompiledScript(
+            templateKey: templateKey,
+            browserType: browserInfo.bundleId,
+            generator: { script }
+        ) {
             var error: NSDictionary?
             let result = appleScript.executeAndReturnError(&error)
             
@@ -1907,7 +2032,13 @@ class AXController {
             return false
         }
         
-        if let appleScript = NSAppleScript(source: script) {
+        // Use cached AppleScript compilation for better performance
+        let templateKey = "check_editable"
+        if let appleScript = AppleScriptTemplateCache.shared.getCompiledScript(
+            templateKey: templateKey,
+            browserType: browserInfo.bundleId,
+            generator: { script }
+        ) {
             var error: NSDictionary?
             let result = appleScript.executeAndReturnError(&error)
             
@@ -1995,7 +2126,13 @@ class AXController {
             return nil
         }
         
-        if let appleScript = NSAppleScript(source: script) {
+        // Use cached AppleScript compilation for better performance
+        let templateKey = "get_web_selection"
+        if let appleScript = AppleScriptTemplateCache.shared.getCompiledScript(
+            templateKey: templateKey,
+            browserType: browserInfo.bundleId,
+            generator: { script }
+        ) {
             var error: NSDictionary?
             let result = appleScript.executeAndReturnError(&error)
             
@@ -2549,7 +2686,13 @@ class AXController {
             return false
         }
         
-        if let appleScript = NSAppleScript(source: script) {
+        // Use cached AppleScript compilation for better performance
+        let templateKey = "reselect_web_text_\(escapedText.hashValue)"
+        if let appleScript = AppleScriptTemplateCache.shared.getCompiledScript(
+            templateKey: templateKey,
+            browserType: browserInfo.bundleId,
+            generator: { script }
+        ) {
             var error: NSDictionary?
             let result = appleScript.executeAndReturnError(&error)
             
@@ -2706,7 +2849,13 @@ class AXController {
         end tell
         """
         
-        if let script = NSAppleScript(source: scriptSource) {
+        // Use cached AppleScript compilation for better performance
+        let templateKey = "check_chrome_permission"
+        if let script = AppleScriptTemplateCache.shared.getCompiledScript(
+            templateKey: templateKey,
+            browserType: "com.google.Chrome",
+            generator: { scriptSource }
+        ) {
             var error: NSDictionary?
             let result = script.executeAndReturnError(&error)
             if error == nil {
