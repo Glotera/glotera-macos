@@ -82,3 +82,29 @@ source=Unnotarized Developer ID
 -- 如果是dmg
 spctl --assess --type open --context context:primary-signature -v /path/to/Glotera.dmg
 ```
+
+## 打包成dmg
+生成配置文件appdmg.json
+```json
+{
+  "title": "Glotera Installer",
+  "icon": "glotera.icns",
+  "background": "background.png",
+  "window": {
+    "size": {
+      "width": 500,
+      "height": 300
+    }
+  },
+  "contents": [
+    { "x": 100, "y": 150, "type": "file", "path": "dist/Glotera.app" },
+    { "x": 350, "y": 150, "type": "link", "path": "/Applications" }
+  ]
+}
+```
+
+进行打包：
+```bash
+npm install -g appdmg
+appdmg appdmg.json Glotera.dmg
+```
