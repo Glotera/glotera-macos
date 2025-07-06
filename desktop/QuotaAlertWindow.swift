@@ -343,7 +343,7 @@ class QuotaManager: TranslatorQuotaDelegate {
     func didReceiveQuotaUpdate(_ quotaInfo: QuotaInfo) {
         Logger.info("配额更新: \(quotaInfo.quotaDescription)")
         
-        // 可以在这里更新菜单栏的配额显示等
+        // 更新菜单栏的配额显示
         DispatchQueue.main.async {
             self.updateQuotaDisplayInMenuBar(quotaInfo)
         }
@@ -352,12 +352,22 @@ class QuotaManager: TranslatorQuotaDelegate {
     func didReceiveQuotaWarning(_ quotaInfo: QuotaInfo) {
         Logger.info("收到配额警告: 剩余 \(quotaInfo.remainingQuota) 次")
         
+        // 更新菜单栏的配额显示
+        DispatchQueue.main.async {
+            self.updateQuotaDisplayInMenuBar(quotaInfo)
+        }
+        
         // 将低配额警告加入延迟队列，等翻译完成后再显示
         scheduleDelayedWarning(quotaInfo)
     }
     
     func didReceiveQuotaExceededError(_ quotaInfo: QuotaInfo) {
         Logger.info("收到配额耗尽错误")
+        
+        // 更新菜单栏的配额显示
+        DispatchQueue.main.async {
+            self.updateQuotaDisplayInMenuBar(quotaInfo)
+        }
         
         // 显示配额耗尽对话框
         QuotaAlertWindow.shared.showQuotaExceeded(quotaInfo)
@@ -366,11 +376,12 @@ class QuotaManager: TranslatorQuotaDelegate {
     // MARK: - Private Methods
     
     private func updateQuotaDisplayInMenuBar(_ quotaInfo: QuotaInfo) {
-        // 这里可以更新菜单栏中的配额显示
-        // 例如更新MenuBarController中的配额信息
-        if (NSApp.delegate as? AppDelegate)?.menuBarController != nil {
-            // 假设MenuBarController有更新配额显示的方法
-            // menuBarController.updateQuotaDisplay(quotaInfo)
+        // Post notification for MenuBarController to update quota display
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(
+                name: .quotaInfoUpdated,
+                object: quotaInfo
+            )
         }
         
         Logger.info("菜单栏配额显示已更新: \(quotaInfo.quotaDescription)")
