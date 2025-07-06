@@ -273,7 +273,7 @@ class InputMonitor {
         } else {
             // 这是第一次点击，只记录时间
             self.lastSpaceTime = currentTime
-            Logger.info("Single space detected, waiting for second space.")
+            Logger.debug("Single space detected, waiting for second space.")
         }
     }
     

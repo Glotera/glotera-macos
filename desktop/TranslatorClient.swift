@@ -136,23 +136,35 @@ struct QuotaInfo {
     }
     
     var quotaStatusMessage: String? {
-        guard isFreeUser else { return nil }
-        
-        if isQuotaExceeded {
-            return "翻译次数已用完，请升级到Pro版本以继续使用"
-        } else if isLowQuota {
-            return "翻译次数即将用完，剩余 \(remainingQuota) 次，建议升级到Pro版本"
+        if isFreeUser {
+            if isQuotaExceeded {
+                return "Translation quota exhausted. Please upgrade to Pro (500/month) or Max (unlimited) to continue"
+            } else if isLowQuota {
+                return "Translation quota running low. \(remainingQuota) remaining. Consider upgrading to Pro (500/month) or Max (unlimited)"
+            }
+        } else {
+            // Pro users with quota limits
+            if remainingQuota != -1 { // Not unlimited
+                if isQuotaExceeded {
+                    return "Pro quota exhausted. Please upgrade to Max for unlimited translations"
+                } else if isLowQuota {
+                    return "Pro quota running low. \(remainingQuota) remaining. Consider upgrading to Max"
+                }
+            }
         }
         return nil
     }
     
     var quotaDescription: String {
         if !isFreeUser {
-            return "Pro用户 - 无限制翻译"
-        } else if isQuotaExceeded {
-            return "免费配额已用完 (\(monthlyUsage)/\(monthlyLimit ?? 200))"
+            // Check if it's Max user or Pro user based on remaining quota
+            if remainingQuota == -1 {
+                return "Max - Unlimited"
+            } else {
+                return "Pro - \(remainingQuota) / \(monthlyLimit ?? 500)"
+            }
         } else {
-            return "免费用户 - 本月剩余 \(remainingQuota) 次"
+            return "Free - \(remainingQuota)/\(monthlyLimit ?? 100)"
         }
     }
 }
@@ -188,15 +200,15 @@ enum TranslationError: Error {
     var localizedDescription: String {
         switch self {
         case .quotaExceeded(let quotaInfo):
-            return quotaInfo.quotaStatusMessage ?? "翻译配额已用完"
+            return quotaInfo.quotaStatusMessage ?? "Translation quota exceeded"
         case .networkError(let message):
-            return "网络错误: \(message)"
+            return "Network error: \(message)"
         case .parseError(let message):
-            return "数据解析错误: \(message)"
+            return "Data parsing error: \(message)"
         case .serverError(let code, let message):
-            return "服务器错误 (\(code)): \(message)"
+            return "Server error (\(code)): \(message)"
         case .authenticationRequired(let message):
-            return "需要登录: \(message)"
+            return "Login required: \(message)"
         }
     }
 }
@@ -996,5 +1008,89 @@ extension TranslatorClient: URLSessionDataDelegate {
         streamCallbacks = nil
         streamProcessor = nil
         streamBuffer = "" 
+    }
+    
+    // MARK: - Quota Information
+    
+    /// Fetch current quota information without consuming usage
+    func fetchQuotaInfo(completion: @escaping (Result<QuotaInfo, TranslationError>) -> Void) {
+        Logger.info("Fetching quota info from server")
+        
+        AuthenticationHelper.shared.getAuthenticatedHeaders { [weak self] headers in
+            guard let self = self,
+                  let headers = headers else {
+                Logger.error("Failed to get authenticated headers for quota fetch")
+                completion(.failure(.authenticationRequired("Authentication required")))
+                return
+            }
+            
+            // Create quota endpoint URL by extracting base URL from apiEndpoint
+            let baseURL = self.environment.apiEndpoint.replacingOccurrences(of: "/api/translate", with: "")
+            let quotaURL = "\(baseURL)/api/quota"
+            guard let url = URL(string: quotaURL) else {
+                Logger.error("Invalid quota URL: \(quotaURL)")
+                completion(.failure(.networkError("Invalid quota URL")))
+                return
+            }
+            
+            // Create request
+            var request = URLRequest(url: url)
+            request.httpMethod = "GET"
+            for (key, value) in headers {
+                request.setValue(value, forHTTPHeaderField: key)
+            }
+            request.timeoutInterval = self.timeoutInterval
+            
+            // Make request
+            let task = URLSession.shared.dataTask(with: request) { data, response, error in
+                if let error = error {
+                    Logger.error("Quota fetch network error: \(error.localizedDescription)")
+                    completion(.failure(.networkError(error.localizedDescription)))
+                    return
+                }
+                
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    Logger.error("Invalid response for quota fetch")
+                    completion(.failure(.networkError("Invalid response")))
+                    return
+                }
+                
+                guard let data = data else {
+                    Logger.error("No data received for quota fetch")
+                    completion(.failure(.networkError("No data received")))
+                    return
+                }
+                
+                if httpResponse.statusCode == 401 {
+                    Logger.error("Quota fetch authentication failed")
+                    completion(.failure(.authenticationRequired("Authentication required")))
+                    return
+                }
+                
+                guard httpResponse.statusCode == 200 else {
+                    Logger.error("Quota fetch HTTP error: \(httpResponse.statusCode)")
+                    completion(.failure(.serverError(httpResponse.statusCode, "Server error")))
+                    return
+                }
+                
+                // Parse response
+                do {
+                    let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+                    if let quotaData = json?["quota_info"] as? [String: Any] {
+                        let quotaInfo = QuotaInfo(from: quotaData)
+                        Logger.info("Quota info fetched successfully: \(quotaInfo.quotaDescription)")
+                        completion(.success(quotaInfo))
+                    } else {
+                        Logger.error("Failed to parse quota info from response")
+                        completion(.failure(.parseError("Invalid quota response format")))
+                    }
+                } catch {
+                    Logger.error("Failed to parse quota response JSON: \(error)")
+                    completion(.failure(.parseError("JSON parsing failed")))
+                }
+            }
+            
+            task.resume()
+        }
     }
 } 

@@ -73,8 +73,9 @@ class QuotaAlertWindow: NSWindow {
         Glotera requires you to sign in to use translation features.
         
         Choose your plan:
-        • Free Account: 200 translations per month
-        • Pro Account: Unlimited translations for $2.9/month
+        • Free Account: 100 translations per month
+        • Pro Account: 500 translations per month for $2.9/month  
+        • Max Account: Unlimited translations for $4.9/month
         
         Please sign in to continue.
         """
@@ -145,14 +146,14 @@ class QuotaAlertWindow: NSWindow {
         alert.informativeText = """
         You have \(quotaInfo.remainingQuota) translations remaining.
         
-        To ensure continuous translation service, we recommend upgrading to Pro:
+        To ensure continuous translation service, we recommend upgrading to Pro or Max:
         • Unlimited translations
         • Faster translation speed
         • Priority customer support
         """
         
         alert.alertStyle = .critical
-        alert.addButton(withTitle: "Upgrade to Pro")
+        alert.addButton(withTitle: "Upgrade to Pro/Max")
         alert.addButton(withTitle: "Continue") 
         
         // 移除应用图标，并防止系统自动附加默认图标
@@ -182,10 +183,11 @@ class QuotaAlertWindow: NSWindow {
         let alert = NSAlert()
         alert.messageText = "Translation Quota Exceeded"
         alert.informativeText = """
-        Your free translation quota (200 times) for this month has been used up.
+        Your free translation quota (100 times) for this month has been used up.
         
-        Upgrade to Pro to get:
-        • Unlimited translations 
+        Upgrade your plan:
+        • Pro: 500 translations per month for $2.9/month
+        • Max: Unlimited translations for $7.9/month
         • Priority customer support
         • Advanced translation features
         """

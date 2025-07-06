@@ -534,6 +534,7 @@ class SessionManager {
 extension Notification.Name {
     static let userDidLogin = Notification.Name("userDidLogin")
     static let userDidLogout = Notification.Name("userDidLogout")
+    static let quotaInfoUpdated = Notification.Name("quotaInfoUpdated")
 }
 
 // MARK: - JWT Token Utilities

@@ -1,13 +1,17 @@
 import Cocoa
 import UserNotifications
 
-class MenuBarController {
+class MenuBarController: NSObject, NSMenuDelegate {
     let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private var languageConfigWindow: ConfigWindow?
     private var statusInfoStorage: [String: String] = [:] // 存储状态信息
     private var settingsObserver: NSObjectProtocol?
+    private var lastQuotaInfo: QuotaInfo?
+    private var lastQuotaFetchTime: Date?
+    private let quotaCacheInterval: TimeInterval = 60 // Cache quota info for 60 seconds
 
-    init() {
+    override init() {
+        super.init()
         Logger.info("MenuBarController initialized")
         if let button = statusItem.button {
             if let image = NSImage(named: "StatusIcon") {
@@ -25,10 +29,18 @@ class MenuBarController {
         if let observer = settingsObserver {
             NotificationCenter.default.removeObserver(observer)
         }
+        
+        // Remove notification observers
+        NotificationCenter.default.removeObserver(self, name: .userDidLogin, object: nil)
+        NotificationCenter.default.removeObserver(self, name: .userDidLogout, object: nil)
+        NotificationCenter.default.removeObserver(self, name: .quotaInfoUpdated, object: nil)
     }
 
     func constructMenu() {
         let menu = NSMenu()
+        
+        // Set delegate to get notified when menu opens
+        menu.delegate = self
         
         // Authentication menu 
         addAuthenticationMenuItems(to: menu)
@@ -816,9 +828,24 @@ class MenuBarController {
                 userInfoItem.isEnabled = false
                 menu.addItem(userInfoItem)
                 
-                let userTypeItem = NSMenuItem(title: "Account: \(user.userType.capitalized)", action: nil, keyEquivalent: "")
-                userTypeItem.isEnabled = false
-                menu.addItem(userTypeItem)
+                // let userTypeItem = NSMenuItem(title: "Account: \(user.userType.capitalized)", action: nil, keyEquivalent: "")
+                // userTypeItem.isEnabled = false
+                // menu.addItem(userTypeItem)
+                
+                // Add quota information if available
+                if let quotaInfo = lastQuotaInfo {
+                    let quotaItem = NSMenuItem(title: quotaInfo.quotaDescription, action: nil, keyEquivalent: "")
+                    quotaItem.isEnabled = false
+                    menu.addItem(quotaItem)
+                } else {
+                    // Show loading state and fetch quota automatically
+                    let quotaItem = NSMenuItem(title: "Loading quota info...", action: nil, keyEquivalent: "")
+                    quotaItem.isEnabled = false
+                    menu.addItem(quotaItem)
+                    
+                    // Automatically fetch quota information
+                    fetchQuotaInfoIfNeeded()
+                }
                 
                 menu.addItem(NSMenuItem.separator())
                 
@@ -842,7 +869,7 @@ class MenuBarController {
             statusItem.isEnabled = false
             menu.addItem(statusItem)
             
-            let helpItem = NSMenuItem(title: "Free: 200/month • Pro: Unlimited", action: nil, keyEquivalent: "")
+            let helpItem = NSMenuItem(title: "Free: 100/month • Pro: 500/month • Max: Unlimited", action: nil, keyEquivalent: "")
             helpItem.isEnabled = false
             menu.addItem(helpItem)
         }
@@ -855,6 +882,7 @@ class MenuBarController {
         // Remove existing observers first
         NotificationCenter.default.removeObserver(self, name: .userDidLogin, object: nil)
         NotificationCenter.default.removeObserver(self, name: .userDidLogout, object: nil)
+        NotificationCenter.default.removeObserver(self, name: .quotaInfoUpdated, object: nil)
         
         // Add observers for authentication state changes
         NotificationCenter.default.addObserver(
@@ -868,6 +896,14 @@ class MenuBarController {
             self,
             selector: #selector(userDidLogout),
             name: .userDidLogout,
+            object: nil
+        )
+        
+        // Add observer for quota updates
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(quotaInfoDidUpdate),
+            name: .quotaInfoUpdated,
             object: nil
         )
     }
@@ -911,13 +947,28 @@ class MenuBarController {
                     message: "Signed in as \(user.username)"
                 )
             }
+            
+            // Quota info will be automatically fetched when menu is opened
         }
     }
     
     @objc private func userDidLogout(_ notification: Notification) {
         DispatchQueue.main.async {
+            // Clear quota info when user logs out
+            self.lastQuotaInfo = nil
+            self.lastQuotaFetchTime = nil
             self.constructMenu()
         }
+    }
+    
+    @objc private func quotaInfoDidUpdate(_ notification: Notification) {
+        guard let quotaInfo = notification.object as? QuotaInfo else {
+            Logger.error("Invalid quota info in notification")
+            return
+        }
+        
+        Logger.info("MenuBarController received quota update notification: \(quotaInfo.quotaDescription)")
+        updateQuotaDisplay(quotaInfo)
     }
     
     private func openLoginPage() {
@@ -1015,5 +1066,118 @@ class MenuBarController {
         task.resume()
     }
     #endif
+    
+    // MARK: - Quota Management
+    
+    func updateQuotaDisplay(_ quotaInfo: QuotaInfo) {
+        Logger.info("MenuBarController updating quota display: \(quotaInfo.quotaDescription)")
+        lastQuotaInfo = quotaInfo
+        lastQuotaFetchTime = Date() // Update cache time since we got fresh data
+        
+        // Update menu to reflect new quota information
+        DispatchQueue.main.async {
+            Logger.info("MenuBarController reconstructing menu with updated quota: \(quotaInfo.quotaDescription)")
+            self.updateQuotaInCurrentMenu(quotaInfo)
+        }
+    }
+    
+    private func fetchQuotaInfoIfNeeded() {
+        // Only fetch if user is authenticated and we don't have recent quota info
+        guard SessionManager.shared.isAuthenticated else { return }
+        
+        // Check if we have cached quota info that's still fresh
+        if let lastFetchTime = lastQuotaFetchTime,
+           Date().timeIntervalSince(lastFetchTime) < quotaCacheInterval,
+           lastQuotaInfo != nil {
+            Logger.info("Using cached quota info (age: \(Int(Date().timeIntervalSince(lastFetchTime)))s)")
+            return
+        }
+        
+        Logger.info("Automatically fetching quota info for menu display")
+        
+        // Fetch quota information without consuming usage
+        TranslatorClient.shared.fetchQuotaInfo { [weak self] result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let quotaInfo):
+                    self?.lastQuotaInfo = quotaInfo
+                    self?.lastQuotaFetchTime = Date()
+                    self?.updateQuotaInCurrentMenu(quotaInfo) // Update current menu in place
+                    Logger.info("Quota info loaded automatically: \(quotaInfo.quotaDescription)")
+                case .failure(let error):
+                    Logger.error("Failed to fetch quota info automatically: \(error.localizedDescription)")
+                    // Even on failure, we might have quota info in the error
+                    if case .quotaExceeded(let quotaInfo) = error {
+                        self?.lastQuotaInfo = quotaInfo
+                        self?.lastQuotaFetchTime = Date()
+                        self?.updateQuotaInCurrentMenu(quotaInfo)
+                    }
+                }
+            }
+        }
+    }
+    
+    @objc private func refreshQuotaInfo() {
+        Logger.info("Refreshing quota info manually")
+        
+        // Fetch quota information without consuming usage
+        TranslatorClient.shared.fetchQuotaInfo { [weak self] result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let quotaInfo):
+                    self?.lastQuotaInfo = quotaInfo
+                    self?.constructMenu() // Refresh menu to show updated quota
+                    Logger.info("Quota info refreshed: \(quotaInfo.quotaDescription)")
+                case .failure(let error):
+                    Logger.error("Failed to refresh quota info: \(error.localizedDescription)")
+                    // Even on failure, we might have quota info in the error
+                    if case .quotaExceeded(let quotaInfo) = error {
+                        self?.lastQuotaInfo = quotaInfo
+                        self?.constructMenu()
+                    }
+                }
+            }
+        }
+    }
+    
+    private func updateQuotaInCurrentMenu(_ quotaInfo: QuotaInfo) {
+        guard let menu = statusItem.menu else {
+            Logger.info("No menu found, constructing new menu")
+            constructMenu()
+            return
+        }
+        
+        // Find and update quota-related menu items
+        for (index, item) in menu.items.enumerated() {
+            if item.title.contains("Loading quota info") ||
+               item.title.contains("Free -") ||
+               item.title.contains("Pro -") ||
+               item.title.contains("Max -") {
+                
+                Logger.info("Found quota item at index \(index), updating to: \(quotaInfo.quotaDescription)")
+                item.title = quotaInfo.quotaDescription
+                item.action = nil // Make it non-clickable
+                item.isEnabled = false
+                return
+            }
+        }
+        
+        // If no quota item found, reconstruct the menu
+        Logger.info("No quota item found in current menu, reconstructing")
+        constructMenu()
+    }
+    
+    // MARK: - NSMenuDelegate
+    
+    func menuWillOpen(_ menu: NSMenu) {
+        Logger.info("Menu will open - checking for fresh quota information")
+        
+        // Force refresh quota info when menu opens if cache is stale
+        if let lastFetchTime = lastQuotaFetchTime,
+           Date().timeIntervalSince(lastFetchTime) > quotaCacheInterval {
+            Logger.info("Quota cache is stale, refreshing before menu opens")
+            fetchQuotaInfoIfNeeded()
+        }
+    }
 
 } 
