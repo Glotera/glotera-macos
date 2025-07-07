@@ -1025,8 +1025,9 @@ extension TranslatorClient: URLSessionDataDelegate {
             }
             
             // Create quota endpoint URL by extracting base URL from apiEndpoint
-            let baseURL = self.environment.apiEndpoint.replacingOccurrences(of: "/api/translate", with: "")
+            let baseURL = EnvironmentManager.shared.baseURL
             let quotaURL = "\(baseURL)/api/quota"
+            Logger.info("Quota URL: \(quotaURL)")
             guard let url = URL(string: quotaURL) else {
                 Logger.error("Invalid quota URL: \(quotaURL)")
                 completion(.failure(.networkError("Invalid quota URL")))
