@@ -73,13 +73,13 @@ class SessionManager {
     // Keychain service identifier
     private let keychainService = "ai.glotera.desktop"
     private let tokenKey = "auth_token"
+    private let userIdKey = "user_id"
     
-    // UserDefaults keys for user info
+    // UserDefaults keys for additional user info
     private let userEmailKey = "user_email"
     private let usernameKey = "username"
     private let userTypeKey = "user_type"
     private let accountTypeKey = "account_type"
-    private let userIdKey = "user_id"  // Store user ID in UserDefaults instead of Keychain
     
     // Current authentication state
     private var currentUser: User?
@@ -130,7 +130,7 @@ class SessionManager {
         }
         
         // Try to load user from storage
-        guard let userId = UserDefaults.standard.string(forKey: userIdKey),
+        guard let userId = getStoredUserId(),
               let email = UserDefaults.standard.string(forKey: userEmailKey),
               let username = UserDefaults.standard.string(forKey: usernameKey) else {
             return nil
@@ -195,8 +195,8 @@ class SessionManager {
         // Store token in Keychain
         storeTokenInKeychain(token)
         
-        // Store user info in UserDefaults
-        UserDefaults.standard.set(user.userId, forKey: userIdKey)
+        // Store user info in UserDefaults and Keychain
+        storeUserIdInKeychain(user.userId)
         UserDefaults.standard.set(user.email, forKey: userEmailKey)
         UserDefaults.standard.set(user.username, forKey: usernameKey)
         UserDefaults.standard.set(user.userType, forKey: userTypeKey)
@@ -227,9 +227,9 @@ class SessionManager {
         
         // Remove from Keychain
         removeTokenFromKeychain()
+        removeUserIdFromKeychain()
         
         // Remove from UserDefaults
-        UserDefaults.standard.removeObject(forKey: userIdKey)
         UserDefaults.standard.removeObject(forKey: userEmailKey)
         UserDefaults.standard.removeObject(forKey: usernameKey)
         UserDefaults.standard.removeObject(forKey: userTypeKey)
@@ -470,6 +470,62 @@ class SessionManager {
         
         if status != errSecSuccess && status != errSecItemNotFound {
             Logger.error("SessionManager: Failed to remove token from Keychain: \(status)")
+        }
+    }
+    
+    private func storeUserIdInKeychain(_ userId: String) {
+        let userIdData = Data(userId.utf8)
+        
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: userIdKey,
+            kSecValueData as String: userIdData
+        ]
+        
+        // Delete existing item first
+        SecItemDelete(query as CFDictionary)
+        
+        // Add new item
+        let status = SecItemAdd(query as CFDictionary, nil)
+        
+        if status != errSecSuccess {
+            Logger.error("SessionManager: Failed to store user ID in Keychain: \(status)")
+        }
+    }
+    
+    private func getStoredUserId() -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: userIdKey,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        
+        if status == errSecSuccess,
+           let userIdData = result as? Data,
+           let userId = String(data: userIdData, encoding: .utf8) {
+            return userId
+        }
+        
+        return nil
+    }
+    
+    private func removeUserIdFromKeychain() {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: userIdKey
+        ]
+        
+        let status = SecItemDelete(query as CFDictionary)
+        
+        if status != errSecSuccess && status != errSecItemNotFound {
+            Logger.error("SessionManager: Failed to remove user ID from Keychain: \(status)")
         }
     }
 }
