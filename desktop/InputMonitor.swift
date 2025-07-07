@@ -217,8 +217,28 @@ class InputMonitor {
                 }
                 return // AdsPower 逻辑结束
             }
+            
+            // 检查是否为Apple Mail应用，如果是，则执行智能检测逻辑
+            if AXController.shared.isAppleMailApp() {
+                Logger.info("Double space in Apple Mail, using smart clipboard-based detection.")
+                DispatchQueue.global(qos: .userInitiated).async {
+                    if let result = AXController.shared.detectTriggerViaClipboardForMail() {
+                        // 成功检测到触发词，启动翻译
+                        DispatchQueue.main.async {
+                            self.startTranslation(text: result.text, lang: result.lang)
+                        }
+                    } else {
+                        // 未检测到触发词（误触），发送右箭头键恢复
+                        Logger.info("Apple Mail misfire detected. No trigger in clipboard. Recovering.")
+                        DispatchQueue.main.async {
+                             AXController.shared.postRightArrowKey()
+                        }
+                    }
+                }
+                return // Apple Mail 逻辑结束
+            }
 
-            // --- 以下为非 AdsPower 应用的常规流程 ---
+            // --- 以下为非 AdsPower/Apple Mail 应用的常规流程 ---
             Logger.info("Double space in standard app, checking for trigger characters.")
             
             // 检查：仅当文本中包含触发字符时才继续

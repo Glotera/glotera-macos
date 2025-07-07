@@ -1405,6 +1405,13 @@ class AXController {
             return
         }
         
+        // 新增：针对Apple Mail的特殊回填逻辑
+        if isAppleMailApp() {
+            Logger.info("Apple Mail detected. Using dedicated clipboard paste for replacement.")
+            replaceAppleMailInput(with: text, completion: completion)
+            return
+        }
+        
         // 优先使用手动触发时保存的焦点元素，如果不存在，再尝试获取当前焦点
         guard let focused = self.lastManuallyFocusedElement ?? getFocusedElement() else {
             Logger.warn("No focused element to replace")
@@ -2963,9 +2970,184 @@ class AXController {
         return false
     }
 
+    // 检查当前是否为Apple Mail应用
+    func isAppleMailApp() -> Bool {
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+              let bundleId = frontmostApp.bundleIdentifier else {
+            return false
+        }
+        
+        // Apple Mail的Bundle ID列表（不区分大小写）
+        let appleMailBundleIds = [
+            "com.apple.mail"
+        ]
+        
+        for id in appleMailBundleIds {
+            if bundleId.caseInsensitiveCompare(id) == .orderedSame {
+                Logger.info("Detected Apple Mail app: \(frontmostApp.localizedName ?? "Unknown") (\(bundleId))")
+                return true
+            }
+        }
+        
+        return false
+    }
+
     private func findTrigger(in content: String) -> (text: String, lang: String)? {
         Logger.info("AdsPower: Finding trigger in content from clipboard.")
         return processContentForTrigger(content)
+    }
+    
+    // 专为Apple Mail设计的智能剪贴板检测（保留邮件历史）
+    func detectTriggerViaClipboardForMail() -> (text: String, lang: String)? {
+        Logger.info("Apple Mail: Starting smart clipboard-based trigger detection.")
+
+        let pasteboard = NSPasteboard.general
+        let originalContent = saveOriginalPasteboardContent()
+        
+        // Clear clipboard to ensure we detect the new content
+        pasteboard.clearContents()
+        
+        // 使用智能选择策略：选择当前段落而非全部内容
+        postSmartSelectionForMail()
+        
+        // Add a delay for the selection to register
+        Thread.sleep(forTimeInterval: 0.2)
+        
+        var copiedText: String?
+        
+        // Try to copy twice to be robust
+        for i in 1...2 {
+            Logger.info("Apple Mail: Attempting smart copy, trial #\(i)")
+            
+            // Send Cmd+C (Copy) globally
+            postCopy()
+            
+            // Add a longer delay for the copy action to complete
+            Thread.sleep(forTimeInterval: 0.3)
+
+            // Check clipboard
+            copiedText = pasteboard.string(forType: .string)
+            
+            if let text = copiedText, !text.isEmpty {
+                Logger.info("Apple Mail: Found content in clipboard: '\(text)'")
+                break
+            } else {
+                Logger.warn("Apple Mail: Clipboard is empty after attempt #\(i).")
+            }
+        }
+        
+        // Restore original clipboard content
+        restorePasteboardContent(originalContent)
+        
+        guard let content = copiedText, !content.isEmpty else {
+            Logger.error("Apple Mail: No content found in clipboard after all copy attempts.")
+            return nil
+        }
+        
+        // 智能解析邮件内容，只处理用户正在输入的部分
+        let cleanContent = extractUserInputFromMailContent(content)
+        Logger.info("Apple Mail: Extracted user input: '\(cleanContent)'")
+        
+        return findTrigger(in: cleanContent)
+    }
+    
+    // 为Apple Mail发送智能选择命令（选择当前段落而非全部内容）
+    private func postSmartSelectionForMail() {
+        Logger.info("Apple Mail: Using smart selection - selecting current paragraph")
+        
+        let source = CGEventSource(stateID: .hidSystemState)
+        
+        // 方案1：尝试选择当前行到行首 (Shift+Cmd+Left)
+        let leftDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_LeftArrow), keyDown: true)
+        leftDown?.flags = [.maskShift, .maskCommand]
+        leftDown?.post(tap: .cghidEventTap)
+        
+        let leftUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_LeftArrow), keyDown: false)
+        leftUp?.flags = [.maskShift, .maskCommand]
+        leftUp?.post(tap: .cghidEventTap)
+        
+        Thread.sleep(forTimeInterval: 0.1)
+        
+        // 如果上面选择的内容太少，则尝试选择当前段落 (Shift+Cmd+Up)
+        let upDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_UpArrow), keyDown: true)
+        upDown?.flags = [.maskShift, .maskCommand]
+        upDown?.post(tap: .cghidEventTap)
+        
+        let upUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_UpArrow), keyDown: false)
+        upUp?.flags = [.maskShift, .maskCommand]
+        upUp?.post(tap: .cghidEventTap)
+    }
+    
+    // 从邮件内容中提取用户正在输入的部分
+    private func extractUserInputFromMailContent(_ content: String) -> String {
+        Logger.info("Apple Mail: Extracting user input from mail content")
+        
+        let lines = content.components(separatedBy: .newlines)
+        var userLines: [String] = []
+        
+        for line in lines {
+            let trimmedLine = line.trimmingCharacters(in: .whitespaces)
+            
+            // 跳过空行
+            if trimmedLine.isEmpty {
+                continue
+            }
+            
+            // 检查是否是邮件历史标记的开始
+            if isMailHistoryMarker(trimmedLine) {
+                Logger.info("Apple Mail: Found mail history marker, stopping extraction")
+                break
+            }
+            
+            userLines.append(line)
+        }
+        
+        let userContent = userLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        Logger.info("Apple Mail: Extracted user content: '\(userContent)'")
+        
+        return userContent
+    }
+    
+    // 检查是否是邮件历史标记
+    private func isMailHistoryMarker(_ line: String) -> Bool {
+        let trimmedLine = line.trimmingCharacters(in: .whitespaces)
+        
+        // 常见的邮件历史标记
+        let historyMarkers = [
+            "On ", // "On [date], [person] wrote:"
+            "From:", // "From: [email]"
+            "To:", // "To: [email]"  
+            "Subject:", // "Subject: [subject]"
+            "Date:", // "Date: [date]"
+            "Sent:", // "Sent: [date]"
+            "-----Original Message-----", // Outlook style
+            "Begin forwarded message:", // Apple Mail forwarding
+            "---------- Forwarded message ----------", // Gmail style
+            "> ", // Quoted text
+            ">>", // Multiple level quotes
+        ]
+        
+        for marker in historyMarkers {
+            if trimmedLine.hasPrefix(marker) {
+                return true
+            }
+        }
+        
+        // 检查是否是邮件签名分隔符
+        if trimmedLine == "--" || trimmedLine.hasPrefix("--") {
+            return true
+        }
+        
+        // 检查是否是时间戳格式的行 (如 "2024-01-01 10:00:00")
+        let dateRegex = try? NSRegularExpression(pattern: "\\d{4}-\\d{2}-\\d{2}|\\d{1,2}/\\d{1,2}/\\d{4}", options: [])
+        if let regex = dateRegex {
+            let matches = regex.matches(in: trimmedLine, options: [], range: NSRange(location: 0, length: trimmedLine.count))
+            if !matches.isEmpty {
+                return true
+            }
+        }
+        
+        return false
     }
 
     // 通过剪贴板检测触发器（专为AdsPower设计）
@@ -3152,6 +3334,41 @@ class AXController {
             self.restorePasteboardContent(originalContent)
             Logger.info("AdsPower Replace: Clipboard restored.")
             completion?()
+        }
+    }
+    
+    // 新增：专为Apple Mail设计的回填方法
+    private func replaceAppleMailInput(with text: String, completion: (() -> Void)?) {
+        // Apple Mail的回填需要重新选择文本，然后粘贴
+        
+        // 1. 保存当前剪贴板
+        let originalContent = saveOriginalPasteboardContent()
+
+        // 2. 将翻译结果放入剪贴板
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        guard pasteboard.setString(text, forType: .string) else {
+            Logger.error("Apple Mail Replace: Failed to set clipboard with translation result.")
+            restorePasteboardContent(originalContent)
+            completion?()
+            return
+        }
+
+        // 3. 重新选择文本（使用与检测时相同的智能选择策略）
+        Logger.info("Apple Mail Replace: Re-selecting text for replacement")
+        postSmartSelectionForMail()
+        
+        // 4. 等待选择完成后再粘贴
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            Logger.info("Apple Mail Replace: Pasting translated text")
+            self.simulatePaste()
+            
+            // 5. 延迟恢复剪贴板并调用完成回调
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                self.restorePasteboardContent(originalContent)
+                Logger.info("Apple Mail Replace: Clipboard restored.")
+                completion?()
+            }
         }
     }
 } 
