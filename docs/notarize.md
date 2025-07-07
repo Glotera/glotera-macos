@@ -92,10 +92,10 @@ xcrun notarytool submit glotera-0.2.0.zip \
 ## Step 10: Check Notarization Status
 ```bash
 # View history
-xcrun notarytool history --keychain-profile "glotera-profile"
+xcrun notarytool history --keychain-profile "glotera-profile2"
 
 # Check specific submission (if needed)
-xcrun notarytool log SUBMISSION-ID --keychain-profile "glotera-profile"
+xcrun notarytool log 38658fe3-5761-4cac-97a7-fef400849d68 --keychain-profile "glotera-profile2"
 ```
 
 ## Step 11: Staple Notarization (After Success)
