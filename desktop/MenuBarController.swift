@@ -60,6 +60,9 @@ class MenuBarController: NSObject, NSMenuDelegate {
         let userGuideItem = NSMenuItem(title: "User Guide", action: #selector(openUserGuide), keyEquivalent: "")
         userGuideItem.target = self
         menu.addItem(userGuideItem)
+        let releaseNotesItem = NSMenuItem(title: "Release Notes", action: #selector(openReleaseNotes), keyEquivalent: "")
+        releaseNotesItem.target = self
+        menu.addItem(releaseNotesItem)
         
 
         menu.addItem(NSMenuItem.separator())
@@ -221,6 +224,22 @@ class MenuBarController: NSObject, NSMenuDelegate {
         }
         
         Logger.info("Opening user guide page: \(userGuideURL)")
+        NSWorkspace.shared.open(url)
+    }
+
+    @objc func openReleaseNotes() {
+        Logger.info("Release Notes menu clicked - opening website release notes")
+        
+        // Get the user guide URL from environment manager
+        let environmentManager = EnvironmentManager.shared
+        let releaseNotesURL = "\(environmentManager.baseURL)/release-notes"
+        
+        guard let url = URL(string: releaseNotesURL) else {
+            Logger.error("Failed to create release notes URL: \(releaseNotesURL)")
+            return
+        }
+        
+        Logger.info("Opening release notes page: \(releaseNotesURL)")
         NSWorkspace.shared.open(url)
     }
     
