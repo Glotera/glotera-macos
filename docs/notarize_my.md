@@ -61,7 +61,178 @@ xcrun notarytool submit glotera-0.1.4.zip \
 ## 查看APP公证状态
 ```bash
 xcrun notarytool history --keychain-profile "glotera-profile"
-xcrun notarytool log adf31c27-29ce-440e-b772-1d2edc45bc56 --keychain-profile "glotera-profile"
+xcrun notarytool log 38658fe3-5761-4cac-97a7-fef400849d68 --keychain-profile "glotera-profile"
+
+ bryanzh@bma release % xcrun notarytool log eac2b237-7acb-4eae-90c7-4cdc6f7ddd95 --keychain-profile "glotera-profile"
+{
+  "logFormatVersion": 1,
+  "jobId": "eac2b237-7acb-4eae-90c7-4cdc6f7ddd95",
+  "status": "Accepted",
+  "statusSummary": "Ready for distribution",
+  "statusCode": 0,
+  "archiveFilename": "Glotera-0.2.1.zip",
+  "uploadDate": "2025-07-11T11:50:53.372Z",
+  "sha256": "1e18854be2359f6da04339cc2d877c97c0716bb8e08f52f14c9042f833dbd56b",
+  "ticketContents": [
+    {
+      "path": "Glotera-0.2.1.zip/Glotera.app/Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app",
+      "digestAlgorithm": "SHA-256",
+      "cdhash": "f378fff9e1148eadfbb64f871395b29116810df1",
+      "arch": "x86_64"
+    },
+    {
+      "path": "Glotera-0.2.1.zip/Glotera.app/Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app",
+      "digestAlgorithm": "SHA-256",
+      "cdhash": "d216a058872695d9a1b23e2687a79325f2e083c6",
+      "arch": "arm64"
+    },
+    {
+      "path": "Glotera-0.2.1.zip/Glotera.app/Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app/Contents/MacOS/Updater",
+      "digestAlgorithm": "SHA-256",
+      "cdhash": "f378fff9e1148eadfbb64f871395b29116810df1",
+      "arch": "x86_64"
+    },
+    {
+      "path": "Glotera-0.2.1.zip/Glotera.app/Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app/Contents/MacOS/Updater",
+      "digestAlgorithm": "SHA-256",
+      "cdhash": "d216a058872695d9a1b23e2687a79325f2e083c6",
+      "arch": "arm64"
+    },
+    {
+      "path": "Glotera-0.2.1.zip/Glotera.app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Installer.xpc",
+      "digestAlgorithm": "SHA-256",
+      "cdhash": "1d6f1f0c44c9423fb2772b1a197939101fd54590",
+      "arch": "x86_64"
+    },
+    {
+      "path": "Glotera-0.2.1.zip/Glotera.app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Installer.xpc",
+      "digestAlgorithm": "SHA-256",
+      "cdhash": "e40b63ac584986f355670aee8a971100766f2506",
+      "arch": "arm64"
+    },
+    {
+      "path": "Glotera-0.2.1.zip/Glotera.app/Contents/Frameworks/Sparkle.framework/Versions/Current",
+      "digestAlgorithm": "SHA-256",
+      "cdhash": "23d325be6998789efb713ea6e60995328a131149",
+      "arch": "x86_64"
+    },
+    {
+      "path": "Glotera-0.2.1.zip/Glotera.app/Contents/Frameworks/Sparkle.framework/Versions/Current",
+      "digestAlgorithm": "SHA-256",
+      "cdhash": "1c542021d2e9b4609aab9ae5ff28ee22499d22d6",
+      "arch": "arm64"
+    },
+    {
+      "path": "Glotera-0.2.1.zip/Glotera.app/Contents/Frameworks/Sparkle.framework/Versions/Current/Updater.app",
+      "digestAlgorithm": "SHA-256",
+      "cdhash": "f378fff9e1148eadfbb64f871395b29116810df1",
+      "arch": "x86_64"
+    },
+    {
+      "path": "Glotera-0.2.1.zip/Glotera.app/Contents/Frameworks/Sparkle.framework/Versions/Current/Updater.app",
+      "digestAlgorithm": "SHA-256",
+      "cdhash": "d216a058872695d9a1b23e2687a79325f2e083c6",
+      "arch": "arm64"
+    },
+    {
+      "path": "Glotera-0.2.1.zip/Glotera.app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Downloader.xpc",
+      "digestAlgorithm": "SHA-256",
+      "cdhash": "36b2921af47036611d930c8b549351e3cc3b46e2",
+      "arch": "x86_64"
+    },
+    {
+      "path": "Glotera-0.2.1.zip/Glotera.app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Downloader.xpc",
+      "digestAlgorithm": "SHA-256",
+      "cdhash": "afedf2133ab4e78890a3992aba95e4224877f28a",
+      "arch": "arm64"
+    },
+    {
+      "path": "Glotera-0.2.1.zip/Glotera.app",
+      "digestAlgorithm": "SHA-256",
+      "cdhash": "25c4a64bb9acfc77b51666054ebaa8dcbad8f35c",
+      "arch": "x86_64"
+    },
+    {
+      "path": "Glotera-0.2.1.zip/Glotera.app",
+      "digestAlgorithm": "SHA-256",
+      "cdhash": "25c3bce8b861978200f93d630bff2a020d6f2242",
+      "arch": "arm64"
+    },
+    {
+      "path": "Glotera-0.2.1.zip/Glotera.app/Contents/Frameworks/Sparkle.framework/Versions/Current/Autoupdate",
+      "digestAlgorithm": "SHA-256",
+      "cdhash": "5ee34c38058e842ccefd5289a4bbc9e1d9356447",
+      "arch": "x86_64"
+    },
+    {
+      "path": "Glotera-0.2.1.zip/Glotera.app/Contents/Frameworks/Sparkle.framework/Versions/Current/Autoupdate",
+      "digestAlgorithm": "SHA-256",
+      "cdhash": "b40764493457edb064f9ca7c1445a06dfc919f5a",
+      "arch": "arm64"
+    },
+    {
+      "path": "Glotera-0.2.1.zip/Glotera.app/Contents/MacOS/Glotera",
+      "digestAlgorithm": "SHA-256",
+      "cdhash": "25c4a64bb9acfc77b51666054ebaa8dcbad8f35c",
+      "arch": "x86_64"
+    },
+    {
+      "path": "Glotera-0.2.1.zip/Glotera.app/Contents/MacOS/Glotera",
+      "digestAlgorithm": "SHA-256",
+      "cdhash": "25c3bce8b861978200f93d630bff2a020d6f2242",
+      "arch": "arm64"
+    },
+    {
+      "path": "Glotera-0.2.1.zip/Glotera.app/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate",
+      "digestAlgorithm": "SHA-256",
+      "cdhash": "5ee34c38058e842ccefd5289a4bbc9e1d9356447",
+      "arch": "x86_64"
+    },
+    {
+      "path": "Glotera-0.2.1.zip/Glotera.app/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate",
+      "digestAlgorithm": "SHA-256",
+      "cdhash": "b40764493457edb064f9ca7c1445a06dfc919f5a",
+      "arch": "arm64"
+    },
+    {
+      "path": "Glotera-0.2.1.zip/Glotera.app/Contents/Frameworks/Sparkle.framework/Versions/B/Sparkle",
+      "digestAlgorithm": "SHA-256",
+      "cdhash": "23d325be6998789efb713ea6e60995328a131149",
+      "arch": "x86_64"
+    },
+    {
+      "path": "Glotera-0.2.1.zip/Glotera.app/Contents/Frameworks/Sparkle.framework/Versions/B/Sparkle",
+      "digestAlgorithm": "SHA-256",
+      "cdhash": "1c542021d2e9b4609aab9ae5ff28ee22499d22d6",
+      "arch": "arm64"
+    },
+    {
+      "path": "Glotera-0.2.1.zip/Glotera.app/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Downloader.xpc/Contents/MacOS/Downloader",
+      "digestAlgorithm": "SHA-256",
+      "cdhash": "36b2921af47036611d930c8b549351e3cc3b46e2",
+      "arch": "x86_64"
+    },
+    {
+      "path": "Glotera-0.2.1.zip/Glotera.app/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Downloader.xpc/Contents/MacOS/Downloader",
+      "digestAlgorithm": "SHA-256",
+      "cdhash": "afedf2133ab4e78890a3992aba95e4224877f28a",
+      "arch": "arm64"
+    },
+    {
+      "path": "Glotera-0.2.1.zip/Glotera.app/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Installer.xpc/Contents/MacOS/Installer",
+      "digestAlgorithm": "SHA-256",
+      "cdhash": "1d6f1f0c44c9423fb2772b1a197939101fd54590",
+      "arch": "x86_64"
+    },
+    {
+      "path": "Glotera-0.2.1.zip/Glotera.app/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Installer.xpc/Contents/MacOS/Installer",
+      "digestAlgorithm": "SHA-256",
+      "cdhash": "e40b63ac584986f355670aee8a971100766f2506",
+      "arch": "arm64"
+    }
+  ],
+  "issues": null
+}
 ```
 
 ## 成功后注入公证信息
@@ -73,7 +244,10 @@ xcrun stapler staple /path/to/Glotera.app
 ```bash
 -- 如果是app
 spctl --assess --type exec -v /path/to/Glotera.app
+
 -- 正常示例如下：
+Glotera-0.2.1/Glotera.app: accepted
+source=Notarized Developer ID
 
 -- 报错示例如下：
 Glotera-0.1.4/Glotera.app: rejected
