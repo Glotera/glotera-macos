@@ -5,11 +5,13 @@ import Cocoa
 enum ConfigCategory: String, CaseIterable {
     case languageTriggers = "Language Triggers"
     case keyboardSettings = "Keyboard Settings"
+    case about = "About Glotera"
     
     var systemImage: String {
         switch self {
         case .languageTriggers: return "globe"
         case .keyboardSettings: return "keyboard"
+        case .about: return "info.circle"
         }
     }
 }
@@ -154,6 +156,8 @@ struct LanguageConfigView: View {
                         LanguageTriggersView(viewModel: viewModel)
                     case .keyboardSettings:
                         KeyboardSettingsView(viewModel: viewModel)
+                    case .about:
+                        AboutView()
                     }
                 }
                 
@@ -183,6 +187,10 @@ struct LanguageConfigView: View {
                     
                     if selectedCategory == .languageTriggers {
                         Text("\(viewModel.filteredConfigs.count) languages")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    } else if selectedCategory == .about {
+                        Text("System Information")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -614,4 +622,134 @@ class LanguageConfigViewModel: ObservableObject {
         
         return true
     }
-} 
+}
+
+// About View
+struct AboutView: View {
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                // App Information
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Application Information")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                    
+                    VStack(alignment: .leading, spacing: 12) {
+                        InfoRow(label: "App Name", value: getAppName())
+                        InfoRow(label: "Version", value: getAppVersion())
+                        InfoRow(label: "Build Number", value: getBuildNumber()) 
+                    }
+                    .padding()
+                    .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
+                    .cornerRadius(8)
+                }
+                
+                // System Information
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("System Information")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                    
+                    VStack(alignment: .leading, spacing: 12) {
+                        InfoRow(label: "macOS Version", value: getSystemVersion())
+                        InfoRow(label: "System Architecture", value: getSystemArchitecture())
+                        InfoRow(label: "Process ID", value: String(ProcessInfo.processInfo.processIdentifier))
+                        InfoRow(label: "Uptime", value: getSystemUptime())
+                    }
+                    .padding()
+                    .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
+                    .cornerRadius(8)
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+    }
+    
+    // Helper functions to get system information
+    private func getAppName() -> String {
+        return Bundle.main.infoDictionary?["CFBundleName"] as? String ?? "Unknown"
+    }
+    
+    private func getAppVersion() -> String {
+        return Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown"
+    }
+    
+    private func getBuildNumber() -> String {
+        return Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "Unknown"
+    }
+    
+    private func getBundleIdentifier() -> String {
+        return Bundle.main.bundleIdentifier ?? "Unknown"
+    }
+    
+    private func getSystemVersion() -> String {
+        let version = ProcessInfo.processInfo.operatingSystemVersion
+        return "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)"
+    }
+    
+    private func getSystemArchitecture() -> String {
+        #if arch(x86_64)
+        return "x86_64 (Intel)"
+        #elseif arch(arm64)
+        return "arm64 (Apple Silicon)"
+        #else
+        return "Unknown"
+        #endif
+    }
+    
+    private func getSystemUptime() -> String {
+        let uptime = ProcessInfo.processInfo.systemUptime
+        let hours = Int(uptime) / 3600
+        let minutes = Int(uptime) % 3600 / 60
+        return "\(hours)h \(minutes)m"
+    }
+    
+    private func getLaunchTime() -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .medium
+        return formatter.string(from: Date())
+    }
+    
+    private func getMemoryUsage() -> String {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size)/4
+        
+        let kerr: kern_return_t = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
+                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
+            }
+        }
+        
+        if kerr == KERN_SUCCESS {
+            let usedMemoryMB = Double(info.resident_size) / 1024 / 1024
+            return String(format: "%.1f MB", usedMemoryMB)
+        } else {
+            return "Unknown"
+        }
+    }
+}
+
+// Info Row Component
+struct InfoRow: View {
+    let label: String
+    let value: String
+    
+    var body: some View {
+        HStack {
+            Text(label)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(.primary)
+                .frame(width: 120, alignment: .leading)
+            
+            Text(value)
+                .font(.system(size: 13))
+                .foregroundColor(.secondary)
+                .textSelection(.enabled)
+            
+            Spacer()
+        }
+    }
+}
