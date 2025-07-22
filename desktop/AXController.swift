@@ -351,12 +351,7 @@ class AXController {
                 // 通过以上检查的 AXTextArea 才认为是可编辑的
                 Logger.info("AXTextArea passed all checks, considered editable")
                 return true
-            }
-            
-            // 如果是明确的可编辑控件
-            if editableRoles.prefix(5).contains(roleString) {
-                return true
-            }
+            } 
             
             // 对于微信，特殊处理
             if isWeChat {
@@ -404,6 +399,15 @@ class AXController {
             
             // 对于StaticText，需要进一步检查是否可编辑
             if roleString == "AXStaticText" {
+                Logger.info("Checking AXStaticText element for editability")
+                
+                // 特殊处理：如果是WeChat历史消息，强制视为不可编辑
+                if SelectEventManager.isWeChatHistoryMessage(element) {
+                    Logger.info("WeChat history message detected, treating as non-editable")
+                    return false
+                }
+                
+                
                 // 检查是否有编辑相关的属性
                 var isEditable: CFTypeRef?
                 let editableResult = AXUIElementCopyAttributeValue(element, "AXEnabled" as CFString, &isEditable)
@@ -415,11 +419,18 @@ class AXController {
                 var canEdit: CFTypeRef?
                 let canEditResult = AXUIElementCopyAttributeValue(element, "AXCanEdit" as CFString, &canEdit)
                 if canEditResult == .success, let canEditBool = canEdit as? Bool {
+                    Logger.info("AXStaticText AXCanEdit result: \(canEditBool)")
                     return canEditBool
                 }
                 
                 // StaticText通常不可编辑，除非特别标记
+                Logger.info("AXStaticText defaulting to non-editable")
                 return false
+            }
+
+             // 如果是明确的可编辑控件
+            if editableRoles.prefix(5).contains(roleString) {
+                return true
             }
         }
         
