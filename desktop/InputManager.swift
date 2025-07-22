@@ -1,0 +1,467 @@
+//
+//  InputManager.swift
+//  Manages input-related operations, such as obtaining the focus element, simulating keyboard events, etc.
+//  Created by Claude Code on 2025-07-20.
+//  Copyright © 2025 Glotera AI. All rights reserved.
+//
+
+import Cocoa 
+import Carbon
+import CoreFoundation
+import ApplicationServices
+
+class InputManager {
+    static let shared = InputManager()
+    
+    // 防止死循环的标志
+    private var isSendingEnterKey = false
+    private var enterKeySentTime: Date?
+
+    private init() {} 
+    
+    // 带重试机制的焦点元素获取
+    func getFocusedElementWithRetry(maxRetries: Int) -> AXUIElement? {
+        for attempt in 1...maxRetries {
+            if let element = getFocusedElementInternal() {
+                Logger.debug("Successfully got focused element on attempt \(attempt)")
+                return element
+            }
+            
+            if attempt < maxRetries {
+                Logger.debug("Failed to get focused element on attempt \(attempt), retrying...")
+                Thread.sleep(forTimeInterval: 0.1 * Double(attempt)) // 递增延迟
+            }
+        }
+        
+        Logger.warn("Failed to get focused element after \(maxRetries) attempts")
+        return nil
+    }
+    
+    // 内部焦点元素获取实现
+    private func getFocusedElementInternal() -> AXUIElement? {
+        let sysWide = AXUIElementCreateSystemWide()
+        
+        // 1. 获取焦点应用
+        var focusedApp: CFTypeRef?
+        let appResult = AXUIElementCopyAttributeValue(sysWide, kAXFocusedApplicationAttribute as CFString, &focusedApp)
+        
+        if appResult != .success {
+            Logger.debug("Failed to get focused application: \(appResult)")
+            return nil
+        }
+        
+        guard let app = focusedApp else {
+            Logger.debug("Failed to get focused app")
+            return nil
+        }
+        let appElement = app as! AXUIElement
+        
+        // 2. 获取应用信息用于调试
+        var appName: CFTypeRef?
+        if AXUIElementCopyAttributeValue(appElement, kAXTitleAttribute as CFString, &appName) == .success,
+           let name = appName as? String {
+            Logger.debug("Focused app: \(name)")
+        }
+        
+        // 3. 获取焦点元素
+        var focusedElem: CFTypeRef?
+        let elemResult = AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedElem)
+        
+        if elemResult != .success {
+            Logger.debug("Failed to get focused UI element, try another method: \(elemResult)")
+            //如果无法从system-wide元素->焦点应用->焦点元素这个路径获取成功，直接尝试 system-wide->焦点元素
+            let elemResult = AXUIElementCopyAttributeValue(sysWide, kAXFocusedUIElementAttribute as CFString, &focusedElem)
+            if elemResult != .success {
+                Logger.debug("Failed to get focused UI element again")
+                return nil
+            }
+        }
+        
+        guard let elem = focusedElem else {
+            Logger.debug("Failed to get focused element")
+            return nil
+        }
+        let element = elem as! AXUIElement
+        
+        // 4. 验证元素有效性
+        if !isElementValid(element) {
+            Logger.debug("Focused element is not valid")
+            return nil
+        }
+        
+        // 5. 记录元素信息用于调试
+        logElementInfo(element)
+        
+        return element
+    }
+    
+    // 验证元素是否有效
+    private func isElementValid(_ element: AXUIElement) -> Bool {
+        var pid: pid_t = 0
+        let result = AXUIElementGetPid(element, &pid)
+        return result == .success && pid > 0
+    }
+    
+    // 记录元素信息用于调试
+    private func logElementInfo(_ element: AXUIElement) {
+        var role: CFTypeRef?
+        var title: CFTypeRef?
+        var description: CFTypeRef?
+        var value: CFTypeRef?
+        var enabled: CFTypeRef?
+        var canEdit: CFTypeRef?
+        
+        let roleResult = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
+        let titleResult = AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &title)
+        let descResult = AXUIElementCopyAttributeValue(element, kAXDescriptionAttribute as CFString, &description)
+        let valueResult = AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &value)
+        let enabledResult = AXUIElementCopyAttributeValue(element, kAXEnabledAttribute as CFString, &enabled)
+        let canEditResult = AXUIElementCopyAttributeValue(element, "AXCanEdit" as CFString, &canEdit)
+        
+        var info = "Focused element: "
+        if roleResult == .success, let roleStr = role as? String {
+            info += "role=\(roleStr) "
+        }
+        if titleResult == .success, let titleStr = title as? String {
+            info += "title='\(titleStr)' "
+        }
+        if descResult == .success, let descStr = description as? String {
+            info += "description='\(descStr)' "
+        }
+        if valueResult == .success, let valueStr = value as? String {
+            info += "value='\(valueStr.prefix(50))' "
+        }
+        if enabledResult == .success, let enabledBool = enabled as? Bool {
+            info += "enabled=\(enabledBool) "
+        }
+        if canEditResult == .success, let canEditBool = canEdit as? Bool {
+            info += "canEdit=\(canEditBool) "
+        }
+        
+        Logger.debug(info)
+        
+        // 如果是TRAE应用，记录更详细的信息
+        if AppDetectionManager.shared.isTRAEApp() {
+            Logger.info("Element role=\(role as? String ?? "unknown"), enabled=\(enabled as? Bool ?? false), canEdit=\(canEdit as? Bool ?? false)")
+        }
+    }
+
+    // ==== 键盘模拟事件 ====
+
+    // 发送Cmd+A
+    func postSelectAll() {
+        let source = CGEventSource(stateID: .hidSystemState)
+        let cmdDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Command), keyDown: true)
+        let aDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_A), keyDown: true)
+        let aUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_A), keyDown: false)
+        let cmdUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Command), keyDown: false)
+        
+        cmdDown?.flags = .maskCommand
+        aDown?.flags = .maskCommand
+        
+        cmdDown?.post(tap: .cghidEventTap)
+        aDown?.post(tap: .cghidEventTap)
+        aUp?.post(tap: .cghidEventTap)
+        cmdUp?.post(tap: .cghidEventTap)
+        
+        Logger.info("Posted global Cmd+A")
+    }
+
+    // 发送Cmd+C
+    func postCopy() {
+        let source = CGEventSource(stateID: .hidSystemState)
+        
+        // 确保事件源有效
+        guard source != nil else {
+            Logger.error("Failed to create event source for copy command")
+            return
+        }
+        
+        let cmdDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Command), keyDown: true)
+        let cDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_C), keyDown: true)
+        let cUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_C), keyDown: false)
+        let cmdUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Command), keyDown: false)
+        
+        // 确保所有事件都有效
+        guard let cmdDown = cmdDown, let cDown = cDown, let cUp = cUp, let cmdUp = cmdUp else {
+            Logger.error("Failed to create copy command events")
+            return
+        }
+        
+        cmdDown.flags = .maskCommand
+        cDown.flags = .maskCommand
+        
+        // 按顺序发送事件
+        cmdDown.post(tap: .cghidEventTap)
+        Thread.sleep(forTimeInterval: 0.05) // 短暂延迟确保按键顺序
+        cDown.post(tap: .cghidEventTap)
+        Thread.sleep(forTimeInterval: 0.05)
+        cUp.post(tap: .cghidEventTap)
+        Thread.sleep(forTimeInterval: 0.05)
+        cmdUp.post(tap: .cghidEventTap)
+        
+        Logger.info("Posted global Cmd+C copy command")
+    }
+
+    // 发送右箭头键以取消全选
+    func postRightArrowKey() {
+        let source = CGEventSource(stateID: .hidSystemState)
+        let rightArrowKeyCode = 124 as CGKeyCode // kVK_RightArrow
+        
+        let downEvent = CGEvent(keyboardEventSource: source, virtualKey: rightArrowKeyCode, keyDown: true)
+        downEvent?.post(tap: .cghidEventTap)
+        
+        let upEvent = CGEvent(keyboardEventSource: source, virtualKey: rightArrowKeyCode, keyDown: false)
+        upEvent?.post(tap: .cghidEventTap)
+        
+        Logger.info("Posted Right Arrow key to deselect text after misfire.")
+    }
+
+    // 发送粘贴命令Cmd+V
+    func postPaste() {
+        let source = CGEventSource(stateID: .hidSystemState)
+        let cmdDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Command), keyDown: true)
+        let vDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: true)
+        let vUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: false)
+        let cmdUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Command), keyDown: false)
+        
+        cmdDown?.flags = .maskCommand
+        vDown?.flags = .maskCommand
+        
+        cmdDown?.post(tap: .cghidEventTap)
+        vDown?.post(tap: .cghidEventTap)
+        vUp?.post(tap: .cghidEventTap)
+        cmdUp?.post(tap: .cghidEventTap)
+        
+        Logger.info("Posted Cmd+V (Paste)")
+    }
+
+    // 为文本编辑器发送智能选择命令（选择光标前的内容）
+    // Shift+Cmd+Left 选择当前行到行首
+    // Shift+Cmd+Up 选择当前行到文档开头
+    func postSmartSelection() {
+        Logger.info("Using optimized smart selection - selecting content before cursor")
+        
+        let source = CGEventSource(stateID: .hidSystemState)
+        
+        // 确保事件源有效
+        guard source != nil else {
+            Logger.error("Failed to create event source")
+            return
+        }
+        
+        // 优化选择策略：减少延迟，提高响应速度
+        
+        // 第一步：选择当前行到行首 (Shift+Cmd+Left)
+        Logger.info("Step 1 - Sending Shift+Cmd+Left to select to line start")
+        let leftDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_LeftArrow), keyDown: true)
+        leftDown?.flags = [.maskShift, .maskCommand]
+        leftDown?.post(tap: .cghidEventTap)
+        
+        let leftUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_LeftArrow), keyDown: false)
+        leftUp?.flags = [.maskShift, .maskCommand]
+        leftUp?.post(tap: .cghidEventTap)
+        
+        // 减少等待时间，提高响应速度
+        Thread.sleep(forTimeInterval: 0.1)
+        
+        // 第二步：继续向上选择到文档开头 (Shift+Cmd+Up)
+        // 这会扩展当前选择，包含光标前的所有行
+        Logger.info("Step 2 - Sending Shift+Cmd+Up to extend selection to document start")
+        let upDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_UpArrow), keyDown: true)
+        upDown?.flags = [.maskShift, .maskCommand]
+        upDown?.post(tap: .cghidEventTap)
+        
+        let upUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_UpArrow), keyDown: false)
+        upUp?.flags = [.maskShift, .maskCommand]
+        upUp?.post(tap: .cghidEventTap)
+        
+        // 减少等待时间，提高响应速度
+        Thread.sleep(forTimeInterval: 0.05)
+        
+        Logger.info("Smart selection completed - should have selected all content before cursor")
+    }
+
+    // 发送回车键事件
+    func sendEnterKey() {
+        Logger.info("Sending Enter key event")
+        
+        // 设置标志防止拦截我们自己发送的Enter键
+        isSendingEnterKey = true
+        enterKeySentTime = Date()
+        
+        // 检查是否为微信，微信需要特殊处理 - 使用缓存的检测结果
+        let isWeChat = AppDetectionManager.shared.isWeChatApp()
+        
+        if isWeChat {
+            // 微信需要特殊处理：确保焦点正确且使用适当的事件发送方式
+            sendEnterKeyForWeChat()
+        } else {
+            // 其他应用（包括Discord、钉钉等）使用标准方式
+            sendEnterKeyStandard()
+        }
+        
+        // 延迟清除标志，确保Enter键事件已经处理完毕
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            self.isSendingEnterKey = false
+            Logger.info("Enter key sending flag cleared")
+        }
+    }
+
+       // 微信专用的Enter键发送
+    private func sendEnterKeyForWeChat() {
+        Logger.info("Sending Enter key for WeChat")
+        
+        // 确保微信窗口获得焦点
+        ensureWeChatFocus { focused in
+            guard focused else {
+                Logger.warn("WeChat: Failed to ensure focus for Enter key")
+                return
+            }
+            
+            // 等待焦点稳定后发送Enter键
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                // 使用最直接有效的方法发送Enter键
+                self.sendWeChatEnterKeyDirect()
+            }
+        }
+    } 
+    
+    // 确保微信应用获得焦点
+    private func ensureWeChatFocus(completion: @escaping (Bool) -> Void) {
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+              let bundleId = frontmostApp.bundleIdentifier,
+              bundleId.contains("wechat") || bundleId.contains("WeChat") else {
+            Logger.warn("WeChat: Not currently the frontmost application")
+            completion(false)
+            return
+        }
+        
+        // 微信已经是前台应用，直接成功
+        Logger.info("WeChat: Already focused")
+        completion(true)
+    }
+    
+    // 直接发送微信Enter键的优化方法
+    private func sendWeChatEnterKeyDirect() {
+        Logger.info("WeChat: Sending Enter key directly")
+        
+        // 先验证输入框内容是否已更新（可选的安全检查）
+        if let focused = AXController.shared.getFocusedElement(),
+           let currentContent = AXController.shared.getValue(of: focused) {
+            Logger.info("WeChat: Current input content before Enter: '\(currentContent)'")
+        }
+        
+        // 使用AppleScript是最可靠的方法，因为它直接与系统事件交互
+        let script = """
+        tell application "System Events"
+            tell process "WeChat"
+                key code 36
+            end tell
+        end tell
+        """
+        
+        var error: NSDictionary?
+        if let scriptObject = NSAppleScript(source: script) {
+            scriptObject.executeAndReturnError(&error)
+            if error == nil {
+                Logger.info("WeChat: Enter key sent successfully via AppleScript")
+            } else {
+                Logger.warn("WeChat: AppleScript failed: \(error?.description ?? "Unknown error"), trying CGEvent")
+                // 如果AppleScript失败，回退到CGEvent方法
+                self.sendWeChatEnterKeyViaCGEvent()
+            }
+        } else {
+            Logger.warn("WeChat: Failed to create AppleScript, trying CGEvent")
+            self.sendWeChatEnterKeyViaCGEvent()
+        }
+    }
+
+
+    
+    // 使用CGEvent发送微信Enter键（备用方法）
+    private func sendWeChatEnterKeyViaCGEvent() {
+        Logger.info("WeChat: Sending Enter key via CGEvent")
+        
+        let source = CGEventSource(stateID: .hidSystemState)
+        if let enterKeyDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Return), keyDown: true),
+           let enterKeyUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Return), keyDown: false) {
+            
+            // 设置事件标志以确保微信能够识别
+            enterKeyDown.flags = []
+            enterKeyUp.flags = []
+            
+            // 发送按下事件
+            enterKeyDown.post(tap: .cghidEventTap)
+            
+            // 稍微延迟后发送释放事件
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+                enterKeyUp.post(tap: .cghidEventTap)
+                Logger.info("WeChat: Enter key sent via CGEvent")
+            }
+        } else {
+            Logger.error("WeChat: Failed to create CGEvent Enter key events")
+        }
+    }
+    
+    // 标准的Enter键发送
+    private func sendEnterKeyStandard() {
+        Logger.info("Sending Enter key (standard method)")
+        
+        let source = CGEventSource(stateID: .hidSystemState)
+        if let enterKeyDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Return), keyDown: true),
+           let enterKeyUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Return), keyDown: false) {
+            
+            enterKeyDown.post(tap: .cghidEventTap)
+            enterKeyUp.post(tap: .cghidEventTap)
+            Logger.info("Standard: Enter key sent successfully")
+        }
+    }
+
+    func isSendingEnterKeyEvent() -> Bool {
+        return isSendingEnterKey
+    }
+
+    func getEnterKeySentTime() -> Date? {
+        return enterKeySentTime
+    }
+
+    // 恢复焦点并选中全部文本
+    func restoreFocusAndSelectAll(for element: AXUIElement, appBundleId: String) {
+        // 1. 切回原应用（如钉钉）
+        NSRunningApplication.runningApplications(withBundleIdentifier: appBundleId).first?.activate(options: [.activateIgnoringOtherApps])
+
+        // 2. 点击输入框（使其获取焦点）
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            self.clickAXElement(element)
+
+            // 3. 再发送 Cmd+A（选中全部文本）
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                self.postSelectAll()
+            }
+        }
+    }
+
+    // 点击AXElement
+    private func clickAXElement(_ element: AXUIElement) {
+        var frameRef: CFTypeRef?
+        let kAXFrameAttribute = "AXFrame" as CFString
+        
+        if AXUIElementCopyAttributeValue(element, kAXFrameAttribute, &frameRef) == .success,
+           let frameValue = frameRef {
+            var rect = CGRect.zero
+            if AXValueGetValue(frameValue as! AXValue, .cgRect, &rect) {
+                let clickPoint = CGPoint(x: rect.midX, y: rect.midY)
+                if let source = CGEventSource(stateID: .hidSystemState) {
+                    if let mouseDown = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: clickPoint, mouseButton: .left),
+                       let mouseUp = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: clickPoint, mouseButton: .left) {
+                        mouseDown.post(tap: .cghidEventTap)
+                        mouseUp.post(tap: .cghidEventTap)
+                        Logger.info("Clicked AXElement: \(clickPoint)")
+                    }  
+                }  
+            }  
+        }  
+    }
+
+}

@@ -29,12 +29,12 @@ class QuotaAlertWindow: NSWindow {
         // 防止频繁弹窗 - 每小时最多显示一次警告
         if let lastTime = lastAlertTime, 
            Date().timeIntervalSince(lastTime) < 3600 {
-            Logger.info("配额警告显示过于频繁，跳过此次提醒")
+            Logger.info("Quota warning shown too frequently, skipping this reminder")
             return
         }
         
         guard !isShowingAlert else {
-            Logger.info("已有配额提醒窗口显示中，跳过")
+            Logger.info("Quota alert window already shown, skipping")
             return
         }
         
@@ -97,7 +97,7 @@ class QuotaAlertWindow: NSWindow {
         switch response {
         case .alertFirstButtonReturn:
             // Sign In
-            self.openLoginPage()
+            UserManager.shared.openLoginPage()
         case .alertSecondButtonReturn:
             // Learn About Pricing
             self.openPricingPage()
@@ -115,7 +115,7 @@ class QuotaAlertWindow: NSWindow {
     /// 显示配额耗尽对话框
     func showQuotaExceeded(_ quotaInfo: QuotaInfo) {
         guard !isShowingAlert else {
-            Logger.info("已有配额提醒窗口显示中，跳过")
+            Logger.info("Quota alert window already shown, skipping")
             return
         }
         
@@ -219,32 +219,7 @@ class QuotaAlertWindow: NSWindow {
         isShowingAlert = false
     }
     
-    
-    private func openLoginPage() {
-        let environmentManager = EnvironmentManager.shared
-        let loginURL = "\(environmentManager.baseURL)/login?redirect=glotera://auth/callback"
-        
-        if let url = URL(string: loginURL) {
-            NSWorkspace.shared.open(url)
-            Logger.info("Opening login page: \(loginURL)")
-        } else {
-            Logger.error("Invalid login URL: \(loginURL)")
-            
-            // Backup plan - Show login information
-            let alert = NSAlert()
-            alert.messageText = "Login Information"
-            alert.informativeText = """
-            Please visit the following URL to sign in:
-            \(loginURL)
-            
-            Or contact support for assistance:
-            support@glotera.ai
-            """
-            alert.addButton(withTitle: "OK")
-            alert.runModal()
-        }
-    }
-    
+ 
     private func openPricingPage() {
         let environmentManager = EnvironmentManager.shared
         let pricingURL = "\(environmentManager.baseURL)/pricing"
@@ -277,9 +252,9 @@ class QuotaAlertWindow: NSWindow {
         
         if let url = URL(string: upgradeURL) {
             NSWorkspace.shared.open(url)
-            Logger.info("打开升级页面: \(upgradeURL)")
+            Logger.info("Open upgrade page: \(upgradeURL)")
         } else {
-            Logger.error("无效的升级页面URL: \(upgradeURL)")
+            Logger.error("Invalid upgrade page URL: \(upgradeURL)")
             
             // Backup plan - Show upgrade information
             let alert = NSAlert()
@@ -319,7 +294,7 @@ class QuotaAlertWindow: NSWindow {
     func resetAlertState() {
         isShowingAlert = false
         lastAlertTime = nil
-        Logger.info("配额提醒状态已重置")
+        Logger.info("Quota alert state reset")
     }
 }
 
@@ -335,13 +310,13 @@ class QuotaManager: TranslatorQuotaDelegate {
     private init() {
         // 设置为TranslatorClient的配额委托
         TranslatorClient.shared.quotaDelegate = self
-        Logger.info("QuotaManager初始化完成，已设置为TranslatorClient的配额委托")
+        Logger.info("QuotaManager initialized, set as quota delegate for TranslatorClient")
     }
     
     // MARK: - TranslatorQuotaDelegate
     
     func didReceiveQuotaUpdate(_ quotaInfo: QuotaInfo) {
-        Logger.info("配额更新: \(quotaInfo.quotaDescription)")
+        Logger.info("Quota updated: \(quotaInfo.quotaDescription)")
         
         // 更新菜单栏的配额显示
         DispatchQueue.main.async {
@@ -350,7 +325,7 @@ class QuotaManager: TranslatorQuotaDelegate {
     }
     
     func didReceiveQuotaWarning(_ quotaInfo: QuotaInfo) {
-        Logger.info("收到配额警告: 剩余 \(quotaInfo.remainingQuota) 次")
+        Logger.info("Received quota warning: remaining \(quotaInfo.remainingQuota) times")
         
         // 更新菜单栏的配额显示
         DispatchQueue.main.async {
@@ -362,7 +337,7 @@ class QuotaManager: TranslatorQuotaDelegate {
     }
     
     func didReceiveQuotaExceededError(_ quotaInfo: QuotaInfo) {
-        Logger.info("收到配额耗尽错误")
+        Logger.info("Received quota exhausted error")
         
         // 更新菜单栏的配额显示
         DispatchQueue.main.async {
@@ -384,14 +359,14 @@ class QuotaManager: TranslatorQuotaDelegate {
             )
         }
         
-        Logger.info("菜单栏配额显示已更新: \(quotaInfo.quotaDescription)")
+        Logger.info("Menu bar quota display updated: \(quotaInfo.quotaDescription)")
     }
     
     /// 安排延迟的低配额警告
     private func scheduleDelayedWarning(_ quotaInfo: QuotaInfo) {
         // 添加到待处理队列
         pendingLowQuotaWarnings.append(quotaInfo)
-        Logger.info("已将配额警告加入延迟队列，当前队列长度: \(pendingLowQuotaWarnings.count)")
+        Logger.info("Quota warning added to delay queue, current queue length: \(pendingLowQuotaWarnings.count)")
         
         // 取消之前的定时器
         warningTimer?.invalidate()
@@ -408,7 +383,7 @@ class QuotaManager: TranslatorQuotaDelegate {
         
         // 取最新的配额信息（如果有多个的话）
         let latestQuotaInfo = pendingLowQuotaWarnings.last!
-        Logger.info("显示延迟的配额警告: 剩余 \(latestQuotaInfo.remainingQuota) 次")
+        Logger.info("Show delayed quota warning: remaining \(latestQuotaInfo.remainingQuota) times")
         
         // 清空队列
         pendingLowQuotaWarnings.removeAll()
@@ -427,6 +402,6 @@ class QuotaManager: TranslatorQuotaDelegate {
     func clearPendingWarnings() {
         warningTimer?.invalidate()
         pendingLowQuotaWarnings.removeAll()
-        Logger.info("已清除所有待处理的配额警告")
+        Logger.info("All pending quota warnings cleared")
     }
 } 

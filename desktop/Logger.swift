@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 
 /// 日志等级枚举
 public enum LogLevel: Int, CaseIterable, Comparable {
@@ -46,29 +47,126 @@ public class ConsoleLogDestination: LogDestination {
     }
 }
 
-/// 文件日志输出（预留扩展）
+/// 文件日志输出
 public class FileLogDestination: LogDestination {
     private let fileURL: URL
     private let fileManager = FileManager.default
+    private let maxFileSize: UInt64 // 最大文件大小（字节）
+    private let maxFiles: Int // 最大文件数量
+    private let logQueue = DispatchQueue(label: "com.glotera.logger.file", qos: .utility)
     
-    public init(fileURL: URL) {
+    public init(fileURL: URL, maxFileSize: UInt64 = 10 * 1024 * 1024, maxFiles: Int = 5) {
         self.fileURL = fileURL
+        self.maxFileSize = maxFileSize
+        self.maxFiles = maxFiles
         createLogFileIfNeeded()
     }
     
     private func createLogFileIfNeeded() {
+        let directory = fileURL.deletingLastPathComponent()
+        
+        // 创建目录（如果不存在）
+        if !fileManager.fileExists(atPath: directory.path) {
+            try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+        
+        // 创建日志文件（如果不存在）
         if !fileManager.fileExists(atPath: fileURL.path) {
             fileManager.createFile(atPath: fileURL.path, contents: nil, attributes: nil)
         }
     }
     
     public func write(_ message: String, level: LogLevel) {
+        logQueue.async {
+            self.writeToFile(message)
+        }
+    }
+    
+    private func writeToFile(_ message: String) {
         guard let data = (message + "\n").data(using: .utf8) else { return }
         
+        // 检查文件大小，如果超过限制则轮转
+        checkAndRotateFile()
+        
+        // 写入日志
         if let fileHandle = try? FileHandle(forWritingTo: fileURL) {
             fileHandle.seekToEndOfFile()
             fileHandle.write(data)
             fileHandle.closeFile()
+        }
+    }
+    
+    private func checkAndRotateFile() {
+        guard let attributes = try? fileManager.attributesOfItem(atPath: fileURL.path),
+              let fileSize = attributes[.size] as? UInt64 else { return }
+        
+        if fileSize > maxFileSize {
+            rotateLogFile()
+        }
+    }
+    
+    private func rotateLogFile() {
+        let baseName = fileURL.deletingPathExtension().lastPathComponent
+        let fileExtension = fileURL.pathExtension.isEmpty ? "log" : fileURL.pathExtension
+        
+        // 删除最旧的文件
+        for i in stride(from: maxFiles - 1, through: 1, by: -1) {
+            let oldFile = fileURL.deletingLastPathComponent()
+                .appendingPathComponent("\(baseName).\(i).\(fileExtension)")
+            try? fileManager.removeItem(at: oldFile)
+        }
+        
+        // 重命名现有文件
+        for i in stride(from: maxFiles - 2, through: 0, by: -1) {
+            let oldFile = fileURL.deletingLastPathComponent()
+                .appendingPathComponent("\(baseName).\(i).\(fileExtension)")
+            let newFile = fileURL.deletingLastPathComponent()
+                .appendingPathComponent("\(baseName).\(i + 1).\(fileExtension)")
+            try? fileManager.moveItem(at: oldFile, to: newFile)
+        }
+        
+        // 重命名当前文件
+        let rotatedFile = fileURL.deletingLastPathComponent()
+            .appendingPathComponent("\(baseName).1.\(fileExtension)")
+        try? fileManager.moveItem(at: fileURL, to: rotatedFile)
+        
+        // 创建新的日志文件
+        createLogFileIfNeeded()
+    }
+    
+    /// 获取日志文件路径
+    public func getLogFilePath() -> String {
+        return fileURL.path
+    }
+    
+    /// 获取日志文件大小
+    public func getLogFileSize() -> UInt64 {
+        guard let attributes = try? fileManager.attributesOfItem(atPath: fileURL.path),
+              let fileSize = attributes[.size] as? UInt64 else { return 0 }
+        return fileSize
+    }
+    
+    /// 清空日志文件
+    public func clearLogFile() {
+        try? "".write(to: fileURL, atomically: true, encoding: .utf8)
+    }
+    
+    /// 获取所有日志文件
+    public func getAllLogFiles() -> [URL] {
+        let directory = fileURL.deletingLastPathComponent()
+        let baseName = fileURL.deletingPathExtension().lastPathComponent
+        let fileExtension = fileURL.pathExtension.isEmpty ? "log" : fileURL.pathExtension
+        
+        guard let files = try? fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.creationDateKey], options: []) else {
+            return []
+        }
+        
+        return files.filter { file in
+            file.lastPathComponent.hasPrefix(baseName) && file.lastPathComponent.hasSuffix(fileExtension)
+        }.sorted { file1, file2 in
+            let date1 = try? file1.resourceValues(forKeys: [.creationDateKey]).creationDate ?? Date.distantPast
+            let date2 = try? file2.resourceValues(forKeys: [.creationDateKey]).creationDate ?? Date.distantPast
+            return date1! > date2!
         }
     }
 }
@@ -408,14 +506,34 @@ public class Logger {
 
 extension Logger {
     /// 配置文件日志输出
-    /// - Parameter fileName: 日志文件名，默认为 "app.log"
-    public static func enableFileLogging(fileName: String = "app.log") {
+    /// - Parameters:
+    ///   - fileName: 日志文件名，默认为 "glotera.log"
+    ///   - maxFileSize: 最大文件大小（字节），默认 10MB
+    ///   - maxFiles: 最大文件数量，默认 5 个
+    public static func enableFileLogging(fileName: String = "glotera.log", maxFileSize: UInt64 = 10 * 1024 * 1024, maxFiles: Int = 5) {
         let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let logFileURL = documentsPath.appendingPathComponent(fileName)
-        let fileDestination = FileLogDestination(fileURL: logFileURL)
+        let logsDirectory = documentsPath.appendingPathComponent("GloteraLogs")
+        let logFileURL = logsDirectory.appendingPathComponent(fileName)
+        
+        let fileDestination = FileLogDestination(fileURL: logFileURL, maxFileSize: maxFileSize, maxFiles: maxFiles)
         addDestination(fileDestination)
         
         info("File logging enabled at: \(logFileURL.path)")
+        info("Max file size: \(formatFileSize(maxFileSize)), Max files: \(maxFiles)")
+    }
+    
+    /// 配置自定义路径的文件日志输出
+    /// - Parameters:
+    ///   - filePath: 完整的文件路径
+    ///   - maxFileSize: 最大文件大小（字节），默认 10MB
+    ///   - maxFiles: 最大文件数量，默认 5 个
+    public static func enableFileLoggingAtPath(_ filePath: String, maxFileSize: UInt64 = 10 * 1024 * 1024, maxFiles: Int = 5) {
+        let logFileURL = URL(fileURLWithPath: filePath)
+        let fileDestination = FileLogDestination(fileURL: logFileURL, maxFileSize: maxFileSize, maxFiles: maxFiles)
+        addDestination(fileDestination)
+        
+        info("File logging enabled at: \(logFileURL.path)")
+        info("Max file size: \(formatFileSize(maxFileSize)), Max files: \(maxFiles)")
     }
     
     /// 配置 UI 回调日志输出
@@ -429,11 +547,115 @@ extension Logger {
     
     /// 获取当前日志配置信息
     public static func getConfiguration() -> String {
-        return """
+        var config = """
         📊 Logger Configuration:
         - Current Level: \(currentLevel.name) \(currentLevel.emoji)
         - Destinations: \(destinations.count)
         - Date Format: \(dateFormatter.dateFormat ?? "Unknown")
         """
+        
+        // 添加文件日志信息
+        for destination in destinations {
+            if let fileDestination = destination as? FileLogDestination {
+                config += "\n- File Log: \(fileDestination.getLogFilePath())"
+                config += "\n- File Size: \(formatFileSize(fileDestination.getLogFileSize()))"
+            }
+        }
+        
+        return config
+    }
+    
+    /// 获取文件日志目标
+    public static func getFileDestination() -> FileLogDestination? {
+        return destinations.first { $0 is FileLogDestination } as? FileLogDestination
+    }
+    
+    /// 获取日志文件路径
+    public static func getLogFilePath() -> String? {
+        return getFileDestination()?.getLogFilePath()
+    }
+    
+    /// 获取日志文件大小
+    public static func getLogFileSize() -> UInt64 {
+        return getFileDestination()?.getLogFileSize() ?? 0
+    }
+    
+    /// 清空日志文件
+    public static func clearLogFile() {
+        getFileDestination()?.clearLogFile()
+        info("Log file cleared")
+    }
+    
+    /// 获取所有日志文件
+    public static func getAllLogFiles() -> [URL] {
+        return getFileDestination()?.getAllLogFiles() ?? []
+    }
+    
+    /// 打开日志文件所在目录
+    public static func openLogsDirectory() {
+        guard let fileDestination = getFileDestination() else {
+            warn("No file destination configured")
+            return
+        }
+        
+        let logsDirectory = URL(fileURLWithPath: fileDestination.getLogFilePath()).deletingLastPathComponent()
+        NSWorkspace.shared.open(logsDirectory)
+        info("Opened logs directory: \(logsDirectory.path)")
+    }
+    
+    /// 格式化文件大小
+    private static func formatFileSize(_ size: UInt64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useKB, .useMB, .useGB]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: Int64(size))
+    }
+    
+    /// 导出日志到指定文件
+    /// - Parameter exportPath: 导出路径
+    public static func exportLogs(to exportPath: String) {
+        guard let fileDestination = getFileDestination() else {
+            warn("No file destination configured")
+            return
+        }
+        
+        let exportURL = URL(fileURLWithPath: exportPath)
+        let logFiles = fileDestination.getAllLogFiles()
+        
+        do {
+            var combinedContent = ""
+            
+            for logFile in logFiles.reversed() { // 从最新的开始
+                if let content = try? String(contentsOf: logFile, encoding: .utf8) {
+                    combinedContent += "=== \(logFile.lastPathComponent) ===\n"
+                    combinedContent += content
+                    combinedContent += "\n\n"
+                }
+            }
+            
+            try combinedContent.write(to: exportURL, atomically: true, encoding: .utf8)
+            info("Logs exported to: \(exportPath)")
+        } catch let exportError {
+            error("Failed to export logs: \(exportError.localizedDescription)")
+        }
+    }
+    
+    /// 设置日志级别
+    /// - Parameter level: 新的日志级别
+    public static func setLogLevel(_ level: LogLevel) {
+        currentLevel = level
+        info("Log level changed to: \(level.name)")
+    }
+    
+    /// 移除所有日志目标
+    public static func removeAllLogDestinations() {
+        removeAllDestinations()
+        info("All log destinations removed")
+    }
+    
+    /// 移除文件日志目标
+    public static func removeFileLogging() {
+        destinations.removeAll { $0 is FileLogDestination }
+        info("File logging disabled")
     }
 } 

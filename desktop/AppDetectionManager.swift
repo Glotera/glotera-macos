@@ -1,0 +1,456 @@
+import Cocoa
+import Carbon
+import CoreFoundation
+import ApplicationServices
+
+/// Application information structure for detection and management
+struct AppInfo {
+    let bundleId: String
+    let appName: String
+    let isBrowser: Bool
+    let isWeChat: Bool
+    let isChrome: Bool
+    var javaScriptPermissionsEnabled: Bool
+}
+
+/// High-performance application detection manager
+class AppDetectionManager {
+    static let shared = AppDetectionManager()
+    
+    // Supported browser application bundle identifiers
+    private let browserBundleIds = [
+        "com.google.Chrome",
+        "com.apple.Safari", 
+        "com.microsoft.edgemac",
+        "org.mozilla.firefox",
+        "com.operasoftware.Opera",
+        "com.brave.Browser",
+        "com.adspower.SunBrowser",
+        "com.vivaldi.Vivaldi"
+    ]
+    
+    // Mail application bundle identifiers
+    private let mailAppBundleIds = [
+        "com.apple.mail",
+        "com.microsoft.Outlook",
+        "notion.mail.id"
+    ]
+    
+    // Text editor application bundle identifiers
+    private let textEditorBundleIds = [
+        "com.apple.Notes",
+        "com.cursor.Cursor",
+        "com.trae.TRAE",
+        "com.microsoft.VSCode",
+        "com.jetbrains.intellij",
+        "com.sublimetext.4"
+    ]
+    
+    // Chat application bundle identifiers
+    private let chatAppBundleIds = [
+        "com.tencent.xinWeChat",
+        "com.alibaba.DingTalkMac",
+        "net.whatsapp.WhatsApp",
+        "com.hnc.Discord", 
+        "com.tdesktop.Telegram",
+        "com.slack.Slack",
+        "com.electron.lark",
+        "com.microsoft.Teams"
+    ]
+    
+    // Terminal application bundle identifiers
+    private let terminalAppBundleIds = [
+        "com.apple.Terminal",
+        "com.googlecode.iterm2",
+        "com.panic.Terminal"
+    ]
+
+    // Mail domain list
+    private let mailDomains = [
+            "gmail.com", "mail.google.com", "outlook.com",
+            "mail.live.com","outlook.live.com",
+            "hotmail.com", "mail.yahoo.com",
+            "mail.icloud.com", "protonmail.com",
+            "mail.zoho.com", "mail.yandex.ru",
+            "mail.qq.com", "mail.163.com",
+            "mail.126.com",  "mail.sina.com"
+        ]
+    
+    private init() {}
+    
+    // MARK: - Public Browser Detection Methods
+    
+    /// Check if the current active application is a browser
+    func getCurrentBrowserInfo() -> (bundleId: String, appName: String)? {
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+              let bundleId = frontmostApp.bundleIdentifier else {
+            return nil
+        }
+        
+        if browserBundleIds.contains(bundleId) {
+            return (bundleId: bundleId, appName: frontmostApp.localizedName ?? "Browser")
+        }
+        
+        return nil
+    }
+    
+    /// Check if currently in a web environment
+    func isWebEnvironment() -> Bool {
+        return getCurrentBrowserInfo() != nil
+    }
+    
+    /// Check if currently on a web mail page
+    func isWebMailPage() -> Bool {
+        guard getCurrentBrowserInfo() != nil else {
+            return false
+        }
+        
+        // Detect current page as mail application via URL
+        let url = getWebpageURL()
+        if !url.isEmpty {
+            let urlLower = url.lowercased()
+            for domain in mailDomains {
+                if urlLower.contains(domain) {
+                    Logger.info("Detected Web mail page via URL: \(domain)")
+                    return true
+                }
+            }
+        }
+        
+        return false
+    }
+    
+    // MARK: - Public Application Type Detection Methods
+
+    func isNeedSimulateKeyboardApp() -> Bool {
+        return isMailApp() || isTextEditorApp() || isWebMailPage()
+    }
+    
+    /// Check if current application is a mail client
+    func isMailApp() -> Bool {
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+              let bundleId = frontmostApp.bundleIdentifier else {
+            return false
+        }
+        
+        return mailAppBundleIds.contains(bundleId)
+    }
+    
+    /// Check if current application is a text editor
+    func isTextEditorApp() -> Bool {
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+              let bundleId = frontmostApp.bundleIdentifier else {
+            return false
+        }
+        
+        return textEditorBundleIds.contains(bundleId)
+    }
+    
+    /// Check if current application is a chat application
+    func isChatApp() -> Bool {
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+              let bundleId = frontmostApp.bundleIdentifier else {
+            return false
+        }
+        
+        return chatAppBundleIds.contains(bundleId)
+    }
+    
+    /// Check if current application is Discord
+    func isDiscordApp() -> Bool {
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+              let bundleId = frontmostApp.bundleIdentifier else {
+            return false
+        }
+        
+        return bundleId == "com.hnc.Discord" || bundleId == "com.discord.Discord"
+    }
+    
+    /// Check if current application is Discord or other chat app
+    func isDiscordOrChatApp() -> Bool {
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+              let bundleId = frontmostApp.bundleIdentifier else {
+            return false
+        }
+        
+        // Discord specific detection
+        if bundleId == "com.hnc.Discord" || bundleId == "com.discord.Discord" {
+            Logger.info("Detected Discord app: \(frontmostApp.localizedName ?? "Unknown") (\(bundleId))")
+            return true
+        } 
+        
+        if chatAppBundleIds.contains(bundleId) {
+            Logger.info("Detected chat app: \(frontmostApp.localizedName ?? "Unknown") (\(bundleId))")
+            return true
+        }
+        
+        return false
+    }
+    
+    /// Check if current application is a terminal
+    func isTerminalApp() -> Bool {
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+              let bundleId = frontmostApp.bundleIdentifier else {
+            return false
+        } 
+        
+        if terminalAppBundleIds.contains(bundleId) {
+            Logger.info("Detected terminal app: \(frontmostApp.localizedName ?? "Unknown") (\(bundleId))")
+            return true
+        }
+        
+        return false
+    }
+    
+    /// Check if current application is WeChat
+    func isWeChatApp() -> Bool {
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+              let bundleId = frontmostApp.bundleIdentifier else {
+            return false
+        }
+        
+        return bundleId.contains("wechat") || bundleId.contains("WeChat")
+    }
+    
+    /// Check if current application is TRAE
+    func isTRAEApp() -> Bool {
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+              let bundleId = frontmostApp.bundleIdentifier else {
+            return false
+        }
+        
+        return bundleId == "com.trae.TRAE"
+    }
+    
+    /// Check if current application is AdsPower
+    func isAdsPowerApp() -> Bool {
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+              let bundleId = frontmostApp.bundleIdentifier else {
+            return false
+        }
+        
+        return bundleId.contains("adspower") || bundleId.contains("AdsPower")
+    } 
+
+    // 历史消息比较特殊，需要单独处理
+    func isDingTalkApp() -> Bool {
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+              let bundleId = frontmostApp.bundleIdentifier else {
+            return false
+        }
+        
+        return bundleId.contains("DingTalk") || bundleId.contains("dingtalk")   
+    }
+    // MARK: - Public Element Information Methods
+    
+    /// Get application information for a specific element
+    func getAppInfo(for element: AXUIElement) -> AppInfo {
+        let pid = getPid(for: element)
+        var appName = "Unknown"
+        var bundleId = ""
+        
+        if let app = NSRunningApplication(processIdentifier: pid) {
+            appName = app.localizedName ?? "Unknown"
+            bundleId = app.bundleIdentifier ?? ""
+        }
+        
+        let isBrowser = browserBundleIds.contains(bundleId)
+        let isWeChat = bundleId.contains("wechat") || bundleId.contains("WeChat")
+        let isChrome = bundleId == "com.google.Chrome"
+        
+        // Check Chrome JavaScript permissions
+        var jsEnabled = false
+        if isChrome {
+            jsEnabled = checkChromeJavaScriptPermission()
+        }
+        
+        return AppInfo(
+            bundleId: bundleId,
+            appName: appName,
+            isBrowser: isBrowser,
+            isWeChat: isWeChat,
+            isChrome: isChrome,
+            javaScriptPermissionsEnabled: jsEnabled
+        )
+    }
+
+    func getBundleId() -> String {
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+              let bundleId = frontmostApp.bundleIdentifier else {
+            return ""
+        }
+        return bundleId
+    }
+    
+    /// Get PID for an element
+    func getPid(for element: AXUIElement) -> pid_t {
+        var pid: pid_t = 0
+        let result = AXUIElementGetPid(element, &pid)
+        if result != .success {
+            Logger.error("Failed to get PID for element")
+        }
+        return pid
+    }
+    
+    // MARK: - Private Helper Methods
+    
+    /// Detect web mail page via URL
+    private func getWebpageURL() -> String {
+        guard let browserInfo = getCurrentBrowserInfo() else {
+            return ""
+        }
+        
+        var script = ""
+        
+        switch browserInfo.bundleId {
+       
+        case "com.google.Chrome":
+            script = """
+                tell application "Google Chrome"
+                    try
+                        tell active tab of front window
+                            set currentUrl to URL
+                            return currentUrl
+                        end tell
+                    on error
+                        return ""
+                    end try
+                end tell
+            """
+        case "com.apple.Safari":
+            script = """
+                tell application "Safari"
+                    try
+                        tell front document
+                            set currentUrl to URL
+                            return currentUrl
+                        end tell
+                    on error
+                        return ""
+                    end try
+                end tell
+            """
+        default:
+            return getUrlFromBrowser(bundleId: browserInfo.bundleId)
+        }
+        
+        guard let appleScript = NSAppleScript(source: script) else {
+            Logger.warn("Failed to create AppleScript for URL detection")
+            return ""
+        }
+        var error: NSDictionary?
+        let result = appleScript.executeAndReturnError(&error)
+        
+        if let error = error {
+            Logger.warn("URL detection failed: \(error)")
+            return ""
+        }
+        
+        let url = result.stringValue ?? ""
+        return url
+    }
+
+    private func getUrlFromBrowser(bundleId: String) -> String {
+        // 1. 获取 SunBrowser 应用进程
+        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first else {
+            print("⚠️ \(bundleId) is not running")
+            return ""
+        }
+
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+
+        // 2. 递归搜索地址栏控件，提取 URL
+        func findURLInAX(element: AXUIElement, depth: Int = 0) -> String? {
+            if depth > 8 { return nil }
+
+            var childrenRef: CFTypeRef?
+            let result = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenRef)
+
+            if result == .success, let children = childrenRef as? [AXUIElement] {
+                for child in children {
+                    // 2.1 检查 AXValue 是否是 URL
+                    var value: CFTypeRef?
+                    if AXUIElementCopyAttributeValue(child, kAXValueAttribute as CFString, &value) == .success,
+                    let str = value as? String,
+                    str.lowercased().hasPrefix("http") || str.contains(".com") || str.contains(".org") {
+                        print("✅ Found URL in AXValue: \(str)")
+                        return str
+                    }
+
+                    // 2.2 检查 AXTitle 是否是 URL（备用方案）
+                    var title: CFTypeRef?
+                    if AXUIElementCopyAttributeValue(child, kAXTitleAttribute as CFString, &title) == .success,
+                    let str = title as? String,
+                    str.lowercased().hasPrefix("http") || str.contains(".com") {
+                        print("✅ Found URL in AXTitle: \(str)")
+                        return str
+                    }
+
+                    // 2.3 递归查找子元素
+                    if let found = findURLInAX(element: child, depth: depth + 1) {
+                        return found
+                    }
+                }
+            }
+
+            return nil
+        }
+
+        // 3. 启动查找流程
+        let url = findURLInAX(element: appElement)
+        return url ?? ""
+    }
+
+    
+    // 检查Chrome的AppleScript JavaScript权限
+    private func checkChromeJavaScriptPermission() -> Bool {
+        // 先检查自动化权限
+        let bundleId = "com.google.Chrome"
+        _ = URL(fileURLWithPath: "/Applications/Google Chrome.app")
+        
+        // 检查应用是否安装
+        guard NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) != nil else {
+            Logger.error("Chrome application not found")
+            return false
+        }
+        
+        // 检查自动化权限
+        let options: [String: Any] = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: false]
+        let isTrusted = AXIsProcessTrustedWithOptions(options as CFDictionary)
+        
+        if !isTrusted {
+            Logger.warn("App does not have automation permission for Chrome")
+            return false
+        }
+        
+        // 尝试执行简单的Chrome AppleScript命令来验证
+        let scriptSource = """
+        tell application "Google Chrome"
+            try
+                get name of first window
+                return true
+            on error
+                return false
+            end try
+        end tell
+        """
+        
+        // Use cached AppleScript compilation for better performance
+        let templateKey = "check_chrome_permission"
+        if let script = AppleScriptTemplateCache.shared.getCompiledScript(
+            templateKey: templateKey,
+            browserType: "com.google.Chrome",
+            generator: { scriptSource }
+        ) {
+            var error: NSDictionary?
+            let result = script.executeAndReturnError(&error)
+            if error == nil {
+                return result.booleanValue
+            } else {
+                Logger.error("Error executing Chrome AppleScript: \(error!)")
+            }
+        }
+        
+        return false
+    }
+} 

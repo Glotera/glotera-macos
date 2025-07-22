@@ -20,6 +20,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         Logger.info("AppDelegate did finish launching")
+        
+        // 启用文件日志记录
+        Logger.enableFileLogging(fileName: "glotera.log", maxFileSize: 5 * 1024 * 1024, maxFiles: 3)
+         
+        
         menuBarController = MenuBarController()
         inputMonitor = InputMonitor()
         
@@ -43,7 +48,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupEventMonitoring()
         
         // 启动选中文本监听
-        AXController.shared.startSelectionMonitoring()
+        SelectEventManager.shared.startSelectionMonitoring()
         
         // Setup a timer to retry if permissions are granted later (check every 15 seconds, max 20 times)
         var retryCount = 0
@@ -640,47 +645,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 } else {
                     Logger.warn("Authentication token validation failed")
                     DispatchQueue.main.async {
-                        self?.promptLogin(reason: "Your session has expired. Please sign in again.")
+                        UserManager.shared.promptLogin(reason: "Your session has expired. Please sign in again.")
                     }
                 }
             }
         } else {
-            Logger.info("User is not authenticated on startup")
-            // For now, we'll still allow the app to work in anonymous mode
-            // In the future, you can uncomment this to require login:
-            // promptLogin(reason: "Please sign in to use Glotera.")
+            Logger.info("User is not authenticated on startup") 
+            UserManager.shared.promptLogin(reason: "Please sign in to use Glotera.")
         }
-    }
-    
-    private func promptLogin(reason: String) {
-        let alert = NSAlert()
-        alert.messageText = "Sign In Required"
-        alert.informativeText = reason
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "Sign In")
-        alert.addButton(withTitle: "Use Anonymous Mode")
-        
-        let response = alert.runModal()
-        
-        if response == .alertFirstButtonReturn {
-            openLoginPage()
-        } else {
-            Logger.info("User chose to continue in anonymous mode")
-        }
-    }
-    
-    private func openLoginPage() {
-        let environmentManager = EnvironmentManager.shared
-        let loginURL = "\(environmentManager.baseURL)/login?redirect=glotera://auth/callback"
-        
-        guard let url = URL(string: loginURL) else {
-            Logger.error("Failed to create login URL")
-            return
-        }
-        
-        Logger.info("Opening login page: \(loginURL)")
-        NSWorkspace.shared.open(url)
-    }
+    } 
     
     func applicationWillTerminate(_ aNotification: Notification) {
         Logger.info("Application will terminate - cleaning up")

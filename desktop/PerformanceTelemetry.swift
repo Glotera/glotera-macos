@@ -103,8 +103,8 @@ class PerformanceTelemetry {
     private struct TelemetryConfig {
         let enabled: Bool = true
         let maxMetrics: Int = 1000
-        let collectionInterval: TimeInterval = 60.0 // 1 minute
-        let memorySnapshotInterval: TimeInterval = 300.0 // 5 minutes
+        let collectionInterval: TimeInterval = 600.0 // 10 minutes
+        let memorySnapshotInterval: TimeInterval = 600.0 // 10 minutes
         let batchSize: Int = 50
         let compressionThreshold: Int = 500
     }

@@ -119,7 +119,7 @@ class TranslationMenuWindow: NSWindow {
         self.sourceElement = element
         self.lastMousePosition = location
         self.cachedBrowserInfo = browserInfo
-        self.sourceElementPid = AXController.shared.getPid(for: element)
+        self.sourceElementPid = AppDetectionManager.shared.getPid(for: element)
         
         setupEventHandlers()
         
@@ -171,36 +171,7 @@ class TranslationMenuWindow: NSWindow {
     override var canBecomeMain: Bool {
         return false
     }
-    
-    private func showLoginRequiredAlert() {
-        DispatchQueue.main.async {
-            let alert = NSAlert()
-            alert.messageText = "Login Required"
-            alert.informativeText = "You need to sign in to use Glotera's translation features."
-            alert.addButton(withTitle: "Sign In")
-            alert.addButton(withTitle: "Cancel")
-            alert.alertStyle = .informational
-            
-            let response = alert.runModal()
-            if response == .alertFirstButtonReturn {
-                self.openLoginPage()
-            }
-        }
-    }
-    
-    private func openLoginPage() {
-        let environmentManager = EnvironmentManager.shared
-        let loginURL = "\(environmentManager.baseURL)/login?redirect=glotera://auth/callback"
-        
-        guard let url = URL(string: loginURL) else {
-            Logger.error("Failed to create login URL")
-            return
-        }
-        
-        Logger.info("Opening login page: \(loginURL)")
-        NSWorkspace.shared.open(url)
-    }
-    
+     
     private func translateToLanguage(_ language: String) {
         Logger.info("Translating to language: \(language)")
         
@@ -224,7 +195,7 @@ class TranslationMenuWindow: NSWindow {
             // Check login status before translation
             guard SessionManager.shared.isAuthenticated else {
                 Logger.info("User not logged in, showing login prompt")
-                showLoginRequiredAlert()
+                UserManager.shared.promptLogin(reason: "Please sign in to use Glotera.")
                 return
             }
             
@@ -247,7 +218,7 @@ class TranslationMenuWindow: NSWindow {
                         // If token expired, prompt for re-login
                         if error.localizedDescription.contains("token") || error.localizedDescription.contains("401") {
                             SessionManager.shared.clearSession()
-                            self?.showLoginRequiredAlert()
+                            UserManager.shared.promptLogin(reason: "Your session has expired. Please sign in again.")
                         } else {
                             TranslationStatusWindow.shared.showFailure()
                         }
@@ -261,7 +232,7 @@ class TranslationMenuWindow: NSWindow {
             // Check login status before stream translation
             guard SessionManager.shared.isAuthenticated else {
                 Logger.info("User not logged in for stream translation, showing login prompt")
-                showLoginRequiredAlert()
+                UserManager.shared.promptLogin(reason: "Please sign in to use Glotera.")
                 return
             }
             
@@ -269,203 +240,7 @@ class TranslationMenuWindow: NSWindow {
             showStreamTranslationResult(original: selectedText, targetLanguage: language)
         }
     }
-    
-    private func replaceSelectedText(in element: AXUIElement, with text: String, completion: @escaping () -> Void) {
-        Logger.info("Attempting to replace selected text with: '\(text)'")
-        Logger.info("Original selected text was: '\(selectedText)'")
-
-        // 暂时禁用选中文本监听，防止我们的操作触发新的菜单
-        AXController.shared.pauseSelectionMonitoring()
-
-        let appInfo = AXController.shared.getAppInfo(for: element)
-        let isBrowser = appInfo.isBrowser
-        let isWeChat = appInfo.isWeChat
-        
-        var methodUsed: String?
-
-        if isBrowser, appInfo.isChrome {
-            // 对于Chrome浏览器，尝试使用JavaScript
-            if replaceViaJavaScript(text: text) {
-                methodUsed = "JavaScript"
-            }
-        }
-
-        if methodUsed == nil {
-             // 默认或后备方案：使用剪贴板
-            replaceTextViaClipboard(with: text, isWeChat: isWeChat) {
-                completion()
-            }
-            methodUsed = "Clipboard"
-        } else {
-            // 如果使用了其他方法，直接完成
-            AXController.shared.resumeSelectionMonitoring()
-            completion()
-        }
-        
-        Logger.info("Text replacement method: \(methodUsed ?? "None")")
-    }
-
-    // 通过JavaScript替换文本（仅限Chrome）
-    private func replaceViaJavaScript(text: String) -> Bool {
-        guard let info = cachedBrowserInfo, info.isChrome, info.javaScriptPermissionsEnabled else {
-            return false
-        }
-        
-        // 使用Base64编码避免特殊字符问题
-        let encodedText = encodeForJavaScript(text)
-        
-        let script = """
-        try {
-            var activeElement = document.activeElement;
-            if (activeElement && (activeElement.isContentEditable || activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
-                var start = activeElement.selectionStart;
-                var end = activeElement.selectionEnd;
-                var originalText = activeElement.value || activeElement.textContent;
-                var newText = originalText.substring(0, start) + atob('\(encodedText)') + originalText.substring(end);
-                activeElement.value = newText;
-                activeElement.textContent = newText;
-
-                // 触发输入事件，让框架（如React）能够识别变化
-                var event = new Event('input', { bubbles: true, cancelable: true });
-                activeElement.dispatchEvent(event);
-            } else {
-                // 如果没有活动元素，尝试在选区上操作
-                var selection = window.getSelection();
-                if (selection.rangeCount > 0) {
-                    var range = selection.getRangeAt(0);
-                    range.deleteContents();
-                    range.insertNode(document.createTextNode(atob('\(encodedText)')));
-                }
-            }
-        } catch(e) {
-            // 错误处理
-        }
-        """
-        
-        let appleScript = """
-        tell application "Google Chrome"
-            execute javascript "\(script)" in active tab of first window
-        end tell
-        """
-        
-        var error: NSDictionary?
-        if let scriptObject = NSAppleScript(source: appleScript) {
-            if scriptObject.executeAndReturnError(&error).stringValue != nil {
-                Logger.info("Successfully executed JavaScript replacement")
-                return true
-            } else if let errorInfo = error {
-                Logger.info("AppleScript execution error: \(errorInfo)")
-            }
-        }
-        return false
-    }
-
-    // 通过剪贴板替换文本
-    private func replaceTextViaClipboard(with text: String, isWeChat: Bool, completion: @escaping () -> Void) {
-        if isWeChat {
-            // 微信有特殊处理
-            replaceTextInWeChat(with: text, completion: completion)
-        } else {
-            // 通用方法
-            replaceTextViaSimpleClipboard(with: text, completion: completion)
-        }
-    }
-    
-    // 最简化的剪贴板替换方法 - 已重构为更稳健的流程
-    private func replaceTextViaSimpleClipboard(with text: String, completion: @escaping () -> Void) {
-        Logger.info("Using enhanced clipboard replacement method for '\(text)'")
-        
-        let pasteboard = NSPasteboard.general
-        let originalClipboard = pasteboard.string(forType: .string)
-        
-        pasteboard.clearContents()
-        guard pasteboard.setString(text, forType: .string) else {
-            Logger.info("Failed to set clipboard content")
-            restoreClipboard(originalClipboard)
-            completion()
-            return
-        }
-        
-        guard pasteboard.string(forType: .string) == text else {
-            Logger.info("ERROR: Clipboard content verification failed!")
-            restoreClipboard(originalClipboard)
-            completion()
-            return
-        }
-        
-        DispatchQueue.main.async {
-            self.ensureOriginalAppFocus { focused in
-                if focused {
-                    self.ensureTextIsSelected(originalText: self.selectedText) { selected in
-                        self.sendImmediatePasteCommand()
-                        
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            self.restoreClipboard(originalClipboard)
-                            completion()
-                        }
-                    }
-                } else {
-                    Logger.info("Could not focus original app. Aborting replacement.")
-                    self.restoreClipboard(originalClipboard)
-                    completion()
-                }
-            }
-        }
-    }
-    
-    // 确保原应用获得焦点
-    private func ensureOriginalAppFocus(completion: @escaping (Bool) -> Void) {
-        if sourceElementPid != 0 {
-             if let app = NSRunningApplication(processIdentifier: sourceElementPid) {
-                app.activate(options: .activateIgnoringOtherApps)
-                Logger.info("Activating app with pid: \(sourceElementPid)")
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { completion(true) }
-                return
-            }
-        }
-
-        guard let info = cachedBrowserInfo,
-              let app = NSRunningApplication.runningApplications(withBundleIdentifier: info.bundleId).first else {
-            Logger.info("Cannot get original app info to focus.")
-            completion(false)
-            return
-        }
-        
-        app.activate(options: .activateIgnoringOtherApps)
-        Logger.info("Activating app: \(info.appName)")
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            completion(true)
-        }
-    }
-
-    // 确保文本被选中
-    private func ensureTextIsSelected(originalText: String, completion: @escaping (Bool) -> Void) {
-        guard let element = sourceElement, let currentText = AXController.shared.getValue(of: element) else {
-            completion(false)
-            return
-        }
-
-        if currentText == originalText {
-            Logger.info("Content matches original selected text. Using Cmd+A to select all.")
-            sendSelectAllCommand()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { completion(true) }
-            return
-        }
-        
-        if originalText.count <= 50 {
-             Logger.info("Short text detected. Attempting to double-click to re-select.")
-            doubleClickToSelectText(at: lastMousePosition)
-        } else {
-            Logger.info("Long text detected. Using Cmd+A to select all.")
-            sendSelectAllCommand()
-        }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            completion(true)
-        }
-    }
-
+     
     // 在指定位置双击
     private func doubleClickToSelectText(at position: NSPoint) {
         let source = CGEventSource(stateID: .hidSystemState)
@@ -479,67 +254,7 @@ class TranslationMenuWindow: NSWindow {
         upEvent?.post(tap: .cghidEventTap)
         Logger.info("Sent double-click event at \(position)")
     }
-    
-    // 立即发送粘贴命令（无延迟）
-    private func sendImmediatePasteCommand() {
-        let source = CGEventSource(stateID: .hidSystemState)
-        guard let cmdVDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: true),
-              let cmdVUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: false) else {
-            Logger.info("Failed to create paste events")
-            return
-        }
-        
-        cmdVDown.flags = .maskCommand
-        cmdVUp.flags = .maskCommand
-        
-        cmdVDown.post(tap: .cghidEventTap)
-        cmdVUp.post(tap: .cghidEventTap)
-        Logger.info("Sent immediate paste command.")
-    }
-
-    // 微信特殊文本替换方法
-    private func replaceTextInWeChat(with text: String, completion: @escaping () -> Void) {
-        Logger.info("Using enhanced WeChat-specific text replacement")
-        
-        let pasteboard = NSPasteboard.general
-        let originalClipboard = pasteboard.string(forType: .string)
-
-        pasteboard.clearContents()
-        guard pasteboard.setString(text, forType: .string) else {
-            Logger.info("WeChat: Failed to set clipboard")
-            restoreClipboard(originalClipboard)
-            completion()
-            return
-        }
-
-        // 核心流程：激活微信 -> 全选 -> 粘贴
-        ensureOriginalAppFocus { focused in
-            guard focused else {
-                Logger.info("WeChat: Failed to focus app.")
-                self.restoreClipboard(originalClipboard)
-                completion()
-                return
-            }
-            
-            // 等待焦点稳定
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                Logger.info("WeChat: Sending Cmd+A to select text.")
-                self.sendSelectAllCommand()
-                
-                // 等待全选完成
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                    Logger.info("WeChat: Sending paste command.")
-                    self.sendImmediatePasteCommand()
-                    
-                    // 延迟恢复剪贴板，确保粘贴完成
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        self.restoreClipboard(originalClipboard)
-                        completion()
-                    }
-                }
-            }
-        }
-    }
+   
     
     // 显示翻译结果浮窗 - 一次性翻译
     private func showTranslationResult(original: String, translated: String) {
@@ -556,69 +271,7 @@ class TranslationMenuWindow: NSWindow {
         currentStreamWindow = TranslationResultWindow(originalText: original, targetLanguage: targetLanguage)
         currentStreamWindow?.showAt(point: lastMousePosition)
     }
-
-    // 恢复剪贴板内容
-    private func restoreClipboard(_ originalClipboard: String?) {
-        let pasteboard = NSPasteboard.general
-        if let original = originalClipboard {
-            pasteboard.clearContents()
-            pasteboard.setString(original, forType: .string)
-            Logger.info("Restored original clipboard content: '\(original)'")
-        } else {
-            pasteboard.clearContents()
-            Logger.info("Cleared clipboard as there was no original content.")
-        }
-        
-        AXController.shared.resumeSelectionMonitoring()
-        Logger.info("Resumed selection monitoring")
-    }
-    
-    // #@指令场景的剪贴板替换方法
-    func replaceTextViaClipboardForTrigger(with text: String, completion: @escaping () -> Void) {
-        Logger.info("Using clipboard replacement for #@ trigger")
-        
-        let pasteboard = NSPasteboard.general
-        let originalClipboard = pasteboard.string(forType: .string)
-
-        pasteboard.clearContents()
-        guard pasteboard.setString(text, forType: .string) else {
-            Logger.info("Failed to set clipboard for trigger")
-            completion()
-            return
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            Logger.info("Sending Cmd+A to select all content before paste")
-            self.sendSelectAllCommand()
-            
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                Logger.info("Sending paste command to replace selected content")
-                self.sendImmediatePasteCommand()
-                
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                        self.restoreClipboard(originalClipboard)
-                        completion()
-                    }
-                }
-            }
-        }
-    }
-    
-    // 发送Cmd+A命令
-    private func sendSelectAllCommand() {
-        let source = CGEventSource(stateID: .hidSystemState)
-        let cmdADown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_A), keyDown: true)
-        cmdADown?.flags = .maskCommand
-        cmdADown?.post(tap: .cghidEventTap)
-        
-        let cmdAUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_A), keyDown: false)
-        cmdAUp?.flags = .maskCommand
-        cmdAUp?.post(tap: .cghidEventTap)
-        
-        Logger.info("Sent Cmd+A select all command")
-    }
-    
+ 
     // 输入文本
     private func typeText(_ text: String) {
         for char in text.unicodeScalars {
@@ -644,40 +297,6 @@ class TranslationMenuWindow: NSWindow {
         return data.base64EncodedString()
     }
     
-    // 显示Chrome JavaScript权限设置提示
-    private func showChromeJavaScriptPermissionAlert() {
-        DispatchQueue.main.async {
-            let alert = NSAlert()
-            alert.messageText = "Chrome JavaScript Permission Setting"
-            alert.informativeText = """
-            To enable precise text replacement in browsers, Chrome's JavaScript permission needs to be enabled.
-            
-            Please follow these steps to set up:
-            1. In Chrome browser, click "View" in the menu bar
-            2. Select "Developer" -> "Allow JavaScript from Apple Events"
-            
-            If you cannot find this option, please ensure Chrome is updated to the latest version.
-            
-            After setting up, this feature will be automatically enabled. If you choose not to set it up, the clipboard will be used for replacement.
-            """
-            alert.alertStyle = .informational
-            
-            alert.addButton(withTitle: "OK")
-            alert.addButton(withTitle: "Copy Setting Path")
-            
-            let response = alert.runModal()
-            if response == .alertSecondButtonReturn {
-                let pasteboard = NSPasteboard.general
-                pasteboard.clearContents()
-                pasteboard.setString("View > Developer > Allow JavaScript from Apple Events", forType: .string)
-                
-                let confirmationAlert = NSAlert()
-                confirmationAlert.messageText = "Path copied"
-                confirmationAlert.informativeText = "Setting path copied to clipboard."
-                confirmationAlert.runModal()
-            }
-        }
-    }
 }
 
 struct TranslationMenuView: View {
