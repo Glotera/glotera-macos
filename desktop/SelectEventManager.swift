@@ -30,6 +30,9 @@ class SelectEventManager {
     private var isWhatsAppMessageSelected: Bool = false
     private var whatsAppMessageShowTime: Date = Date.distantPast
     private var lastWhatsAppSelectedText: String = ""
+    
+    // WeChat 历史消息标记（用于区分历史消息和输入框）
+    private var wechatHistoryMessageElements: Set<Int> = []
 
     private init() {}
 
@@ -368,6 +371,19 @@ class SelectEventManager {
             // 重要：返回实际的消息元素，不是焦点元素
             return (text: whatsappResult.text, element: whatsappResult.element)
         }
+        
+        // 特殊处理：WeChat 聊天历史 - 使用鼠标位置定位正确的消息
+        if let wechatResult = getWeChatChatHistoryTextWithMousePosition() {
+            // 标记这是 WeChat 消息选择 (复用 WhatsApp 的保护机制)
+            isWhatsAppMessageSelected = true
+            whatsAppMessageShowTime = Date()
+            lastWhatsAppSelectedText = wechatResult.text
+            Logger.info("WeChat message selected - protection activated for 5 seconds")
+            // 重要：为了确保显示浮动翻译窗口而不是粘贴到输入框，
+            // 我们需要标记这个元素为WeChat历史消息
+            markElementAsWeChatHistoryMessage(wechatResult.element)
+            return (text: wechatResult.text, element: wechatResult.element)
+        }
          
         return nil
     }
@@ -376,7 +392,7 @@ class SelectEventManager {
     private func getWhatsAppChatHistoryText(from element: AXUIElement) -> String? {
         // 检查是否为 WhatsApp 应用
         guard AppDetectionManager.shared.isWhatsAppApp() else {
-            Logger.info("Not WhatsApp app")
+            //Logger.info("Not WhatsApp app")
             return nil
         }
         
@@ -810,5 +826,207 @@ class SelectEventManager {
     func resumeSelectionMonitoring() {
         isSelectionMonitoringPaused = false
         Logger.info("Selection monitoring resumed")
-    } 
+    }
+    
+    // MARK: - WeChat Message Detection
+    
+    // 使用鼠标位置获取 WeChat 聊天历史文本和元素
+    private func getWeChatChatHistoryTextWithMousePosition() -> (text: String, element: AXUIElement)? {
+        // 检查是否为 WeChat 应用
+        guard AppDetectionManager.shared.isWeChatApp() else {
+            //Logger.info("Not WeChat app, skipping mouse position detection")
+            return nil
+        }
+        
+        // 获取当前鼠标位置
+        let mouseLocation = NSEvent.mouseLocation
+        
+        // 将屏幕坐标转换为CGPoint（屏幕坐标系原点在左下角）
+        let screenFrame = NSScreen.main?.frame ?? NSRect.zero
+        let cgPoint = CGPoint(x: mouseLocation.x, y: screenFrame.height - mouseLocation.y)
+        
+        // 获取系统的 UI 元素访问对象
+        var systemWideElement: AXUIElement
+        systemWideElement = AXUIElementCreateSystemWide()
+        
+        // 查找鼠标位置下的元素
+        var elementUnderMouse: AXUIElement?
+        let result = AXUIElementCopyElementAtPosition(systemWideElement, Float(cgPoint.x), Float(cgPoint.y), &elementUnderMouse)
+        
+        guard result == .success, let mouseElement = elementUnderMouse else {
+            return nil
+        }
+        
+        // 验证该元素是否属于 WeChat
+        var pid: pid_t = 0
+        let pidResult = AXUIElementGetPid(mouseElement, &pid)
+        guard pidResult == .success else {
+            return nil
+        }
+        
+        // 检查该 PID 是否属于 WeChat 进程
+        guard let app = NSRunningApplication(processIdentifier: pid),
+              let bundleId = app.bundleIdentifier,
+              bundleId.contains("wechat") || bundleId.contains("WeChat") else {
+            if let failedApp = NSRunningApplication(processIdentifier: pid) {
+                Logger.info("Element not from WeChat process - bundleId: \(failedApp.bundleIdentifier ?? "nil")")
+            } else {
+                Logger.info("Element not from WeChat process - failed to get app")
+            }
+            return nil
+        }
+          
+        // 尝试从鼠标位置的元素获取消息内容
+        if let messageText = getWeChatMessageFromElement(mouseElement) {
+            Logger.info("Successfully extracted WeChat message from mouse position: '\(messageText)'")
+            return (text: messageText, element: mouseElement)
+        }
+        
+        // 如果直接获取失败，尝试遍历父元素
+        var currentElement: AXUIElement? = mouseElement
+        var depth = 0
+        let maxDepth = 5 // 限制遍历深度，防止无限循环
+        
+        while currentElement != nil && depth < maxDepth {
+            if let messageText = getWeChatMessageFromElement(currentElement!) {
+                Logger.info("Successfully extracted WeChat message from parent element (depth \(depth)): '\(messageText)'")
+                return (text: messageText, element: currentElement!)
+            }
+            
+            // 获取父元素
+            var parent: CFTypeRef?
+            let parentResult = AXUIElementCopyAttributeValue(currentElement!, kAXParentAttribute as CFString, &parent)
+            if parentResult == .success, let parentRef = parent {
+                let parentElement = parentRef as! AXUIElement
+                currentElement = parentElement
+                depth += 1
+            } else {
+                break
+            }
+        }
+        return nil
+    }
+    
+    // 从指定元素获取 WeChat 消息内容
+    private func getWeChatMessageFromElement(_ element: AXUIElement) -> String? {
+        // 检查元素角色
+        var role: CFTypeRef?
+        let roleResult = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
+        guard roleResult == .success, let roleString = role as? String else {
+            Logger.info("Failed to get element role")
+            return nil
+        } 
+        
+        // WeChat 历史消息通常是 AXStaticText 角色
+        if roleString == "AXStaticText" {
+            // 根据用户的Inspector发现，WeChat消息内容在Title属性中
+            var title: CFTypeRef?
+            let titleResult = AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &title)
+            
+            if titleResult == .success, let titleString = title as? String, !titleString.isEmpty {
+                Logger.info("WeChat AXStaticText Title: '\(titleString)'")
+                
+                // 验证这是否是有效的消息内容（过滤掉UI元素标题）
+                if isValidWeChatMessage(titleString) {
+                    Logger.info("Successfully parsed WeChat message from AXStaticText Title: '\(titleString)'")
+                    return titleString
+                }
+            }
+        }
+        
+        // 如果不是 AXStaticText 或者没有找到内容，尝试其他常见的WeChat消息元素类型
+        let supportedRoles = ["AXGroup", "AXGenericElement", "AXTextArea", "AXTextField"]
+        if supportedRoles.contains(roleString) {
+            return getWeChatMessageFromElementDirectly(element)
+        }
+        
+        return nil
+    }
+    
+    // 直接从元素获取WeChat消息（尝试多个属性）
+    private func getWeChatMessageFromElementDirectly(_ element: AXUIElement) -> String? {
+        Logger.info("Getting WeChat message directly from element...")
+        
+        let attributesToTry: [(CFString, String)] = [
+            (kAXTitleAttribute as CFString, "Title"),      // WeChat主要使用Title
+            (kAXValueAttribute as CFString, "Value"),
+            ("AXLabel" as CFString, "Label"),
+            (kAXDescriptionAttribute as CFString, "Description"),
+            (kAXHelpAttribute as CFString, "Help"),
+            (kAXSelectedTextAttribute as CFString, "SelectedText")
+        ]
+        
+        for (attribute, attributeName) in attributesToTry {
+            var value: CFTypeRef?
+            let result = AXUIElementCopyAttributeValue(element, attribute, &value)
+            
+            if result == .success, let stringValue = value as? String, !stringValue.isEmpty {
+                Logger.info("WeChat Element \(attributeName): '\(stringValue)'")
+                
+                if isValidWeChatMessage(stringValue) {
+                    Logger.info("Successfully extracted WeChat message from element \(attributeName): '\(stringValue)'")
+                    return stringValue
+                }
+            }
+        }
+        
+        return nil
+    }
+    
+    // 验证是否是有效的WeChat消息内容
+    private func isValidWeChatMessage(_ text: String) -> Bool {
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // 过滤掉太短的文本
+        guard trimmedText.count >= 1 else {
+            return false
+        }
+        
+        // 过滤掉常见的UI元素标题（可以根据需要扩展）
+        let uiElementTitles = [
+            "发送", "Send", "取消", "Cancel", "确定", "OK", 
+            "最小化", "Minimize", "关闭", "Close", "最大化", "Maximize",
+            "搜索", "Search", "更多", "More", "设置", "Settings",
+            "微信", "WeChat", "联系人", "Contacts", "发现", "Discover",
+            "我", "Me", "聊天", "Chats"
+        ]
+        
+        // 如果文本是常见UI元素标题，则不是消息
+        for uiTitle in uiElementTitles {
+            if trimmedText == uiTitle {
+                Logger.info("Filtered out UI element title: '\(trimmedText)'")
+                return false
+            }
+        }
+        
+        // 其他过滤规则
+        // 过滤掉只包含单个字符的表情符号按钮等
+        if trimmedText.count == 1 && trimmedText.unicodeScalars.first?.properties.isEmojiPresentation == true {
+            Logger.info("Filtered out single emoji: '\(trimmedText)'")
+            return false
+        }
+        
+        Logger.info("Valid WeChat message detected: '\(trimmedText)'")
+        return true
+    }
+    
+    // 标记元素为WeChat历史消息
+    private func markElementAsWeChatHistoryMessage(_ element: AXUIElement) {
+        let elementHash = Unmanaged.passUnretained(element).toOpaque().hashValue
+        wechatHistoryMessageElements.insert(elementHash)
+        Logger.info("Marked element as WeChat history message: \(elementHash)")
+        
+        // 清理旧的标记（保留最近的100个）
+        if wechatHistoryMessageElements.count > 100 {
+            let sortedElements = Array(wechatHistoryMessageElements).sorted()
+            let toRemove = sortedElements.prefix(sortedElements.count - 100)
+            wechatHistoryMessageElements.subtract(toRemove)
+        }
+    }
+    
+    // 检查元素是否为WeChat历史消息
+    static func isWeChatHistoryMessage(_ element: AXUIElement) -> Bool {
+        let elementHash = Unmanaged.passUnretained(element).toOpaque().hashValue
+        return shared.wechatHistoryMessageElements.contains(elementHash)
+    }
 }
