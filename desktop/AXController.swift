@@ -367,6 +367,32 @@ class AXController {
                 }
             }
             
+            // 对于 WhatsApp，需要区分消息历史和输入框
+            var isWhatsApp = false
+            if pidResult == .success, let app = NSRunningApplication(processIdentifier: pid) {
+                if let appBundleId = app.bundleIdentifier, appBundleId.lowercased().contains("whatsapp") {
+                    isWhatsApp = true
+                    Logger.info("Element belongs to WhatsApp app (bundleId: \(appBundleId))")
+                }
+            }
+            
+            if isWhatsApp {
+                // WhatsApp 消息历史元素（不可编辑，应显示浮动窗口）
+                if roleString == "AXGenericElement" || roleString == "AXGroup" || roleString == "AXStaticText" {
+                    Logger.info("WhatsApp message element detected as non-editable (showing floating window)")
+                    return false
+                }
+                
+                // WhatsApp 输入框元素（可编辑，应该粘贴翻译结果）
+                if roleString == "AXTextField" || roleString == "AXTextArea" {
+                    Logger.info("WhatsApp input element detected as editable")
+                    return true
+                }
+                
+                // 其他 WhatsApp 元素默认不可编辑
+                return false
+            }
+            
             // 对于TRAE应用，特殊处理
             if AppDetectionManager.shared.isTRAEApp() {
                 // TRAE应用中的AXTextArea和AXTextField都应该可编辑

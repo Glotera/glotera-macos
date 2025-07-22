@@ -69,6 +69,15 @@ class InputManager {
         
         if elemResult != .success {
             Logger.debug("Failed to get focused UI element, try another method: \(elemResult)")
+            
+            // 特殊处理：Microsoft Teams
+            if AppDetectionManager.shared.isTeamsApp() {
+                Logger.info("Teams detected - trying specialized focus detection")
+                if let teamsElement = getTeamsFocusedElement(appElement) {
+                    return teamsElement
+                }
+            }
+            
             //如果无法从system-wide元素->焦点应用->焦点元素这个路径获取成功，直接尝试 system-wide->焦点元素
             let elemResult = AXUIElementCopyAttributeValue(sysWide, kAXFocusedUIElementAttribute as CFString, &focusedElem)
             if elemResult != .success {
@@ -144,6 +153,156 @@ class InputManager {
         if AppDetectionManager.shared.isTRAEApp() {
             Logger.info("Element role=\(role as? String ?? "unknown"), enabled=\(enabled as? Bool ?? false), canEdit=\(canEdit as? Bool ?? false)")
         }
+    }
+    
+    // Microsoft Teams 专用焦点检测
+    private func getTeamsFocusedElement(_ appElement: AXUIElement) -> AXUIElement? {
+        Logger.info("Starting specialized Teams focus detection")
+        
+        // Teams 是基于 Electron 的应用，通常有复杂的嵌套结构
+        // 尝试多种方法来找到可编辑的输入元素
+        
+        // 方法1: 深度遍历查找文本输入框
+        if let inputElement = findTeamsInputElement(appElement, depth: 0, maxDepth: 6) {
+            Logger.info("Found Teams input element via deep traversal")
+            return inputElement
+        }
+        
+        // 方法2: 查找 WebArea 然后深入
+        if let webElement = findTeamsWebArea(appElement) {
+            Logger.info("Found Teams web area, searching for input")
+            if let inputElement = findTeamsInputElement(webElement, depth: 0, maxDepth: 4) {
+                Logger.info("Found Teams input element in web area")
+                return inputElement
+            }
+        }
+        
+        // 方法3: 使用鼠标位置检测 (类似 WhatsApp 方法)
+        if let mouseElement = getElementUnderMouse() {
+            if isTeamsEditableElement(mouseElement) {
+                Logger.info("Found Teams element under mouse")
+                return mouseElement
+            }
+        }
+        
+        Logger.warn("All Teams focus detection methods failed")
+        return nil
+    }
+    
+    // 深度查找 Teams 输入元素
+    private func findTeamsInputElement(_ element: AXUIElement, depth: Int, maxDepth: Int) -> AXUIElement? {
+        if depth > maxDepth {
+            return nil
+        }
+        
+        // 检查当前元素是否是可编辑的输入框
+        if isTeamsEditableElement(element) {
+            return element
+        }
+        
+        // 获取子元素并递归搜索
+        var children: CFTypeRef?
+        let childrenResult = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children)
+        
+        if childrenResult == .success, let childrenArray = children as? NSArray {
+            for child in childrenArray {
+                let childElement = child as! AXUIElement
+                if let found = findTeamsInputElement(childElement, depth: depth + 1, maxDepth: maxDepth) {
+                    return found
+                }
+            }
+        }
+        
+        return nil
+    }
+    
+    // 查找 Teams WebArea
+    private func findTeamsWebArea(_ appElement: AXUIElement) -> AXUIElement? {
+        var children: CFTypeRef?
+        let childrenResult = AXUIElementCopyAttributeValue(appElement, kAXChildrenAttribute as CFString, &children)
+        
+        if childrenResult == .success, let childrenArray = children as? NSArray {
+            for child in childrenArray {
+                let childElement = child as! AXUIElement
+                var role: CFTypeRef?
+                if AXUIElementCopyAttributeValue(childElement, kAXRoleAttribute as CFString, &role) == .success,
+                   let roleString = role as? String,
+                   roleString == "AXWebArea" {
+                    return childElement
+                }
+                
+                // 递归查找
+                if let webArea = findTeamsWebArea(childElement) {
+                    return webArea
+                }
+            }
+        }
+        
+        return nil
+    }
+    
+    // 检查是否是 Teams 可编辑元素
+    private func isTeamsEditableElement(_ element: AXUIElement) -> Bool {
+        var role: CFTypeRef?
+        let roleResult = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
+        
+        guard roleResult == .success, let roleString = role as? String else {
+            return false
+        }
+        
+        // Teams 中常见的可编辑元素类型
+        let editableRoles = [
+            "AXTextField",
+            "AXTextArea", 
+            "AXComboBox",
+            "AXGroup",  // Teams 消息输入框通常是 AXGroup
+            "AXGenericElement"  // 有时是通用元素
+        ]
+        
+        if !editableRoles.contains(roleString) {
+            return false
+        }
+        
+        // 检查是否可编辑
+        var canEdit: CFTypeRef?
+        if AXUIElementCopyAttributeValue(element, "AXCanEdit" as CFString, &canEdit) == .success,
+           let canEditBool = canEdit as? Bool,
+           canEditBool {
+            return true
+        }
+        
+        // 检查是否有值属性 (输入框特征)
+        var value: CFTypeRef?
+        if AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &value) == .success {
+            return true
+        }
+        
+        // Teams 的输入框可能没有标准的编辑属性，但有特定的描述
+        var description: CFTypeRef?
+        if AXUIElementCopyAttributeValue(element, kAXDescriptionAttribute as CFString, &description) == .success,
+           let descString = description as? String,
+           descString.lowercased().contains("message") || descString.lowercased().contains("type") {
+            return true
+        }
+        
+        return false
+    }
+    
+    // 获取鼠标位置下的元素
+    private func getElementUnderMouse() -> AXUIElement? {
+        let mouseLocation = NSEvent.mouseLocation
+        let screenFrame = NSScreen.main?.frame ?? NSRect.zero
+        let cgPoint = CGPoint(x: mouseLocation.x, y: screenFrame.height - mouseLocation.y)
+        
+        let systemWideElement = AXUIElementCreateSystemWide()
+        var elementUnderMouse: AXUIElement?
+        let result = AXUIElementCopyElementAtPosition(systemWideElement, Float(cgPoint.x), Float(cgPoint.y), &elementUnderMouse)
+        
+        if result == .success {
+            return elementUnderMouse
+        }
+        
+        return nil
     }
 
     // ==== 键盘模拟事件 ====

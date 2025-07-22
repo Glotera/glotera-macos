@@ -39,6 +39,12 @@ class AppDetectionManager {
     // Text editor application bundle identifiers
     private let textEditorBundleIds = [
         "com.apple.Notes",
+        "com.apple.TextEdit",
+        "com.coderforart.One-Markdown",
+        "com.microsoft.Word",
+        "com.microsoft.Excel",
+        "com.microsoft.Powerpoint",
+        "com.microsoft.OneNote",
         "com.cursor.Cursor",
         "com.trae.TRAE",
         "com.microsoft.VSCode",
@@ -212,6 +218,16 @@ class AppDetectionManager {
         return bundleId.contains("wechat") || bundleId.contains("WeChat")
     }
     
+    /// Check if current application is WhatsApp
+    func isWhatsAppApp() -> Bool {
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+              let bundleId = frontmostApp.bundleIdentifier else {
+            return false
+        }
+        
+        return bundleId == "net.whatsapp.WhatsApp"
+    }
+    
     /// Check if current application is TRAE
     func isTRAEApp() -> Bool {
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
@@ -220,6 +236,16 @@ class AppDetectionManager {
         }
         
         return bundleId == "com.trae.TRAE"
+    }
+    
+    /// Check if current application is Microsoft Teams
+    func isTeamsApp() -> Bool {
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+              let bundleId = frontmostApp.bundleIdentifier else {
+            return false
+        }
+        
+        return bundleId == "com.microsoft.Teams"
     }
     
     /// Check if current application is AdsPower
