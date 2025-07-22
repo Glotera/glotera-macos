@@ -25,6 +25,11 @@ class SelectEventManager {
     // 用于跟踪最近的自动翻译操作
     private var lastAutoTranslationTime: Date = Date.distantPast
     private var lastAutoTranslationText: String = ""
+    
+    // WhatsApp 特殊处理
+    private var isWhatsAppMessageSelected: Bool = false
+    private var whatsAppMessageShowTime: Date = Date.distantPast
+    private var lastWhatsAppSelectedText: String = ""
 
     private init() {}
 
@@ -172,9 +177,19 @@ class SelectEventManager {
         guard let selection = getSelectedText() else {
             // 如果没有选中文本，隐藏菜单并重置状态
             if !lastSelectedText.isEmpty {
+                // 特殊处理：如果是 WhatsApp 消息且刚刚显示菜单，给更长时间
+                if isWhatsAppMessageSelected && AppDetectionManager.shared.isWhatsAppApp() {
+                    let timeSinceShow = Date().timeIntervalSince(whatsAppMessageShowTime)
+                    if timeSinceShow < 5.0 { // 给 WhatsApp 消息 5 秒的稳定时间
+                        Logger.info("WhatsApp message menu protection: keeping menu visible (no selection, \(String(format: "%.1f", timeSinceShow))s since show)")
+                        return
+                    }
+                }
+                
                 TranslationMenuWindow.shared.hide()
                 lastSelectedText = ""
                 isMenuShowing = false
+                isWhatsAppMessageSelected = false
             }
             
             let processingTime = Date().timeIntervalSince(startTime)
@@ -187,9 +202,22 @@ class SelectEventManager {
         // 如果选中文本发生变化，也隐藏菜单
         let originalText = selection.text
         if originalText != lastSelectedText && !lastSelectedText.isEmpty {
+            // 特殊处理：如果是 WhatsApp 消息且刚刚显示菜单，给更长时间
+            if isWhatsAppMessageSelected && AppDetectionManager.shared.isWhatsAppApp() {
+                let timeSinceShow = Date().timeIntervalSince(whatsAppMessageShowTime)
+                // 检查是否是同一个WhatsApp消息，如果是，保持菜单显示
+                if timeSinceShow < 5.0 && (originalText == lastWhatsAppSelectedText || originalText.isEmpty) {
+                    Logger.info("WhatsApp message menu protection: keeping menu visible (text changed, \(String(format: "%.1f", timeSinceShow))s since show, same message: \(originalText == lastWhatsAppSelectedText))")
+                    return
+                }
+            }
+            
+            Logger.info("Hiding menu due to text change: '\(lastSelectedText)' -> '\(originalText)'")
             TranslationMenuWindow.shared.hide()
             lastSelectedText = ""
             isMenuShowing = false
+            isWhatsAppMessageSelected = false
+            lastWhatsAppSelectedText = ""
         }
         
         let processingTime = Date().timeIntervalSince(startTime)
@@ -221,9 +249,21 @@ class SelectEventManager {
         guard let selection = getSelectedText() else {
             // 如果没有选中文本，隐藏菜单并重置状态
             if !lastSelectedText.isEmpty {
+                // 特殊处理：如果是 WhatsApp 消息且刚刚显示菜单，给更长时间
+                if isWhatsAppMessageSelected && AppDetectionManager.shared.isWhatsAppApp() {
+                    let timeSinceShow = Date().timeIntervalSince(whatsAppMessageShowTime)
+                    if timeSinceShow < 5.0 { // 给 WhatsApp 消息 5 秒的稳定时间
+                        Logger.info("WhatsApp message menu protection in showMenu: keeping menu visible (\(String(format: "%.1f", timeSinceShow))s since show)")
+                        return
+                    }
+                }
+                
+                Logger.info("Hiding menu in checkSelectedTextAndShowMenu - no selection found")
                 TranslationMenuWindow.shared.hide()
                 lastSelectedText = ""
                 isMenuShowing = false
+                isWhatsAppMessageSelected = false
+                lastWhatsAppSelectedText = ""
             }
             
             let processingTime = Date().timeIntervalSince(startTime)
@@ -262,7 +302,8 @@ class SelectEventManager {
             lastSelectedText = originalText
             isMenuShowing = true
             
-            Logger.info("Selected text after \(selectionType) selection: '\(originalText)' (length: \(originalText.count))") 
+            Logger.info("Selected text after \(selectionType) selection: '\(originalText)' (length: \(originalText.count))")
+            Logger.info("WhatsApp message selected flag: \(isWhatsAppMessageSelected)")
             
             // ⭐️ 关键：在弹出翻译菜单之前记录应用信息，这时应用还在前台
             EnvironmentManager.shared.recordTriggerApp()
@@ -286,7 +327,9 @@ class SelectEventManager {
             TranslationMenuWindow.shared.onMenuClosed = { [weak self] in
                     self?.isMenuShowing = false
                     self?.lastSelectedText = ""
-                Logger.info("Menu closed callback triggered")
+                    self?.isWhatsAppMessageSelected = false
+                    self?.lastWhatsAppSelectedText = ""
+                Logger.info("Menu closed callback triggered - WhatsApp flag reset")
                 }
         }
     }
@@ -313,8 +356,389 @@ class SelectEventManager {
                 return (text: selectedText, element: focused)
             }
         }
+        
+        // 特殊处理：WhatsApp 聊天历史 - 使用鼠标位置定位正确的消息
+        if let whatsappResult = getWhatsAppChatHistoryTextWithMousePosition() {
+            Logger.info("Got WhatsApp chat history text: '\(whatsappResult.text)'")
+            // 标记这是 WhatsApp 消息选择
+            isWhatsAppMessageSelected = true
+            whatsAppMessageShowTime = Date()
+            lastWhatsAppSelectedText = whatsappResult.text
+            Logger.info("WhatsApp message selected - protection activated for 5 seconds")
+            // 重要：返回实际的消息元素，不是焦点元素
+            return (text: whatsappResult.text, element: whatsappResult.element)
+        }
          
         return nil
+    }
+    
+    // 获取 WhatsApp 聊天历史文本
+    private func getWhatsAppChatHistoryText(from element: AXUIElement) -> String? {
+        // 检查是否为 WhatsApp 应用
+        guard AppDetectionManager.shared.isWhatsAppApp() else {
+            Logger.info("Not WhatsApp app")
+            return nil
+        }
+        
+        // 检查元素角色
+        var role: CFTypeRef?
+        let roleResult = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
+        guard roleResult == .success, let roleString = role as? String else {
+            Logger.info("Failed to get element role")
+            return nil
+        }
+        
+        Logger.info("Found WhatsApp element with role: \(roleString)")
+        
+        // 处理 AXGenericElement（直接包含消息内容）
+        if roleString == "AXGenericElement" {
+            return getMessageFromGenericElement(element)
+        }
+        
+        // 处理 AXGroup（包含子元素，需要查找消息）
+        if roleString == "AXGroup" {
+            return getMessageFromGroupElement(element)
+        }
+        
+        Logger.info("Element role not supported: \(roleString)")
+        return nil
+    }
+    
+    // 从 AXGenericElement 获取消息
+    private func getMessageFromGenericElement(_ element: AXUIElement) -> String? {
+        Logger.info("Getting message from AXGenericElement...")
+        
+        // 首先尝试从 Label 属性获取（Inspector 显示这里包含消息内容）
+        var label: CFTypeRef?
+        let labelResult = AXUIElementCopyAttributeValue(element, "AXLabel" as CFString, &label)
+        
+        if labelResult == .success, let labelString = label as? String, !labelString.isEmpty {
+            Logger.info("AXGenericElement Label: '\(labelString)'")
+            
+            // 检查是否包含 WhatsApp 消息的特征
+            if labelString.contains(",") && (labelString.contains("message") || labelString.contains("Your message")) {
+                Logger.info("Found WhatsApp message in Label attribute")
+                return parseWhatsAppMessage(labelString)
+            }
+        } else {
+            Logger.info("AXGenericElement Label: empty or failed (result: \(labelResult))")
+        }
+        
+        // 如果 Label 没有内容，尝试其他属性
+        let attributesToTry: [(CFString, String)] = [
+            (kAXValueAttribute as CFString, "Value"),
+            (kAXDescriptionAttribute as CFString, "Description"),
+            (kAXTitleAttribute as CFString, "Title"),
+            (kAXHelpAttribute as CFString, "Help"),
+            (kAXSelectedTextAttribute as CFString, "SelectedText")
+        ]
+        
+        for (attribute, attributeName) in attributesToTry {
+            var value: CFTypeRef?
+            let result = AXUIElementCopyAttributeValue(element, attribute, &value)
+            
+            if result == .success, let stringValue = value as? String, !stringValue.isEmpty {
+                Logger.info("AXGenericElement \(attributeName): '\(stringValue)'")
+                
+                if let parsedContent = parseWhatsAppMessage(stringValue) {
+                    Logger.info("Successfully parsed WhatsApp message from \(attributeName): '\(parsedContent)'")
+                    return parsedContent
+                }
+            }
+        }
+        
+        return nil
+    }
+    
+    // 从 AXGroup 获取消息
+    private func getMessageFromGroupElement(_ element: AXUIElement) -> String? {
+        Logger.info("Getting message from AXGroup...")
+        
+        // 获取子元素
+        var children: CFTypeRef?
+        let childrenResult = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children)
+        
+        if childrenResult == .success, let childrenArray = children {
+            // 首先尝试从当前元素本身获取消息（可能是直接选中的元素）
+            if let message = getMessageFromElementDirectly(element) {
+                Logger.info("Found message directly from current element: '\(message)'")
+                return message
+            }
+            
+            // 将CFTypeRef转换为NSArray，然后遍历
+            if let nsArray = childrenArray as? NSArray {
+                Logger.info("Found \(nsArray.count) child elements in AXGroup")
+                
+                for i in 0..<nsArray.count {
+                    let child = nsArray[i] as! AXUIElement
+                    Logger.info("Checking child element \(i)...")
+                    
+                    // 检查子元素的角色
+                    var childRole: CFTypeRef?
+                    let childRoleResult = AXUIElementCopyAttributeValue(child, kAXRoleAttribute as CFString, &childRole)
+                    if childRoleResult == .success, let childRoleString = childRole as? String {
+                        Logger.info("Child \(i) role: \(childRoleString)")
+                        
+                        // 如果子元素是 AXGenericElement，尝试获取消息
+                        if childRoleString == "AXGenericElement" {
+                            if let message = getMessageFromGenericElement(child) {
+                                Logger.info("Found WhatsApp message in child \(i): '\(message)'")
+                                return message
+                            }
+                        }
+                        
+                        // 如果子元素是 AXGroup，递归查找
+                        if childRoleString == "AXGroup" {
+                            if let message = getMessageFromGroupElement(child) {
+                                Logger.info("Found WhatsApp message in child \(i) group: '\(message)'")
+                                return message
+                            }
+                        }
+                        
+                        // 尝试从子元素的其他属性获取文本
+                        let attributesToTry: [(CFString, String)] = [
+                            ("AXLabel" as CFString, "Label"),
+                            (kAXValueAttribute as CFString, "Value"),
+                            (kAXDescriptionAttribute as CFString, "Description"),
+                            (kAXTitleAttribute as CFString, "Title"),
+                            (kAXHelpAttribute as CFString, "Help"),
+                            (kAXSelectedTextAttribute as CFString, "SelectedText")
+                        ]
+                        
+                        for (attribute, attributeName) in attributesToTry {
+                            var childValue: CFTypeRef?
+                            let childResult = AXUIElementCopyAttributeValue(child, attribute, &childValue)
+                            
+                            if childResult == .success, let childStringValue = childValue as? String, !childStringValue.isEmpty {
+                                Logger.info("Child \(i) \(attributeName): '\(childStringValue)'")
+                                
+                                if let parsedContent = parseWhatsAppMessage(childStringValue) {
+                                    Logger.info("Successfully parsed WhatsApp message from child \(i) \(attributeName): '\(parsedContent)'")
+                                    return parsedContent
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        return nil
+    }
+    
+    // 直接从元素获取消息（不遍历子元素）
+    private func getMessageFromElementDirectly(_ element: AXUIElement) -> String? {
+        Logger.info("Getting message directly from element...")
+        
+        let attributesToTry: [(CFString, String)] = [
+            ("AXLabel" as CFString, "Label"),
+            (kAXValueAttribute as CFString, "Value"),
+            (kAXDescriptionAttribute as CFString, "Description"),
+            (kAXTitleAttribute as CFString, "Title"),
+            (kAXHelpAttribute as CFString, "Help"),
+            (kAXSelectedTextAttribute as CFString, "SelectedText")
+        ]
+        
+        for (attribute, attributeName) in attributesToTry {
+            var value: CFTypeRef?
+            let result = AXUIElementCopyAttributeValue(element, attribute, &value)
+            
+            if result == .success, let stringValue = value as? String, !stringValue.isEmpty {
+                Logger.info("Element \(attributeName): '\(stringValue)'")
+                
+                if let parsedContent = parseWhatsAppMessage(stringValue) {
+                    Logger.info("Successfully parsed WhatsApp message from element \(attributeName): '\(parsedContent)'")
+                    return parsedContent
+                }
+            }
+        }
+        
+        return nil
+    }
+    
+    // 使用鼠标位置获取 WhatsApp 聊天历史文本和元素
+    private func getWhatsAppChatHistoryTextWithMousePosition() -> (text: String, element: AXUIElement)? {
+        // 检查是否为 WhatsApp 应用
+        guard AppDetectionManager.shared.isWhatsAppApp() else {
+            // Logger.info("Not WhatsApp app, skipping mouse position detection")
+            return nil
+        }
+        
+        // 获取当前鼠标位置
+        let mouseLocation = NSEvent.mouseLocation
+        
+        // 将屏幕坐标转换为CGPoint（屏幕坐标系原点在左下角）
+        let screenFrame = NSScreen.main?.frame ?? NSRect.zero
+        let cgPoint = CGPoint(x: mouseLocation.x, y: screenFrame.height - mouseLocation.y)
+        
+        // 获取系统的 UI 元素访问对象
+        var systemWideElement: AXUIElement
+        systemWideElement = AXUIElementCreateSystemWide()
+        
+        // 查找鼠标位置下的元素
+        var elementUnderMouse: AXUIElement?
+        let result = AXUIElementCopyElementAtPosition(systemWideElement, Float(cgPoint.x), Float(cgPoint.y), &elementUnderMouse)
+        
+        guard result == .success, let mouseElement = elementUnderMouse else {
+            return nil
+        }
+        
+        // 验证该元素是否属于 WhatsApp
+        var pid: pid_t = 0
+        let pidResult = AXUIElementGetPid(mouseElement, &pid)
+        guard pidResult == .success else {
+            return nil
+        }
+        
+        // 检查该 PID 是否属于 WhatsApp 进程
+        guard let app = NSRunningApplication(processIdentifier: pid),
+              let bundleId = app.bundleIdentifier,
+              bundleId.lowercased().contains("whatsapp") else {
+            return nil
+        }
+        
+        // 尝试从鼠标位置的元素获取消息内容
+        if let messageText = getWhatsAppMessageFromElement(mouseElement) {
+            Logger.info("Successfully extracted WhatsApp message from mouse position: '\(messageText)'")
+            return (text: messageText, element: mouseElement)
+        }
+        
+        // 如果直接获取失败，尝试遍历父元素
+        var currentElement: AXUIElement? = mouseElement
+        var depth = 0
+        let maxDepth = 5 // 限制遍历深度，防止无限循环
+        
+        while currentElement != nil && depth < maxDepth {
+            if let messageText = getWhatsAppMessageFromElement(currentElement!) {
+                Logger.info("Successfully extracted WhatsApp message from parent element (depth \(depth)): '\(messageText)'")
+                return (text: messageText, element: currentElement!)
+            }
+            
+            // 获取父元素
+            var parent: CFTypeRef?
+            let parentResult = AXUIElementCopyAttributeValue(currentElement!, kAXParentAttribute as CFString, &parent)
+            if parentResult == .success, let parentRef = parent {
+                let parentElement = parentRef as! AXUIElement
+                currentElement = parentElement
+                depth += 1
+            } else {
+                break
+            }
+        }
+        return nil
+    }
+    
+    // 从指定元素获取 WhatsApp 消息内容
+    private func getWhatsAppMessageFromElement(_ element: AXUIElement) -> String? {
+        // 检查元素角色
+        var role: CFTypeRef?
+        let roleResult = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
+        guard roleResult == .success, let roleString = role as? String else {
+            return nil
+        }
+        
+        // 处理不同类型的元素
+        switch roleString {
+        case "AXGenericElement":
+            return getMessageFromGenericElement(element)
+        case "AXGroup":
+            return getMessageFromGroupElement(element)
+        case "AXStaticText":
+            // 对于静态文本，直接尝试获取内容
+            return getMessageFromElementDirectly(element)
+        default:
+            // 对于其他类型，尝试直接获取消息
+            Logger.info("Trying direct message extraction for role: \(roleString)")
+            return getMessageFromElementDirectly(element)
+        }
+    }
+    
+    // 解析 WhatsApp 消息格式 - 改进版本，支持消息内容包含逗号
+    private func parseWhatsAppMessage(_ rawText: String) -> String? {
+        Logger.info("Attempting to parse WhatsApp message: '\(rawText)'")
+        
+        // WhatsApp 消息格式：Your message, [Message Content with possible commas], July22, at08:38, Sent to John Warhol, Red
+        // 从后往前解析，避免消息内容中的逗号干扰
+        let parts = rawText.components(separatedBy: ",")
+        
+        guard parts.count >= 2 else {
+            Logger.warn("WhatsApp message format invalid, parts count: \(parts.count)")
+            return nil
+        }
+        
+        // 从后往前找发送人信息 (包含 "Send to" 或 "Receive from")
+        var senderIndex = -1
+        for i in stride(from: parts.count - 1, through: 0, by: -1) {
+            let part = parts[i].trimmingCharacters(in: .whitespacesAndNewlines)
+            if part.lowercased().contains("send to") || part.lowercased().contains("receive from") || part.lowercased().contains("sent to") || part.lowercased().contains("received from") {
+                senderIndex = i
+                break
+            }
+        }
+        
+        if senderIndex == -1 {
+            // 没有找到发送人信息，使用原有简单解析
+            Logger.info("No sender info found, using simple parsing")
+            let messageType = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+            let messageContent = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            Logger.info("Message type: '\(messageType)', Content: '\(messageContent)'")
+            return messageContent.isEmpty ? nil : messageContent
+        }
+        
+        // 找到发送人信息，往前找时间信息
+        var timeIndex = -1
+        if senderIndex > 1 {
+            // 检查发送人信息前面一个或两个位置是否是时间
+            for i in stride(from: senderIndex - 1, through: max(0, senderIndex - 2), by: -1) {
+                let part = parts[i].trimmingCharacters(in: .whitespacesAndNewlines)
+                if part.lowercased().hasPrefix("at") || part.contains(":") {
+                    timeIndex = i
+                    break
+                }
+            }
+        }
+        
+        // 找时间信息前面的日期
+        var dateIndex = -1
+        if timeIndex > 0 {
+            let part = parts[timeIndex - 1].trimmingCharacters(in: .whitespacesAndNewlines)
+            // 检查是否是日期格式 (如 "July22", "July 22", 月份名称等)
+            let datePattern = #"(?i)(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s*\d+"#
+            if part.range(of: datePattern, options: .regularExpression) != nil {
+                dateIndex = timeIndex - 1
+            }
+        }
+        
+        // 确定消息内容的结束位置
+        var contentEndIndex = parts.count - 1
+        if dateIndex > 1 {
+            contentEndIndex = dateIndex - 1
+        } else if timeIndex > 1 {
+            contentEndIndex = timeIndex - 1
+        } else if senderIndex > 1 {
+            contentEndIndex = senderIndex - 1
+        }
+        
+        // 提取消息内容 (从第2部分到contentEndIndex)
+        if contentEndIndex >= 1 {
+            var contentParts: [String] = []
+            for i in 1...contentEndIndex {
+                contentParts.append(parts[i])
+            }
+            let messageContent = contentParts.joined(separator: ",").trimmingCharacters(in: .whitespacesAndNewlines)
+            
+            let messageType = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+            Logger.info("Parsed - Type: '\(messageType)', Content: '\(messageContent)'")
+            
+            if !messageContent.isEmpty {
+                return messageContent
+            }
+        }
+        
+        // 如果解析失败，回退到简单解析
+        Logger.info("Advanced parsing failed, falling back to simple parsing")
+        let messageContent = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+        return messageContent.isEmpty ? nil : messageContent
     }
 
      
