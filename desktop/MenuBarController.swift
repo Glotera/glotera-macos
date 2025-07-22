@@ -66,106 +66,7 @@ class MenuBarController: NSObject, NSMenuDelegate {
         
 
         menu.addItem(NSMenuItem.separator())
-        
-
-        #if DEBUG
-        // Debug menu
-        menu.addItem(NSMenuItem.separator())
-        let debugMenu = NSMenuItem(title: "Debug", action: nil, keyEquivalent: "")
-        let debugSubMenu = NSMenu()
-        
-        let detailedDiagnosticsItem = NSMenuItem(title: "Detailed Diagnostics", action: #selector(detailedDiagnostics), keyEquivalent: "")
-        detailedDiagnosticsItem.target = self
-        debugSubMenu.addItem(detailedDiagnosticsItem)
-        
-        debugSubMenu.addItem(NSMenuItem.separator())
-        
-        let testTriggerItem = NSMenuItem(title: "Test Trigger", action: #selector(testTrigger), keyEquivalent: "")
-        testTriggerItem.target = self
-        debugSubMenu.addItem(testTriggerItem)
-        
-        let testDiscordTriggerItem = NSMenuItem(title: "Test Discord Trigger", action: #selector(testDiscordTrigger), keyEquivalent: "")
-        testDiscordTriggerItem.target = self
-        debugSubMenu.addItem(testDiscordTriggerItem)
-        
-        let testSpaceKeyItem = NSMenuItem(title: "Test Space Key Capture", action: #selector(testSpaceKeyCapture), keyEquivalent: "")
-        testSpaceKeyItem.target = self
-        debugSubMenu.addItem(testSpaceKeyItem)
-        
-        let testWeChatEnterItem = NSMenuItem(title: "Test WeChat Enter Key", action: #selector(testWeChatEnterKey), keyEquivalent: "")
-        testWeChatEnterItem.target = self
-        debugSubMenu.addItem(testWeChatEnterItem)
-        
-        let testEnterLoopItem = NSMenuItem(title: "Test Enter Key Loop", action: #selector(testEnterKeyLoop), keyEquivalent: "")
-        testEnterLoopItem.target = self
-        debugSubMenu.addItem(testEnterLoopItem)
-        
-        debugSubMenu.addItem(NSMenuItem.separator())
-        
-        let showCacheInfoItem = NSMenuItem(title: "Show Language Cache Info", action: #selector(showLanguageCacheInfo), keyEquivalent: "")
-        showCacheInfoItem.target = self
-        debugSubMenu.addItem(showCacheInfoItem)
-        
-        debugSubMenu.addItem(NSMenuItem.separator())
-        
-        // Memory management debug options
-        let memoryStatsItem = NSMenuItem(title: "Show Memory Statistics", action: #selector(showMemoryStatistics), keyEquivalent: "")
-        memoryStatsItem.target = self
-        debugSubMenu.addItem(memoryStatsItem)
-        
-        let cleanupIdleItem = NSMenuItem(title: "Cleanup Idle Windows", action: #selector(cleanupIdleWindows), keyEquivalent: "")
-        cleanupIdleItem.target = self
-        debugSubMenu.addItem(cleanupIdleItem)
-        
-        let forceCleanupItem = NSMenuItem(title: "Force Cleanup All Windows", action: #selector(forceCleanupAllWindows), keyEquivalent: "")
-        forceCleanupItem.target = self
-        debugSubMenu.addItem(forceCleanupItem)
-        
-        // Language cache management is now automatic, no manual refresh needed
-        
-        let showStatusItem = NSMenuItem(title: "Show Status", action: #selector(showStatus), keyEquivalent: "")
-        showStatusItem.target = self
-        debugSubMenu.addItem(showStatusItem)
-        
-        let restartEventItem = NSMenuItem(title: "Restart Event Monitoring", action: #selector(restartEventMonitoring), keyEquivalent: "")
-        restartEventItem.target = self
-        debugSubMenu.addItem(restartEventItem)
-        
-        debugSubMenu.addItem(NSMenuItem.separator())
-        
-        let resetCountersItem = NSMenuItem(title: "Reset Counters", action: #selector(resetCounters), keyEquivalent: "")
-        resetCountersItem.target = self
-        debugSubMenu.addItem(resetCountersItem)
-        
-        let forceHealthCheckItem = NSMenuItem(title: "Force Business Logic Check", action: #selector(forceBusinessLogicCheck), keyEquivalent: "")
-        forceHealthCheckItem.target = self
-        debugSubMenu.addItem(forceHealthCheckItem)
-        
-        debugSubMenu.addItem(NSMenuItem.separator())
-        
-        let openConsoleItem = NSMenuItem(title: "Open Console", action: #selector(openConsole), keyEquivalent: "")
-        openConsoleItem.target = self
-        debugSubMenu.addItem(openConsoleItem)
-        
-        debugSubMenu.addItem(NSMenuItem.separator())
-        
-        // Update testing menu items
-        let testUpdateAvailableItem = NSMenuItem(title: "Test: Update Available", action: #selector(testUpdateAvailable), keyEquivalent: "")
-        testUpdateAvailableItem.target = self
-        debugSubMenu.addItem(testUpdateAvailableItem)
-        
-        let testNoUpdateItem = NSMenuItem(title: "Test: No Update Available", action: #selector(testNoUpdate), keyEquivalent: "")
-        testNoUpdateItem.target = self
-        debugSubMenu.addItem(testNoUpdateItem)
-        
-        let testBetaChannelItem = NSMenuItem(title: "Test: Switch to Beta Channel", action: #selector(testBetaChannel), keyEquivalent: "")
-        testBetaChannelItem.target = self
-        debugSubMenu.addItem(testBetaChannelItem)
-        
-        debugMenu.submenu = debugSubMenu
-        menu.addItem(debugMenu)
-        #endif
-        
+         
         // Exit menu
         menu.addItem(NSMenuItem.separator())
         let quitItem = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
@@ -252,63 +153,7 @@ class MenuBarController: NSObject, NSMenuDelegate {
         // Note: In Sparkle 2.7.1, the standard updater shows its own UI
         // No need for manual notification as Sparkle handles user feedback
     }
-    
-    @objc func testTrigger() {
-        Logger.info("Manual trigger test requested")
-        
-        // 在后台线程执行测试，避免阻塞主线程
-        DispatchQueue.global(qos: .userInitiated).async {
-            InputMonitor.shared.manualTriggerTest()
-            
-            // 回到主线程显示非阻塞通知
-            DispatchQueue.main.async {
-                self.showNonBlockingNotification(
-                    title: "Trigger Test Completed",
-                    message: "Please check console output for detailed information"
-                )
-            }
-        }
-    }
-    
-    @objc func testDiscordTrigger() {
-        Logger.info("Discord trigger test requested")
-        
-        // 在后台线程执行测试，避免阻塞主线程
-        DispatchQueue.global(qos: .userInitiated).async {
-            InputMonitor.shared.testDiscordTrigger()
-            
-            // 回到主线程显示非阻塞通知
-            DispatchQueue.main.async {
-                self.showNonBlockingNotification(
-                    title: "Discord Trigger Test Completed",
-                    message: "Please check console output for detailed information.\nRecommend entering test content (like 'hello #@en') in Discord input box before running this test."
-                )
-            }
-        }
-    }
-    
-    @objc func testSpaceKeyCapture() {
-        Logger.info("Space key capture test requested")
-        InputMonitor.shared.testSpaceKeyCapture()
-    }
-    
-    @objc func testWeChatEnterKey() {
-        Logger.info("WeChat Enter key test requested")
-        
-        // 在后台线程执行测试，避免阻塞主线程
-        DispatchQueue.global(qos: .userInitiated).async {
-            InputMonitor.shared.testWeChatEnterKey()
-        }
-    }
-    
-    @objc func testEnterKeyLoop() {
-        Logger.info("Enter key loop test requested")
-        
-        // 在后台线程执行测试，避免阻塞主线程
-        DispatchQueue.global(qos: .userInitiated).async {
-            InputMonitor.shared.testEnterKeyLoop()
-        }
-    }
+
     
     @objc func showLanguageCacheInfo() {
         Logger.info("Language cache info requested")
@@ -353,35 +198,13 @@ class MenuBarController: NSObject, NSMenuDelegate {
     
     // MARK: - Memory Management Debug Methods
     
-    @objc func showMemoryStatistics() {
-        Logger.info("Memory statistics requested")
-        
-        DispatchQueue.global(qos: .userInitiated).async {
-            let memoryStats = AXController.shared.getMemoryStatistics()
-            let jsStats = AXController.shared.getJavaScriptCacheStats()
-            
-            let detailedInfo = """
-            Memory Management Statistics:
-            - Active Windows: \(memoryStats.active)
-            - Total Created: \(memoryStats.created)
-            - Total Cleaned: \(memoryStats.cleaned)
-            
-            JavaScript Cache:
-            - Cached Browsers: \(jsStats.cachedBrowsers)
-            - Total Cache Size: \(jsStats.totalSize) bytes
-            """
-            
-            DispatchQueue.main.async {
-                self.showStatusWindow(statusInfo: detailedInfo)
-            }
-        }
-    }
+   
     
     @objc func cleanupIdleWindows() {
         Logger.info("Cleanup idle windows requested")
         
         DispatchQueue.global(qos: .userInitiated).async {
-            AXController.shared.forceCleanupIdleWindows()
+            SimpleMemoryManager.shared.forceCleanup()
             
             DispatchQueue.main.async {
                 self.showNonBlockingNotification(
@@ -929,7 +752,7 @@ class MenuBarController: NSObject, NSMenuDelegate {
     
     @objc private func signIn() {
         Logger.info("Sign In menu item clicked")
-        openLoginPage()
+        UserManager.shared.openLoginPage()
     }
     
     @objc private func signOut() {
@@ -989,19 +812,7 @@ class MenuBarController: NSObject, NSMenuDelegate {
         Logger.info("MenuBarController received quota update notification: \(quotaInfo.quotaDescription)")
         updateQuotaDisplay(quotaInfo)
     }
-    
-    private func openLoginPage() {
-        let environmentManager = EnvironmentManager.shared
-        let loginURL = "\(environmentManager.baseURL)/login?redirect=glotera://auth/callback"
-        
-        guard let url = URL(string: loginURL) else {
-            Logger.error("Failed to create login URL")
-            return
-        }
-        
-        Logger.info("Opening login page: \(loginURL)")
-        NSWorkspace.shared.open(url)
-    }
+ 
     
     @objc private func openPricing() {
         let environmentManager = EnvironmentManager.shared

@@ -687,15 +687,7 @@ class TranslatorClient: NSObject {
             }
         }
     }
-    
-    /// 检查是否为免费用户
-    func isFreeUser() -> Bool {
-        let userId = UserManager.shared.getUserId()
-        let uuidRegex = try! NSRegularExpression(pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", options: .caseInsensitive)
-        let range = NSRange(location: 0, length: userId.utf16.count)
-        return uuidRegex.firstMatch(in: userId, options: [], range: range) != nil || userId == "anonymous" || userId.isEmpty
-    }
-    
+      
     // 异步处理流式数据，避免阻塞delegate队列
     private func processStreamData(_ dataString: String) {
         // Use StreamBatchProcessor for optimized processing
@@ -868,10 +860,12 @@ extension TranslatorClient: URLSessionDataDelegate {
             return
         }
         
-        Logger.info("Received stream data chunk: \(data.count) bytes")
-        if isProductionEnvironment {
-            Logger.info("Raw data: \(dataString.prefix(200))...") // 只显示前200字符
-        }
+        
+        // if isProductionEnvironment {
+        //     Logger.info("Raw data: \(dataString.prefix(200))...") // Only show first 200 characters
+        // }else{
+        //     Logger.info("Raw data: \(dataString)")
+        // }
         
         // 异步处理数据，避免阻塞delegate队列
         DispatchQueue.global(qos: .userInteractive).async { [weak self] in
@@ -914,8 +908,8 @@ extension TranslatorClient: URLSessionDataDelegate {
                                         "remaining_quota": 0,
                                         "is_quota_exceeded": true,
                                         "is_low_quota": false,
-                                        "monthly_usage": 200,
-                                        "monthly_limit": 200
+                                        "monthly_usage": 100,
+                                        "monthly_limit": 100
                                     ]
                                     let quotaInfo = QuotaInfo(from: defaultQuotaJson)
                                     Logger.info("Created default quota info for 429 response")
@@ -938,8 +932,8 @@ extension TranslatorClient: URLSessionDataDelegate {
                                     "remaining_quota": 0,
                                     "is_quota_exceeded": true,
                                     "is_low_quota": false,
-                                    "monthly_usage": 200,
-                                    "monthly_limit": 200
+                                    "monthly_usage": 100,
+                                    "monthly_limit": 100
                                 ]
                                 let quotaInfo = QuotaInfo(from: defaultQuotaJson)
                                 
@@ -956,8 +950,8 @@ extension TranslatorClient: URLSessionDataDelegate {
                                 "remaining_quota": 0,
                                 "is_quota_exceeded": true,
                                 "is_low_quota": false,
-                                "monthly_usage": 200,
-                                "monthly_limit": 200
+                                "monthly_usage": 100,
+                                "monthly_limit": 100
                             ]
                             let quotaInfo = QuotaInfo(from: defaultQuotaJson)
                             
@@ -974,8 +968,8 @@ extension TranslatorClient: URLSessionDataDelegate {
                             "remaining_quota": 0,
                             "is_quota_exceeded": true,
                             "is_low_quota": false,
-                            "monthly_usage": 200,
-                            "monthly_limit": 200
+                            "monthly_usage": 100,
+                            "monthly_limit": 100
                         ]
                         let quotaInfo = QuotaInfo(from: defaultQuotaJson)
                         

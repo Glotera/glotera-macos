@@ -105,6 +105,11 @@ class TranslationStatusWindow: NSWindow {
         // that may be reused frequently. MemoryManager will handle cleanup if needed.
     }
     
+    // 判断翻译状态栏是否正在显示
+    func isStatusVisible() -> Bool {
+        return self.isVisible
+    }
+    
     // 防止状态窗口抢夺焦点
     override var canBecomeKey: Bool {
         return false
