@@ -1,5 +1,4 @@
 import Foundation
-import Security
 
 // User information structure
 struct User {
@@ -70,12 +69,9 @@ class SessionManager {
     
     private init() {}
     
-    // Keychain service identifier
-    private let keychainService = "ai.glotera.desktop"
+    // UserDefaults keys for all user info (moved from Keychain to reduce user interruption)
     private let tokenKey = "auth_token"
     private let userIdKey = "user_id"
-    
-    // UserDefaults keys for additional user info
     private let userEmailKey = "user_email"
     private let usernameKey = "username"
     private let userTypeKey = "user_type"
@@ -192,11 +188,9 @@ class SessionManager {
     func setAuthSession(token: String, user: User) {
         Logger.info("SessionManager: Storing authentication session for user: \(user.email)")
         
-        // Store token in Keychain
-        storeTokenInKeychain(token)
-        
-        // Store user info in UserDefaults and Keychain
-        storeUserIdInKeychain(user.userId)
+        // Store token and user info in UserDefaults (moved from Keychain to reduce interruption)
+        UserDefaults.standard.set(token, forKey: tokenKey)
+        UserDefaults.standard.set(user.userId, forKey: userIdKey)
         UserDefaults.standard.set(user.email, forKey: userEmailKey)
         UserDefaults.standard.set(user.username, forKey: usernameKey)
         UserDefaults.standard.set(user.userType, forKey: userTypeKey)
@@ -225,11 +219,9 @@ class SessionManager {
     func clearSession() {
         Logger.info("SessionManager: Clearing authentication session")
         
-        // Remove from Keychain
-        removeTokenFromKeychain()
-        removeUserIdFromKeychain()
-        
-        // Remove from UserDefaults
+        // Remove from UserDefaults (no longer using Keychain)
+        UserDefaults.standard.removeObject(forKey: tokenKey)
+        UserDefaults.standard.removeObject(forKey: userIdKey)
         UserDefaults.standard.removeObject(forKey: userEmailKey)
         UserDefaults.standard.removeObject(forKey: usernameKey)
         UserDefaults.standard.removeObject(forKey: userTypeKey)
@@ -406,127 +398,20 @@ class SessionManager {
         return (hasCachedEntry, pendingCount)
     }
     
-    // MARK: - Private Keychain Methods
-    
-    private func storeTokenInKeychain(_ token: String) {
-        let tokenData = Data(token.utf8)
-        
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-            kSecAttrAccount as String: tokenKey,
-            kSecValueData as String: tokenData
-        ]
-        
-        // Delete existing item first
-        SecItemDelete(query as CFDictionary)
-        
-        // Add new item
-        let status = SecItemAdd(query as CFDictionary, nil)
-        
-        if status != errSecSuccess {
-            Logger.error("SessionManager: Failed to store token in Keychain: \(status)")
-        } else {
-            Logger.info("SessionManager: Token stored in Keychain successfully")
-        }
-    }
+    // MARK: - Private UserDefaults Methods
     
     private func getStoredToken() -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-            kSecAttrAccount as String: tokenKey,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-        
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        
-        if status == errSecSuccess,
-           let tokenData = result as? Data,
-           let token = String(data: tokenData, encoding: .utf8) {
-            Logger.info("SessionManager: Retrieved token from Keychain successfully")
-            return token
-        }
-        
-        if status == errSecItemNotFound {
-            Logger.info("SessionManager: No token found in Keychain")
+        let token = UserDefaults.standard.string(forKey: tokenKey)
+        if token != nil {
+            Logger.info("SessionManager: Retrieved token from UserDefaults successfully")
         } else {
-            Logger.error("SessionManager: Failed to retrieve token from Keychain: \(status)")
+            Logger.info("SessionManager: No token found in UserDefaults")
         }
-        
-        return nil
-    }
-    
-    private func removeTokenFromKeychain() {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-            kSecAttrAccount as String: tokenKey
-        ]
-        
-        let status = SecItemDelete(query as CFDictionary)
-        
-        if status != errSecSuccess && status != errSecItemNotFound {
-            Logger.error("SessionManager: Failed to remove token from Keychain: \(status)")
-        }
-    }
-    
-    private func storeUserIdInKeychain(_ userId: String) {
-        let userIdData = Data(userId.utf8)
-        
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-            kSecAttrAccount as String: userIdKey,
-            kSecValueData as String: userIdData
-        ]
-        
-        // Delete existing item first
-        SecItemDelete(query as CFDictionary)
-        
-        // Add new item
-        let status = SecItemAdd(query as CFDictionary, nil)
-        
-        if status != errSecSuccess {
-            Logger.error("SessionManager: Failed to store user ID in Keychain: \(status)")
-        }
+        return token
     }
     
     private func getStoredUserId() -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-            kSecAttrAccount as String: userIdKey,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-        
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        
-        if status == errSecSuccess,
-           let userIdData = result as? Data,
-           let userId = String(data: userIdData, encoding: .utf8) {
-            return userId
-        }
-        
-        return nil
-    }
-    
-    private func removeUserIdFromKeychain() {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-            kSecAttrAccount as String: userIdKey
-        ]
-        
-        let status = SecItemDelete(query as CFDictionary)
-        
-        if status != errSecSuccess && status != errSecItemNotFound {
-            Logger.error("SessionManager: Failed to remove user ID from Keychain: \(status)")
-        }
+        return UserDefaults.standard.string(forKey: userIdKey)
     }
 }
 
