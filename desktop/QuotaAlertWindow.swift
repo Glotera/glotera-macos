@@ -316,7 +316,7 @@ class QuotaManager: TranslatorQuotaDelegate {
     // MARK: - TranslatorQuotaDelegate
     
     func didReceiveQuotaUpdate(_ quotaInfo: QuotaInfo) {
-        Logger.info("Quota updated: \(quotaInfo.quotaDescription)")
+        Logger.debug("Quota updated: \(quotaInfo.quotaDescription)")
         
         // 更新菜单栏的配额显示
         DispatchQueue.main.async {
@@ -359,7 +359,7 @@ class QuotaManager: TranslatorQuotaDelegate {
             )
         }
         
-        Logger.info("Menu bar quota display updated: \(quotaInfo.quotaDescription)")
+        Logger.debug("Menu bar quota display updated: \(quotaInfo.quotaDescription)")
     }
     
     /// 安排延迟的低配额警告

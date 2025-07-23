@@ -247,17 +247,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @objc private func applicationDidBecomeActive() {
-        Logger.info("Application became active - triggering immediate monitoring check")
+        Logger.debug("Application became active - triggering immediate monitoring check")
         // 应用变为活跃时立即检查事件监听状态
         triggerImmediateMonitoringCheck()
     }
     
     @objc private func applicationDidResignActive() {
-        Logger.info("Application resigned active")
+        Logger.debug("Application resigned active")
     }
     
     @objc private func systemDidWakeUp() {
-        Logger.info("System woke up - triggering immediate monitoring check")
+        Logger.debug("System woke up - triggering immediate monitoring check")
         // 系统唤醒后立即检查并可能重启事件监听
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             self.triggerImmediateMonitoringCheck()

@@ -99,7 +99,7 @@ class TranslationMenuWindow: NSWindow {
         keyEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
             if let window = self, window.isVisible {
                 // 在任何键盘输入时隐藏菜单
-                Logger.info("Key pressed while menu visible, hiding menu")
+                Logger.debug("Key pressed while menu visible, hiding menu")
                 window.hide()
             }
         }
@@ -160,7 +160,7 @@ class TranslationMenuWindow: NSWindow {
         // 清理当前流式翻译窗口引用
         currentStreamWindow = nil
         
-        Logger.info("Translation menu hidden")
+        Logger.debug("Translation menu hidden")
     }
     
     // 重写方法以控制窗口焦点行为
@@ -173,10 +173,10 @@ class TranslationMenuWindow: NSWindow {
     }
      
     private func translateToLanguage(_ language: String) {
-        Logger.info("Translating to language: \(language)")
+        Logger.debug("Translating to language: \(language)")
         
         guard !selectedText.isEmpty else {
-            Logger.info("No text selected for translation")
+            Logger.warn("No text selected for translation")
             hide()
             return
         }

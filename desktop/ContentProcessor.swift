@@ -94,16 +94,16 @@ class ContentProcessor {
         }
         
         // 检查当前应用是否为Discord或其他聊天应用
-        let isDiscordOrChat = AppDetectionManager.shared.isDiscordOrChatApp()
+        // let isDiscordOrChat = AppDetectionManager.shared.isDiscordOrChatApp()
         
-        // 对于Discord等聊天应用，使用更保守的清理策略
-        if isDiscordOrChat {
-            Logger.info("Detected Discord/Chat app - using conservative preprocessing")
-            // 只进行基本的空格合并，不移除任何文本内容
-            cleaned = cleaned.replacingOccurrences(of: #"[ \t]+"#, with: " ", options: .regularExpression)
-            cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
-            return cleaned
-        }
+        // // 对于Discord等聊天应用，使用更保守的清理策略
+        // if isDiscordOrChat {
+        //     Logger.info("Detected Discord/Chat app - using conservative preprocessing")
+        //     // 只进行基本的空格合并，不移除任何文本内容
+        //     cleaned = cleaned.replacingOccurrences(of: #"[ \t]+"#, with: " ", options: .regularExpression)
+        //     cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        //     return cleaned
+        // }
         
         // 对于其他应用（如Notion），使用更激进的清理策略
         // 移除常见的Notion界面元素文本

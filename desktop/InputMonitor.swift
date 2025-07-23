@@ -201,7 +201,7 @@ class InputMonitor {
         // 检查是否为双击空格 - 放宽验证条件，提高检测可靠性
         if let lastTime = lastSpaceTime, currentTime.timeIntervalSince(lastTime) < 0.4 {
             // 这是第二次点击，进行宽松的验证
-            Logger.info("Double space validation: checking keyboard events between spaces")
+            Logger.debug("Double space validation: checking keyboard events between spaces")
             
             // 验证1: 检查两次空格之间是否有其他键盘事件 
             // 分析键盘事件，过滤掉空格键本身和修饰键
@@ -214,7 +214,7 @@ class InputMonitor {
             } 
             
             if !nonSpaceEvents.isEmpty {
-                Logger.info("Double space validation failed: found \(nonSpaceEvents.count) non-space key events between spaces, ignoring as misfire")
+                Logger.debug("Double space validation failed: found \(nonSpaceEvents.count) non-space key events between spaces, ignoring as misfire")
                 self.lastSpaceTime = nil
                 self.lastSpaceKeyEventCount = 0
                 self.keyEventsBetweenSpaces.removeAll()
@@ -321,13 +321,13 @@ class InputMonitor {
             DispatchQueue.main.async {
                 switch result {
                 case .success(let translationResult):
-                    Logger.info("Translation result: \(translationResult.translated)")
+                    Logger.debug("Translation result: \(translationResult.translated)")
                     // 翻译成功后立即隐藏状态窗口，然后开始回填
                     TranslationStatusWindow.shared.hideStatus()
-                    // print("[LOG] Status window hidden before auto-translation replacement")
+                  
                     // 回填翻译结果
                     AXController.shared.replaceInput(with: translationResult.translated) {
-                        Logger.info("Auto-translation replacement completed")
+                        Logger.debug("Auto-translation replacement completed")
                         // 翻译完成后清除缓存的应用信息
                         EnvironmentManager.shared.clearTriggerAppInfo()
                     }
@@ -384,20 +384,20 @@ class InputMonitor {
         
         // 只在聊天软件中启用回车键拦截功能
         guard AppDetectionManager.shared.isChatApp() else {
-            Logger.info("Return key interception disabled - not a chat application: \(AppDetectionManager.shared.getBundleId())")
+            Logger.debug("Return key interception disabled - not a chat application: \(AppDetectionManager.shared.getBundleId())")
             return false
         }
         
         // 防止拦截我们自己发送的Enter键
         if InputManager.shared.isSendingEnterKeyEvent() {
-            Logger.info("Ignoring Enter key - we are currently sending one")
+            Logger.debug("Ignoring Enter key - we are currently sending one")
             return false
         }
         
         // 如果最近刚发送过Enter键，也忽略（防止时序问题）
         if let sentTime = InputManager.shared.getEnterKeySentTime(),
            Date().timeIntervalSince(sentTime) < 1.0 {
-            Logger.info("Ignoring Enter key - recently sent one")
+            Logger.debug("Ignoring Enter key - recently sent one")
             return false
         }
           

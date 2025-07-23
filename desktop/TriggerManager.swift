@@ -335,7 +335,7 @@ class TriggerManager {
     
     /// Remove trigger from text and return cleaned text
     func removeTriggerFromText(_ fullText: String, detectedText: String, lang: String) -> String {
-        Logger.info("TriggerManager: Removing trigger from text: '\(fullText)', detected text: '\(detectedText)', lang: '\(lang)'")
+        Logger.debug("TriggerManager: Removing trigger from text: '\(fullText)', detected text: '\(detectedText)', lang: '\(lang)'")
         
         // 注意：这里的 detectedText 参数实际上是检测到的文本内容，不是触发指令
         // 我们需要从原始文本中移除触发指令部分，保留检测到的文本内容
@@ -366,7 +366,7 @@ class TriggerManager {
                     let textRange = match.range(at: 1)
                     if textRange.location != NSNotFound {
                         let cleanedText = nsText.substring(with: textRange).trimmingCharacters(in: .whitespaces)
-                        Logger.info("TriggerManager: Successfully removed trigger via regex, cleaned text: '\(cleanedText)'")
+                        Logger.debug("TriggerManager: Successfully removed trigger via regex, cleaned text: '\(cleanedText)'")
                         return cleanedText
                     }
                 }
@@ -384,7 +384,7 @@ class TriggerManager {
         // 清理多余的空白字符
         cleanedText = cleanedText.trimmingCharacters(in: .whitespaces)
         
-        Logger.info("TriggerManager: Used string replacement, cleaned text: '\(cleanedText)'")
+        Logger.debug("TriggerManager: Used string replacement, cleaned text: '\(cleanedText)'")
         return cleanedText
     }
     

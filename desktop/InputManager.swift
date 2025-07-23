@@ -33,7 +33,7 @@ class InputManager {
             }
         }
         
-        Logger.warn("Failed to get focused element after \(maxRetries) attempts")
+        Logger.debug("Failed to get focused element after \(maxRetries) attempts")
         return nil
     }
     

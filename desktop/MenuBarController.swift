@@ -809,7 +809,7 @@ class MenuBarController: NSObject, NSMenuDelegate {
             return
         }
         
-        Logger.info("MenuBarController received quota update notification: \(quotaInfo.quotaDescription)")
+        Logger.debug("MenuBarController received quota update notification: \(quotaInfo.quotaDescription)")
         updateQuotaDisplay(quotaInfo)
     }
  
@@ -900,13 +900,13 @@ class MenuBarController: NSObject, NSMenuDelegate {
     // MARK: - Quota Management
     
     func updateQuotaDisplay(_ quotaInfo: QuotaInfo) {
-        Logger.info("MenuBarController updating quota display: \(quotaInfo.quotaDescription)")
+        Logger.debug("MenuBarController updating quota display: \(quotaInfo.quotaDescription)")
         lastQuotaInfo = quotaInfo
         lastQuotaFetchTime = Date() // Update cache time since we got fresh data
         
         // Update menu to reflect new quota information
         DispatchQueue.main.async {
-            Logger.info("MenuBarController reconstructing menu with updated quota: \(quotaInfo.quotaDescription)")
+            Logger.debug("MenuBarController reconstructing menu with updated quota: \(quotaInfo.quotaDescription)")
             self.updateQuotaInCurrentMenu(quotaInfo)
         }
     }
@@ -984,7 +984,7 @@ class MenuBarController: NSObject, NSMenuDelegate {
                item.title.contains("Pro -") ||
                item.title.contains("Max -") {
                 
-                Logger.info("Found quota item at index \(index), updating to: \(quotaInfo.quotaDescription)")
+                Logger.debug("Found quota item at index \(index), updating to: \(quotaInfo.quotaDescription)")
                 item.title = quotaInfo.quotaDescription
                 item.action = nil // Make it non-clickable
                 item.isEnabled = false

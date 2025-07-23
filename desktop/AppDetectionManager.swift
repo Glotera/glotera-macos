@@ -173,25 +173,25 @@ class AppDetectionManager {
     }
     
     /// Check if current application is Discord or other chat app
-    func isDiscordOrChatApp() -> Bool {
-        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
-              let bundleId = frontmostApp.bundleIdentifier else {
-            return false
-        }
+    // func isDiscordOrChatApp() -> Bool {
+    //     guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+    //           let bundleId = frontmostApp.bundleIdentifier else {
+    //         return false
+    //     }
         
-        // Discord specific detection
-        if bundleId == "com.hnc.Discord" || bundleId == "com.discord.Discord" {
-            Logger.info("Detected Discord app: \(frontmostApp.localizedName ?? "Unknown") (\(bundleId))")
-            return true
-        } 
+    //     // Discord specific detection
+    //     if bundleId == "com.hnc.Discord" || bundleId == "com.discord.Discord" {
+    //         Logger.info("Detected Discord app: \(frontmostApp.localizedName ?? "Unknown") (\(bundleId))")
+    //         return true
+    //     } 
         
-        if chatAppBundleIds.contains(bundleId) {
-            Logger.info("Detected chat app: \(frontmostApp.localizedName ?? "Unknown") (\(bundleId))")
-            return true
-        }
+    //     if chatAppBundleIds.contains(bundleId) {
+    //         Logger.info("Detected chat app: \(frontmostApp.localizedName ?? "Unknown") (\(bundleId))")
+    //         return true
+    //     }
         
-        return false
-    }
+    //     return false
+    // }
     
     /// Check if current application is a terminal
     func isTerminalApp() -> Bool {
