@@ -21,7 +21,7 @@ class AXController {
     // MARK: - Trigger Detection
     // 检测当前焦点输入框内容，提取触发标记和原文
     func detectTriggerAndExtract() -> (text: String, lang: String)? {
-        Logger.info("Starting trigger detection")
+        Logger.debug("Starting trigger detection")
         
         guard let focused = getFocusedElement() else {
             Logger.warn("No focused element found")
@@ -30,7 +30,7 @@ class AXController {
         
         // 存储当前获取到的焦点元素，用于后续回填
         self.lastManuallyFocusedElement = focused
-        Logger.info("Stored focused element for potential replacement")
+        Logger.debug("Stored focused element for potential replacement")
         
         let value = getInputValue(of: focused, focusedElement: focused)
         if value.isEmpty {
@@ -48,17 +48,17 @@ class AXController {
         let detectionContent = value.count > 200 ? 
             String(value.suffix(50)) : value
         
-        Logger.info("Using detection content length: \(detectionContent.count)\n content: \(detectionContent)")
+        Logger.debug("Using detection content length: \(detectionContent.count)\n content: \(detectionContent)")
         
         // 预处理内容：清理可能的干扰文本
         let cleanedValue = ContentProcessor.shared.preprocessContent(detectionContent)
         
         // 使用高性能缓存触发器检测
         if let result = TriggerManager.shared.detectTrigger(in: cleanedValue) {
-            Logger.info("Cached trigger detected: text='\(result.text)', lang='\(result.lang)'")
+            Logger.debug("Cached trigger detected: text='\(result.text)', lang='\(result.lang)'")
             // 移除触发指令，返回清理后的文本作为翻译内容
             let cleanedText = TriggerManager.shared.removeTriggerFromText(value, detectedText: result.text, lang: result.lang)
-            Logger.info("Cleaned text for translation: '\(cleanedText)'")
+            Logger.debug("Cleaned text for translation: '\(cleanedText)'")
             return (text: cleanedText, lang: result.lang)
         }
         
@@ -119,7 +119,7 @@ class AXController {
         var value: CFTypeRef?
         AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &value)
         if let value = value as? String {
-            Logger.info("Got content via standard method: \(value.count) chars \n \(value) ")
+            Logger.debug("Got content via standard method: \(value.count) chars \n \(value) ")
             return value
         } 
         
@@ -262,7 +262,7 @@ class AXController {
         // 使用更长的延迟，确保自动翻译完全完成且文本状态稳定
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
             SelectEventManager.shared.resumeSelectionMonitoring()
-            Logger.info("Resumed selection monitoring after auto-translation")
+            Logger.debug("Resumed selection monitoring after auto-translation")
         }
     }
    
@@ -481,7 +481,7 @@ class AXController {
         // 3. 等待全选操作完成，然后立即设置剪贴板并粘贴，以覆盖应用可能进行的自动复制
         // simulateSelectAll() 内部有0.2秒延迟，我们等待0.3秒以确保其完成
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            Logger.info("Setting clipboard content right before pasting to avoid app interference.")
+            Logger.debug("Setting clipboard content right before pasting to avoid app interference.")
             
             // 4. 在粘贴前一刻，才将翻译结果放入剪贴板
             pasteboard.clearContents()
@@ -530,7 +530,7 @@ class AXController {
                 aUp.post(tap: .cghidEventTap)
                 cmdUp.post(tap: .cghidEventTap)
                 
-                Logger.info("Simulated Cmd+A select all (with timing separation)")
+                Logger.debug("Simulated Cmd+A select all (with timing separation)")
             } else {
                 Logger.warn("Failed to create Cmd+A events")
             }
@@ -562,7 +562,7 @@ class AXController {
                 vUp.post(tap: .cghidEventTap)
                 cmdUp.post(tap: .cghidEventTap)
                 
-                Logger.info("Simulated Cmd+V paste (with timing separation)")
+                Logger.debug("Simulated Cmd+V paste (with timing separation)")
             } else {
                 Logger.warn("Failed to create Cmd+V events")
             }
@@ -580,7 +580,7 @@ class AXController {
             completion()
             return
         }
-        Logger.info("Clipboard set with text: '\(text)'. Original content will not be restored.")
+        Logger.debug("Clipboard set with text: '\(text)'. Original content will not be restored.")
 
         // 2. 尝试激活目标应用
         guard let targetApp = NSRunningApplication(processIdentifier: pid) else {
@@ -687,7 +687,7 @@ class AXController {
     
     // 专为文本编辑器设计的回填方法
     private func replaceTextEditorInput(with text: String, completion: (() -> Void)?) {
-        Logger.info("Text Editor: Using optimized replacement method with translation: '\(text)'")
+        Logger.debug("Text Editor: Using optimized replacement method with translation: '\(text)'")
         
         // 简化的回填方法：直接设置翻译结果到剪贴板，然后粘贴
         let pasteboard = NSPasteboard.general

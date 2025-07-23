@@ -301,7 +301,7 @@ class TranslatorClient: NSObject {
 
     // 翻译文本 - 新方法，返回完整结果包含配额信息
     func translate(text: String, to language: String, completion: @escaping (Result<TranslationResult, TranslationError>) -> Void) {
-        Logger.info("Starting translation: \(text) -> \(language)")
+        Logger.debug("Starting translation: \(text) -> \(language)")
         
         // Record translation attempt
         recordPerformanceCounter("translation.attempt")
@@ -411,7 +411,7 @@ class TranslatorClient: NSObject {
                     if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                        let quotaData = json["quota_info"] as? [String: Any] {
                         let quotaInfo = QuotaInfo(from: quotaData)
-                        Logger.info("Quota exceeded for user")
+                        Logger.warn("Quota exceeded for user")
                         
                         // 通知配额委托
                         DispatchQueue.main.async {
@@ -464,7 +464,7 @@ class TranslatorClient: NSObject {
                         }
                     }
                     
-                    Logger.info("Quota info: \(quotaInfo.quotaDescription)")
+                    Logger.debug("Quota info: \(quotaInfo.quotaDescription)")
                 }
                 
                 completion(.success(result))
@@ -993,7 +993,7 @@ extension TranslatorClient: URLSessionDataDelegate {
                 var fullContent = ""
                 processStreamLine(streamBuffer, fullContent: &fullContent)
             }
-            Logger.info("Stream translation completed")
+            Logger.debug("Stream translation completed")
         }
          
         // 清理

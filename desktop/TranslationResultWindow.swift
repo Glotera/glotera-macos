@@ -315,7 +315,7 @@ class TranslationResultWindow: NSWindow {
         // Unregister from SimpleMemoryManager
         SimpleMemoryManager.shared.unregisterWindow(self)
         
-        Logger.info("Translation result window hidden")
+        Logger.debug("Translation result window hidden")
     }
     
     deinit {

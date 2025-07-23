@@ -280,7 +280,7 @@ class SessionManager {
             return
         }
         
-        Logger.info("SessionManager: Validating token with server")
+        Logger.debug("SessionManager: Validating token with server")
         
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             DispatchQueue.main.async {
@@ -305,7 +305,7 @@ class SessionManager {
                 timer.addContext("status_code", httpResponse.statusCode)
                 
                 if httpResponse.statusCode == 200 {
-                    Logger.info("SessionManager: Token validation successful")
+                    Logger.debug("SessionManager: Token validation successful")
                     timer.finish(success: true)
                     completion(true)
                 } else if httpResponse.statusCode == 401 {
@@ -403,7 +403,7 @@ class SessionManager {
     private func getStoredToken() -> String? {
         let token = UserDefaults.standard.string(forKey: tokenKey)
         if token != nil {
-            Logger.info("SessionManager: Retrieved token from UserDefaults successfully")
+            Logger.debug("SessionManager: Retrieved token from UserDefaults successfully")
         } else {
             Logger.info("SessionManager: No token found in UserDefaults")
         }

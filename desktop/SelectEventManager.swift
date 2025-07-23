@@ -177,7 +177,7 @@ class SelectEventManager {
     
     // 双击后的文本选择检查
     private func checkForTextSelectionAfterDoubleClick() {
-        Logger.info("Checking text selection after double click")
+        Logger.debug("Checking text selection after double click")
         
         // 等待延迟，确保双击选择完全稳定
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
@@ -218,8 +218,8 @@ class SelectEventManager {
             }
             
             let processingTime = Date().timeIntervalSince(startTime)
-            if processingTime > 0.2 {
-                Logger.warn("hideMenuIfNoSelection took \(String(format: "%.3f", processingTime))s - performance warning")
+            if processingTime > 0.5 {  // 提高阈值，只在真正慢的时候警告
+                Logger.debug("hideMenuIfNoSelection took \(String(format: "%.3f", processingTime))s")
             }
             return
         }
@@ -335,7 +335,7 @@ class SelectEventManager {
             lastSelectedText = originalText
             isMenuShowing = true
             
-            Logger.info("Selected text after \(selectionType) selection: '\(originalText)' (length: \(originalText.count))")
+            Logger.debug("Selected text after \(selectionType) selection: '\(originalText)' (length: \(originalText.count))")
             Logger.debug("WhatsApp message selected flag: \(isWhatsAppMessageSelected)")
             Logger.debug("WeChat message selected flag: \(isWeChatMessageSelected)")
             
@@ -365,7 +365,7 @@ class SelectEventManager {
                     self?.lastWhatsAppSelectedText = ""
                     self?.isWeChatMessageSelected = false
                     self?.lastWeChatSelectedText = ""
-                Logger.info("Menu closed callback triggered - Special App flag reset")
+                Logger.debug("Menu closed callback triggered - Special App flag reset")
                 }
         }
     }
