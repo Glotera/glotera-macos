@@ -20,6 +20,7 @@ class SelectEventManager {
     private var mouseEventMonitor: Any?
     private var keyboardEventMonitor: Any?
     private var lastDoubleClickTime: Date = Date.distantPast
+    private var doubleClickCheckScheduled: Bool = false
     private var lastCtrlATime: Date = Date.distantPast 
     
     // 用于跟踪最近的自动翻译操作
@@ -30,6 +31,11 @@ class SelectEventManager {
     private var isWhatsAppMessageSelected: Bool = false
     private var whatsAppMessageShowTime: Date = Date.distantPast
     private var lastWhatsAppSelectedText: String = ""
+    
+    // WeChat 特殊处理
+    private var isWeChatMessageSelected: Bool = false
+    private var weChatMessageShowTime: Date = Date.distantPast
+    private var lastWeChatSelectedText: String = ""
     
     // WeChat 历史消息标记（用于区分历史消息和输入框）
     private var wechatHistoryMessageElements: Set<Int> = []
@@ -84,9 +90,15 @@ class SelectEventManager {
                 // 双击检测
                 Logger.info("Double click detected")
                 lastDoubleClickTime = now
-                // 延迟检查双击选择的文本
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    self.checkForTextSelectionAfterDoubleClick()
+                
+                // 防止重复调度：只在没有已调度的检查时才调度新的检查
+                if !doubleClickCheckScheduled {
+                    doubleClickCheckScheduled = true
+                    // 延迟检查双击选择的文本
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        self.checkForTextSelectionAfterDoubleClick()
+                        self.doubleClickCheckScheduled = false
+                    }
                 }
             } else {
                 lastDoubleClickTime = now
@@ -159,7 +171,7 @@ class SelectEventManager {
         // 等待一个更长的延迟，确保选择完全稳定
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             // 只有在鼠标拖拽选择后才显示菜单
-            self.checkSelectedTextAndShowMenuAfterMouseSelection()
+            self.checkSelectedTextAndShowMenu(selectionType: "mouse")
         }
     }
     
@@ -169,7 +181,7 @@ class SelectEventManager {
         
         // 等待延迟，确保双击选择完全稳定
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            self.checkSelectedTextAndShowMenuAfterMouseSelection()
+            self.checkSelectedTextAndShowMenu(selectionType: "mouse")
         }
     }
 
@@ -177,14 +189,23 @@ class SelectEventManager {
     private func hideMenuIfNoSelection() {
         let startTime = Date()
         
-        guard let selection = getSelectedText() else {
+        guard let selection = getSelectedText(checkSpecialApps: false) else {
             // 如果没有选中文本，隐藏菜单并重置状态
             if !lastSelectedText.isEmpty {
                 // 特殊处理：如果是 WhatsApp 消息且刚刚显示菜单，给更长时间
                 if isWhatsAppMessageSelected && AppDetectionManager.shared.isWhatsAppApp() {
                     let timeSinceShow = Date().timeIntervalSince(whatsAppMessageShowTime)
-                    if timeSinceShow < 5.0 { // 给 WhatsApp 消息 5 秒的稳定时间
+                    if timeSinceShow < 2.5 { // 给 WhatsApp 消息 2.2.5 秒的稳定时间
                         Logger.info("WhatsApp message menu protection: keeping menu visible (no selection, \(String(format: "%.1f", timeSinceShow))s since show)")
+                        return
+                    }
+                }
+                
+                // 特殊处理：如果是 WeChat 消息且刚刚显示菜单，给更长时间
+                if isWeChatMessageSelected && AppDetectionManager.shared.isWeChatApp() {
+                    let timeSinceShow = Date().timeIntervalSince(weChatMessageShowTime)
+                    if timeSinceShow < 2.5 { // 给 WeChat 消息 2.2.5 秒的稳定时间
+                        Logger.info("WeChat message menu protection: keeping menu visible (no selection, \(String(format: "%.1f", timeSinceShow))s since show)")
                         return
                     }
                 }
@@ -193,6 +214,7 @@ class SelectEventManager {
                 lastSelectedText = ""
                 isMenuShowing = false
                 isWhatsAppMessageSelected = false
+                isWeChatMessageSelected = false
             }
             
             let processingTime = Date().timeIntervalSince(startTime)
@@ -209,8 +231,18 @@ class SelectEventManager {
             if isWhatsAppMessageSelected && AppDetectionManager.shared.isWhatsAppApp() {
                 let timeSinceShow = Date().timeIntervalSince(whatsAppMessageShowTime)
                 // 检查是否是同一个WhatsApp消息，如果是，保持菜单显示
-                if timeSinceShow < 5.0 && (originalText == lastWhatsAppSelectedText || originalText.isEmpty) {
+                if timeSinceShow < 2.5 && (originalText == lastWhatsAppSelectedText || originalText.isEmpty) {
                     Logger.info("WhatsApp message menu protection: keeping menu visible (text changed, \(String(format: "%.1f", timeSinceShow))s since show, same message: \(originalText == lastWhatsAppSelectedText))")
+                    return
+                }
+            }
+            
+            // 特殊处理：如果是 WeChat 消息且刚刚显示菜单，给更长时间
+            if isWeChatMessageSelected && AppDetectionManager.shared.isWeChatApp() {
+                let timeSinceShow = Date().timeIntervalSince(weChatMessageShowTime)
+                // 检查是否是同一个WeChat消息，如果是，保持菜单显示
+                if timeSinceShow < 2.5 && (originalText == lastWeChatSelectedText || originalText.isEmpty) {
+                    Logger.info("WeChat message menu protection: keeping menu visible (text changed, \(String(format: "%.1f", timeSinceShow))s since show, same message: \(originalText == lastWeChatSelectedText))")
                     return
                 }
             }
@@ -221,6 +253,8 @@ class SelectEventManager {
             isMenuShowing = false
             isWhatsAppMessageSelected = false
             lastWhatsAppSelectedText = ""
+            isWeChatMessageSelected = false
+            lastWeChatSelectedText = ""
         }
         
         let processingTime = Date().timeIntervalSince(startTime)
@@ -228,12 +262,7 @@ class SelectEventManager {
             Logger.warn("hideMenuIfNoSelection took \(String(format: "%.3f", processingTime))s - performance warning")
         }
     }
-    
-
-    // 鼠标选择后的菜单显示逻辑
-    private func checkSelectedTextAndShowMenuAfterMouseSelection() {
-        checkSelectedTextAndShowMenu(selectionType: "mouse")
-    }
+     
     
     // 键盘选择后的菜单显示逻辑 - 改为 public 以便 InputMonitor 调用
     func checkForTextSelectionAfterKeyboardSelection() {
@@ -255,7 +284,7 @@ class SelectEventManager {
                 // 特殊处理：如果是 WhatsApp 消息且刚刚显示菜单，给更长时间
                 if isWhatsAppMessageSelected && AppDetectionManager.shared.isWhatsAppApp() {
                     let timeSinceShow = Date().timeIntervalSince(whatsAppMessageShowTime)
-                    if timeSinceShow < 5.0 { // 给 WhatsApp 消息 5 秒的稳定时间
+                    if timeSinceShow < 2.5 { // 给 WhatsApp 消息 2.5 秒的稳定时间
                         Logger.info("WhatsApp message menu protection in showMenu: keeping menu visible (\(String(format: "%.1f", timeSinceShow))s since show)")
                         return
                     }
@@ -266,6 +295,7 @@ class SelectEventManager {
                 lastSelectedText = ""
                 isMenuShowing = false
                 isWhatsAppMessageSelected = false
+                isWeChatMessageSelected = false
                 lastWhatsAppSelectedText = ""
             }
             
@@ -306,7 +336,8 @@ class SelectEventManager {
             isMenuShowing = true
             
             Logger.info("Selected text after \(selectionType) selection: '\(originalText)' (length: \(originalText.count))")
-            Logger.info("WhatsApp message selected flag: \(isWhatsAppMessageSelected)")
+            Logger.debug("WhatsApp message selected flag: \(isWhatsAppMessageSelected)")
+            Logger.debug("WeChat message selected flag: \(isWeChatMessageSelected)")
             
             // ⭐️ 关键：在弹出翻译菜单之前记录应用信息，这时应用还在前台
             EnvironmentManager.shared.recordTriggerApp()
@@ -332,7 +363,9 @@ class SelectEventManager {
                     self?.lastSelectedText = ""
                     self?.isWhatsAppMessageSelected = false
                     self?.lastWhatsAppSelectedText = ""
-                Logger.info("Menu closed callback triggered - WhatsApp flag reset")
+                    self?.isWeChatMessageSelected = false
+                    self?.lastWeChatSelectedText = ""
+                Logger.info("Menu closed callback triggered - Special App flag reset")
                 }
         }
     }
@@ -340,7 +373,7 @@ class SelectEventManager {
       
 
     // 获取当前选中的文本
-    func getSelectedText() -> (text: String, element: AXUIElement)? {
+    func getSelectedText(checkSpecialApps: Bool = true) -> (text: String, element: AXUIElement)? {
         guard let focused = InputManager.shared.getFocusedElementWithRetry(maxRetries: 3) else {
             // print("[LOG] No focused element for selection")
             return nil
@@ -360,29 +393,31 @@ class SelectEventManager {
             }
         }
         
-        // 特殊处理：WhatsApp 聊天历史 - 使用鼠标位置定位正确的消息
-        if let whatsappResult = getWhatsAppChatHistoryTextWithMousePosition() {
-            Logger.info("Got WhatsApp chat history text: '\(whatsappResult.text)'")
-            // 标记这是 WhatsApp 消息选择
-            isWhatsAppMessageSelected = true
-            whatsAppMessageShowTime = Date()
-            lastWhatsAppSelectedText = whatsappResult.text
-            Logger.info("WhatsApp message selected - protection activated for 5 seconds")
-            // 重要：返回实际的消息元素，不是焦点元素
-            return (text: whatsappResult.text, element: whatsappResult.element)
-        }
-        
-        // 特殊处理：WeChat 聊天历史 - 使用鼠标位置定位正确的消息
-        if let wechatResult = getWeChatChatHistoryTextWithMousePosition() {
-            // 标记这是 WeChat 消息选择 (复用 WhatsApp 的保护机制)
-            isWhatsAppMessageSelected = true
-            whatsAppMessageShowTime = Date()
-            lastWhatsAppSelectedText = wechatResult.text
-            Logger.info("WeChat message selected - protection activated for 5 seconds")
-            // 重要：为了确保显示浮动翻译窗口而不是粘贴到输入框，
-            // 我们需要标记这个元素为WeChat历史消息
-            markElementAsWeChatHistoryMessage(wechatResult.element)
-            return (text: wechatResult.text, element: wechatResult.element)
+        // 只在实际选择事件时检查特殊应用消息（避免鼠标悬停时的无用日志）
+        if checkSpecialApps {
+            // 特殊处理：WhatsApp 聊天历史 - 使用鼠标位置定位正确的消息
+            if let whatsappResult = getWhatsAppChatHistoryTextWithMousePosition() { 
+                // 标记这是 WhatsApp 消息选择
+                isWhatsAppMessageSelected = true
+                whatsAppMessageShowTime = Date()
+                lastWhatsAppSelectedText = whatsappResult.text
+                Logger.info("WhatsApp message selected - protection activated for 2.5 seconds")
+                // 重要：返回实际的消息元素，不是焦点元素
+                return (text: whatsappResult.text, element: whatsappResult.element)
+            }
+            
+            // 特殊处理：WeChat 聊天历史 - 使用鼠标位置定位正确的消息
+            if let wechatResult = getWeChatHistoryTextWithMousePosition() {
+                // 标记这是 WeChat 消息选择
+                isWeChatMessageSelected = true
+                weChatMessageShowTime = Date()
+                lastWeChatSelectedText = wechatResult.text
+                Logger.info("WeChat message selected - protection activated for 2.5 seconds")
+                // 重要：为了确保显示浮动翻译窗口而不是粘贴到输入框，
+                // 我们需要标记这个元素为WeChat历史消息
+                markElementAsWeChatHistoryMessage(wechatResult.element)
+                return (text: wechatResult.text, element: wechatResult.element)
+            }
         }
          
         return nil
@@ -615,7 +650,7 @@ class SelectEventManager {
         
         // 尝试从鼠标位置的元素获取消息内容
         if let messageText = getWhatsAppMessageFromElement(mouseElement) {
-            Logger.info("Successfully extracted WhatsApp message from mouse position: '\(messageText)'")
+            Logger.debug("Successfully extracted WhatsApp message from mouse position: '\(messageText)'")
             return (text: messageText, element: mouseElement)
         }
         
@@ -626,7 +661,7 @@ class SelectEventManager {
         
         while currentElement != nil && depth < maxDepth {
             if let messageText = getWhatsAppMessageFromElement(currentElement!) {
-                Logger.info("Successfully extracted WhatsApp message from parent element (depth \(depth)): '\(messageText)'")
+                Logger.debug("Successfully extracted WhatsApp message from parent element (depth \(depth)): '\(messageText)'")
                 return (text: messageText, element: currentElement!)
             }
             
@@ -671,7 +706,7 @@ class SelectEventManager {
     
     // 解析 WhatsApp 消息格式 - 改进版本，支持消息内容包含逗号
     private func parseWhatsAppMessage(_ rawText: String) -> String? {
-        Logger.info("Attempting to parse WhatsApp message: '\(rawText)'")
+        Logger.debug("Attempting to parse WhatsApp message: '\(rawText)'")
         
         // WhatsApp 消息格式：Your message, [Message Content with possible commas], July22, at08:38, Sent to John Warhol, Red
         // 从后往前解析，避免消息内容中的逗号干扰
@@ -744,7 +779,7 @@ class SelectEventManager {
             let messageContent = contentParts.joined(separator: ",").trimmingCharacters(in: .whitespacesAndNewlines)
             
             let messageType = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
-            Logger.info("Parsed - Type: '\(messageType)', Content: '\(messageContent)'")
+            Logger.debug("Parsed - Type: '\(messageType)', Content: '\(messageContent)'")
             
             if !messageContent.isEmpty {
                 return messageContent
@@ -831,7 +866,7 @@ class SelectEventManager {
     // MARK: - WeChat Message Detection
     
     // 使用鼠标位置获取 WeChat 聊天历史文本和元素
-    private func getWeChatChatHistoryTextWithMousePosition() -> (text: String, element: AXUIElement)? {
+    private func getWeChatHistoryTextWithMousePosition() -> (text: String, element: AXUIElement)? {
         // 检查是否为 WeChat 应用
         guard AppDetectionManager.shared.isWeChatApp() else {
             //Logger.info("Not WeChat app, skipping mouse position detection")
@@ -877,8 +912,7 @@ class SelectEventManager {
         }
           
         // 尝试从鼠标位置的元素获取消息内容
-        if let messageText = getWeChatMessageFromElement(mouseElement) {
-            Logger.info("Successfully extracted WeChat message from mouse position: '\(messageText)'")
+        if let messageText = getWeChatMessageFromElement(mouseElement) { 
             return (text: messageText, element: mouseElement)
         }
         
@@ -888,8 +922,7 @@ class SelectEventManager {
         let maxDepth = 5 // 限制遍历深度，防止无限循环
         
         while currentElement != nil && depth < maxDepth {
-            if let messageText = getWeChatMessageFromElement(currentElement!) {
-                Logger.info("Successfully extracted WeChat message from parent element (depth \(depth)): '\(messageText)'")
+            if let messageText = getWeChatMessageFromElement(currentElement!) { 
                 return (text: messageText, element: currentElement!)
             }
             
@@ -927,8 +960,7 @@ class SelectEventManager {
                 Logger.info("WeChat AXStaticText Title: '\(titleString)'")
                 
                 // 验证这是否是有效的消息内容（过滤掉UI元素标题）
-                if isValidWeChatMessage(titleString) {
-                    Logger.info("Successfully parsed WeChat message from AXStaticText Title: '\(titleString)'")
+                if isValidWeChatMessage(titleString) { 
                     return titleString
                 }
             }
@@ -1006,7 +1038,7 @@ class SelectEventManager {
             return false
         }
         
-        Logger.info("Valid WeChat message detected: '\(trimmedText)'")
+        // Logger.info("Valid WeChat message detected: '\(trimmedText)'")
         return true
     }
     

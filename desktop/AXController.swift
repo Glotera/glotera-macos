@@ -281,12 +281,21 @@ class AXController {
     
     // 检查元素是否可编辑
     func isElementEditable(_ element: AXUIElement) -> Bool {
-        // 检查当前应用是否是微信
-        let isWeChat = AppDetectionManager.shared.isWeChatApp()
-        
         // 检查元素的角色（Role）
         var role: CFTypeRef?
         let roleResult = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
+        
+        // 获取元素所属应用的pid，用于更准确的应用检测
+        var pid: pid_t = 0
+        let pidResult = AXUIElementGetPid(element, &pid)
+        var isWeChat = false
+        var bundleId = ""
+        if pidResult == .success, let app = NSRunningApplication(processIdentifier: pid) {
+            if let appBundleId = app.bundleIdentifier {
+                bundleId = appBundleId
+                isWeChat = appBundleId.contains("wechat") || appBundleId.contains("WeChat")
+            }
+        }
         
         if roleResult == .success, let roleString = role as? String {
             let editableRoles = [
@@ -298,20 +307,13 @@ class AXController {
                 "AXStaticText"          // 静态文本（某些情况下可编辑）
             ]
             
-            Logger.info("Element role: \(roleString), isWeChat: \(isWeChat), isTRAE: \(AppDetectionManager.shared.isTRAEApp())")
+            Logger.info("Element role: \(roleString), isWeChat: \(isWeChat), bundleId: \(bundleId), isTRAE: \(AppDetectionManager.shared.isTRAEApp())")
               
             // 对于 AXTextArea，需要进一步检查是否真的可编辑
             //这里不能直接调用AppDetectionManager.shared.isDingTalkApp()，因为最上层的应用是Glotera的菜单，需要通过pid来判断
-            var isDingTalk = false
-            var bundleId = ""
-            var pid: pid_t = 0
-            let pidResult = AXUIElementGetPid(element, &pid)
-            if pidResult == .success, let app = NSRunningApplication(processIdentifier: pid) {
-                if let appBundleId = app.bundleIdentifier, appBundleId.contains("DingTalk") || appBundleId.contains("dingtalk") {
-                    isDingTalk = true
-                    bundleId = appBundleId
-                    Logger.info("Element belongs to DingTalk app (bundleId: \(bundleId))")
-                }
+            let isDingTalk = bundleId.contains("DingTalk") || bundleId.contains("dingtalk")
+            if isDingTalk {
+                Logger.info("Element belongs to DingTalk app (bundleId: \(bundleId))")
             } 
             
             if roleString == "AXTextArea" && isDingTalk {
@@ -354,21 +356,18 @@ class AXController {
             } 
             
             // 对于微信，特殊处理
-            if isWeChat {
-                // 微信中的文本通常都可以被替换，即使是StaticText
-                if roleString == "AXStaticText" || roleString == "AXTextArea" || roleString == "AXTextField" {
-                    Logger.info("WeChat element detected as editable")
-                    return true
-                }
-            }
+//            if isWeChat {
+//                // 微信中的文本通常都可以被替换，即使是StaticText
+//                if roleString == "AXStaticText" || roleString == "AXTextArea" || roleString == "AXTextField" {
+//                    Logger.info("WeChat element detected as editable")
+//                    return true
+//                }
+//            }
             
             // 对于 WhatsApp，需要区分消息历史和输入框
-            var isWhatsApp = false
-            if pidResult == .success, let app = NSRunningApplication(processIdentifier: pid) {
-                if let appBundleId = app.bundleIdentifier, appBundleId.lowercased().contains("whatsapp") {
-                    isWhatsApp = true
-                    Logger.info("Element belongs to WhatsApp app (bundleId: \(appBundleId))")
-                }
+            let isWhatsApp = bundleId.lowercased().contains("whatsapp")
+            if isWhatsApp {
+                Logger.info("Element belongs to WhatsApp app (bundleId: \(bundleId))")
             }
             
             if isWhatsApp {
