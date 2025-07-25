@@ -22,6 +22,7 @@ class InputManager {
     // 带重试机制的焦点元素获取
     func getFocusedElementWithRetry(maxRetries: Int) -> AXUIElement? {
         for attempt in 1...maxRetries {
+            // 直接调用，不使用异步
             if let element = getFocusedElementInternal() {
                 Logger.debug("Successfully got focused element on attempt \(attempt)")
                 return element
@@ -29,7 +30,8 @@ class InputManager {
             
             if attempt < maxRetries {
                 Logger.debug("Failed to get focused element on attempt \(attempt), retrying...")
-                Thread.sleep(forTimeInterval: 0.1 * Double(attempt)) // 递增延迟
+                // 短暂延迟后重试
+                Thread.sleep(forTimeInterval: 0.3)
             }
         }
         
@@ -39,15 +41,45 @@ class InputManager {
     
     // 内部焦点元素获取实现
     private func getFocusedElementInternal() -> AXUIElement? {
+        //检查前台应用是否正确
+        let frontmostApp = NSWorkspace.shared.frontmostApplication
+        if let frontmostApp  = frontmostApp {
+            let name = frontmostApp.localizedName ?? "Unknown"
+            let bundleId = frontmostApp.bundleIdentifier ?? "Unknown"
+            let pid = frontmostApp.processIdentifier
+            Logger.info("Frontmost App → name: \(name), bundleId: \(bundleId), pid: \(pid)")
+        } else {
+            Logger.warn("Unable to get frontmost application")
+            return nil
+        }
+
+        // 检查是否是 Chrome，如果是则执行 Accessibility 预热
+        let chromeBundleId = "com.google.Chrome"
+        if chromeBundleId == AppDetectionManager.shared.getBundleId() {
+            Logger.info("Chrome detected, performing accessibility warm-up")
+            AppDetectionManager.shared.chromeWarmUpAccessibility()
+        }
+
+        // 1. 使用system-wide获取焦点应用
         let sysWide = AXUIElementCreateSystemWide()
-        
-        // 1. 获取焦点应用
         var focusedApp: CFTypeRef?
         let appResult = AXUIElementCopyAttributeValue(sysWide, kAXFocusedApplicationAttribute as CFString, &focusedApp)
         
-        if appResult != .success {
-            Logger.debug("Failed to get focused application: \(appResult)")
-            return nil
+        if appResult != .success , let frontmostApp = frontmostApp {
+            Logger.debug("Failed to get focused application: \(appResult), try frontmost app") 
+         
+            // 1.1 使用前台应用直接获取焦点元素
+            let pid = frontmostApp.processIdentifier
+            let appElement = AXUIElementCreateApplication(pid)
+            var focusedElement: CFTypeRef?
+            let result = AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedElement)
+            if result == .success, let focusedElement = focusedElement {
+                return (focusedElement as! AXUIElement)
+            } else {
+                Logger.warn("Frontmost App focus detection failed: result=\(result), focusedElement=\(focusedElement?.description ?? "nil")")
+            }
+
+            return nil // 如果前台应用获取失败，则返回nil
         }
         
         guard let app = focusedApp else {
@@ -56,14 +88,14 @@ class InputManager {
         }
         let appElement = app as! AXUIElement
         
-        // 2. 获取应用信息用于调试
+        // 获取应用信息用于调试
         var appName: CFTypeRef?
         if AXUIElementCopyAttributeValue(appElement, kAXTitleAttribute as CFString, &appName) == .success,
            let name = appName as? String {
             Logger.debug("Focused app: \(name)")
         }
         
-        // 3. 获取焦点元素
+        // 2. 获取焦点元素
         var focusedElem: CFTypeRef?
         let elemResult = AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedElem)
         

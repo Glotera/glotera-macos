@@ -138,8 +138,10 @@ class InputMonitor {
                     shared.spaceKeyEventCount += 1
                     // 立即提交处理任务，不在回调中等待
                     DispatchQueue.global(qos: .userInitiated).async {
+                        // 在后台线程中获取焦点元素，避免阻塞事件回调
+                        let focusedElement = AXController.shared.getFocusedElement()
                         DispatchQueue.main.async {
-                            shared.handleSpaceKey()
+                            shared.handleSpaceKey(focusedElement: focusedElement)
                         }
                     }
                 } else if keyCode == kVK_Return || keyCode == kVK_ANSI_KeypadEnter { // 回车键
@@ -195,7 +197,7 @@ class InputMonitor {
 
     static let shared = InputMonitor()
 
-    func handleSpaceKey() {
+    func handleSpaceKey(focusedElement: AXUIElement?) {
         let currentTime = Date()
         
         // 检查是否为双击空格 - 放宽验证条件，提高检测可靠性
@@ -241,7 +243,7 @@ class InputMonitor {
                     if let result = AXController.shared.detectTriggerViaClipboard() {
                         // 成功检测到触发词，启动翻译
                         DispatchQueue.main.async {
-                            self.startTranslation(text: result.text, lang: result.lang)
+                            self.startTranslation(text: result.text, lang: result.lang, focusedElement: focusedElement)
                         }
                     } else {
                         // 未检测到触发词（误触），发送右箭头键恢复
@@ -257,10 +259,10 @@ class InputMonitor {
             // --- 以下为标准应用的常规流程 ---
             Logger.info("Double space in standard app, checking for trigger characters.")   
             
-            // 首先尝试标准检测 
-            if let result = AXController.shared.detectTriggerAndExtract() { 
+            // 首先尝试标准检测，使用传入的焦点元素
+            if let result = AXController.shared.detectTriggerAndExtract(focusedElement: focusedElement) { 
                 Logger.info("Standard trigger detected: text='\(result.text)', lang='\(result.lang)'")
-                startTranslation(text: result.text, lang: result.lang)
+                startTranslation(text: result.text, lang: result.lang, focusedElement: focusedElement)
                 return
             }
             
@@ -271,9 +273,9 @@ class InputMonitor {
             
             DispatchQueue.main.asyncAfter(deadline: .now() + delayTime) {
                 Logger.info("Attempting delayed trigger detection (delay: \(delayTime)s)")
-                if let result = AXController.shared.detectTriggerAndExtract() {
+                if let result = AXController.shared.detectTriggerAndExtract(focusedElement: focusedElement) {
                     Logger.info("Delayed trigger detected: text='\(result.text)', lang='\(result.lang)'")
-                    self.startTranslation(text: result.text, lang: result.lang)
+                    self.startTranslation(text: result.text, lang: result.lang, focusedElement: focusedElement)
                 } else {
                     Logger.info("No trigger detected after delay, canceling selection.")
                     // 没有检测到触发指令，立即取消选中状态
@@ -290,7 +292,7 @@ class InputMonitor {
     }
  
   
-    private func startTranslation(text: String, lang: String) {
+    private func startTranslation(text: String, lang: String, focusedElement: AXUIElement? = nil) {
         // 记录翻译时间，用于健康检查的智能调整
         lastTranslationTime = Date()
         
@@ -298,13 +300,13 @@ class InputMonitor {
         // 选中文本翻译已在 checkSelectedTextAndShowMenu 中记录了
         EnvironmentManager.shared.recordTriggerApp() 
         
-        // 获取当前焦点元素用于定位状态窗口
-        let focusedElement = AXController.shared.getFocusedElement()
+        // 使用传入的焦点元素，如果没有传入则获取当前焦点元素
+        let elementToUse = focusedElement ?? AXController.shared.getFocusedElement()
         
         // 获取当前焦点元素用于定位状态窗口
         let mouseLocation = NSEvent.mouseLocation
         // 显示翻译中状态
-        TranslationStatusWindow.shared.showTranslating(near: focusedElement,mousePoint:mouseLocation)
+        TranslationStatusWindow.shared.showTranslating(near: elementToUse,mousePoint:mouseLocation)
         
         
         // Check login status before translation
@@ -432,11 +434,14 @@ class InputMonitor {
     func handleInterceptedEnter() {
         Logger.info("Handling intercepted Enter key")
         
-        if let result = AXController.shared.detectTriggerAndExtract() {
+        // 获取当前焦点元素，避免重复调用
+        let focusedElement = AXController.shared.getFocusedElement()
+        
+        if let result = AXController.shared.detectTriggerAndExtract(focusedElement: focusedElement) {
             Logger.info("Trigger detected via intercepted Enter: text=\(result.text), lang=\(result.lang)")
             
             // 开始翻译，完成后自动发送
-            startTranslationWithAutoSend(text: result.text, lang: result.lang)
+            startTranslationWithAutoSend(text: result.text, lang: result.lang, focusedElement: focusedElement)
         } else {
             Logger.warn("No trigger found, sending original Enter key")
             // 如果没有检测到触发器，发送原始回车键
@@ -445,18 +450,18 @@ class InputMonitor {
     }
     
     // 翻译完成后自动发送
-    private func startTranslationWithAutoSend(text: String, lang: String) {
+    private func startTranslationWithAutoSend(text: String, lang: String, focusedElement: AXUIElement? = nil) {
         // 对于输入框翻译（回车键触发），需要在翻译开始前记录应用信息
         // 选中文本翻译已在 checkSelectedTextAndShowMenu 中记录了
         EnvironmentManager.shared.recordTriggerApp() 
         
-        // 获取当前焦点元素用于定位状态窗口
-        let focusedElement = AXController.shared.getFocusedElement()
+        // 使用传入的焦点元素，如果没有传入则获取当前焦点元素
+        let elementToUse = focusedElement ?? AXController.shared.getFocusedElement()
         
         // 获取当前焦点元素用于定位状态窗口
         let mouseLocation = NSEvent.mouseLocation
         // 显示翻译中状态
-        TranslationStatusWindow.shared.showTranslating(near: focusedElement,mousePoint:mouseLocation)
+        TranslationStatusWindow.shared.showTranslating(near: elementToUse,mousePoint:mouseLocation)
         
         
         // Check login status before translation

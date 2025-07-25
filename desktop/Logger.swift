@@ -187,7 +187,7 @@ public class CallbackLogDestination: LogDestination {
 /// 主要的日志工具类
 public class Logger {
     /// 当前日志等级，只有等于或高于此等级的日志才会被输出
-    public static var currentLevel: LogLevel = .info
+    public static var currentLevel: LogLevel = .debug
     
     /// 日志输出目标列表
     private static var destinations: [LogDestination] = [ConsoleLogDestination()]
@@ -252,12 +252,12 @@ public class Logger {
         let logMessage = "\(level.emoji) [\(timestamp)] [\(level.name)] \(fileName):\(line) \(function) - \(message)"
         
         // 如果是 debug 等级，添加调用栈信息
-        var finalMessage = logMessage
-        if level == .debug {
-            let callStack = Thread.callStackSymbols
-            let stackTrace = formatCallStack(callStack)
-            finalMessage += "\n" + stackTrace
-        }
+         let finalMessage = logMessage
+        // if level == .debug {
+        //     let callStack = Thread.callStackSymbols
+        //     let stackTrace = formatCallStack(callStack)
+        //     finalMessage += "\n" + stackTrace
+        // }
         
         // 输出到所有目标
         for destination in destinations {

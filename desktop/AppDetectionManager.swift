@@ -479,4 +479,109 @@ class AppDetectionManager {
         
         return false
     }
+    
+    // MARK: - Chrome Accessibility Warm-up
+    
+    /// 主动触发 Chrome 的 Accessibility 权限，解决某些电脑上权限不生效的问题
+    /// 可以在应用启动时、切换到 Chrome 时或手动调用此方法来确保权限生效
+    func chromeWarmUpAccessibility() {
+        Logger.info("Starting Chrome accessibility warm-up...")
+        
+        // 检查 Chrome 是否正在运行
+        guard let chromeApp = NSWorkspace.shared.runningApplications.first(where: { app in
+            guard let bundleId = app.bundleIdentifier else { return false }
+            return bundleId.lowercased().contains("chrome")
+        }) else {
+            Logger.info("Chrome is not running, skipping accessibility warm-up")
+            return
+        }
+        
+        Logger.info("Chrome found, PID: \(chromeApp.processIdentifier)")
+        
+        // 创建 Chrome 的 AXUIElement
+        let chromeElement = AXUIElementCreateApplication(chromeApp.processIdentifier)
+        
+        // 尝试获取 Chrome 的主窗口
+        var mainWindow: CFTypeRef?
+        let windowResult = AXUIElementCopyAttributeValue(chromeElement, kAXMainWindowAttribute as CFString, &mainWindow)
+        
+        if windowResult == .success, let window = mainWindow {
+            let windowElement = window as! AXUIElement
+            Logger.info("Chrome main window found, attempting accessibility warm-up")
+            
+            // 执行一系列 Accessibility API 调用来"唤醒"Chrome 的权限
+            warmUpChromeAccessibility(windowElement)
+        } else {
+            Logger.warn("Failed to get Chrome main window for accessibility warm-up")
+        }
+    }
+    
+    /// 执行 Chrome Accessibility 预热操作
+    private func warmUpChromeAccessibility(_ windowElement: AXUIElement) {
+        Logger.info("Executing Chrome accessibility warm-up operations...")
+        
+        // 1. 获取窗口的子元素
+        var children: CFTypeRef?
+        let childrenResult = AXUIElementCopyAttributeValue(windowElement, kAXChildrenAttribute as CFString, &children)
+        
+        if childrenResult == .success, let childrenArray = children as? NSArray {
+            Logger.info("Found \(childrenArray.count) child elements in Chrome window")
+            
+            // 2. 遍历子元素，尝试获取各种属性来触发权限
+            for i in 0..<min(childrenArray.count, 10) { // 限制遍历数量，避免性能问题
+                let child = childrenArray[i] as! AXUIElement
+                
+                // 尝试获取元素的角色
+                var role: CFTypeRef?
+                let roleResult = AXUIElementCopyAttributeValue(child, kAXRoleAttribute as CFString, &role)
+                
+                if roleResult == .success, let roleString = role as? String {
+                    Logger.debug("Chrome child element \(i) role: \(roleString)")
+                    
+                    // 3. 对于特定类型的元素，尝试获取更多属性来触发权限
+                    if roleString == "AXWebArea" || roleString == "AXGroup" || roleString == "AXGenericElement" {
+                        warmUpElementAccessibility(child)
+                    }
+                }
+            }
+        }
+        
+        // 4. 尝试获取窗口的标题和位置信息
+        var title: CFTypeRef?
+        let titleResult = AXUIElementCopyAttributeValue(windowElement, kAXTitleAttribute as CFString, &title)
+        if titleResult == .success, let titleString = title as? String {
+            Logger.info("Chrome window title: \(titleString)")
+        }
+        
+        var position: CFTypeRef?
+        let positionResult = AXUIElementCopyAttributeValue(windowElement, kAXPositionAttribute as CFString, &position)
+        if positionResult == .success {
+            Logger.info("Chrome window position retrieved successfully")
+        }
+        
+        Logger.info("Chrome accessibility warm-up completed")
+    }
+    
+    /// 对单个元素执行 Accessibility 预热
+    private func warmUpElementAccessibility(_ element: AXUIElement) {
+        // 尝试获取各种属性来触发 Accessibility 权限
+        let attributesToTry: [CFString] = [
+            kAXValueAttribute as CFString,
+            kAXTitleAttribute as CFString,
+            kAXDescriptionAttribute as CFString,
+            "AXLabel" as CFString,
+            kAXHelpAttribute as CFString,
+            kAXSelectedTextAttribute as CFString
+        ]
+        
+        for attribute in attributesToTry {
+            var value: CFTypeRef?
+            let result = AXUIElementCopyAttributeValue(element, attribute, &value)
+            
+            if result == .success {
+                Logger.debug("Successfully accessed Chrome element attribute: \(attribute)")
+                // 不需要处理返回值，目的只是触发权限检查
+            }
+        }
+    }
 } 

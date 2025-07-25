@@ -92,7 +92,7 @@ class SessionManager {
     var isAuthenticated: Bool {
         // First check cached validation result
         if let cachedEntry = authCache.getCachedEntry() {
-            Logger.debug("SessionManager: ✅ Cache hit - using cached authentication result: \(cachedEntry.isValid)")
+            // Logger.debug("SessionManager: ✅ Cache hit - using cached authentication result: \(cachedEntry.isValid)")
             PerformanceTelemetry.shared.recordAuthCacheHit(true)
             return cachedEntry.isValid
         }
