@@ -80,7 +80,7 @@ class EnvironmentManager {
             if let bundle = Bundle(url: bundleURL) {
                 appVersion = bundle.infoDictionary?["CFBundleShortVersionString"] as? String ?? 
                            bundle.infoDictionary?["CFBundleVersion"] as? String ?? "-"
-                Logger.debug("Got app version via Bundle URL: \(appVersion)")
+                // Logger.debug("Got app version via Bundle URL: \(appVersion)")
             }
         }
         

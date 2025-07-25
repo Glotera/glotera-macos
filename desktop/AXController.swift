@@ -20,10 +20,12 @@ class AXController {
 
     // MARK: - Trigger Detection
     // 检测当前焦点输入框内容，提取触发标记和原文
-    func detectTriggerAndExtract() -> (text: String, lang: String)? {
+    func detectTriggerAndExtract(focusedElement: AXUIElement? = nil) -> (text: String, lang: String)? {
         Logger.debug("Starting trigger detection")
         
-        guard let focused = getFocusedElement() else {
+        // 使用传入的焦点元素，如果没有传入则获取当前焦点元素
+        let focused = focusedElement ?? getFocusedElement()
+        guard let focused = focused else {
             Logger.warn("No focused element found")
             return nil
         }

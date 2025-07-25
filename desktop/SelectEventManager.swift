@@ -39,8 +39,60 @@ class SelectEventManager {
     
     // WeChat 历史消息标记（用于区分历史消息和输入框）
     private var wechatHistoryMessageElements: Set<Int> = []
+    
+    // 焦点元素缓存，减少频繁的 Accessibility API 调用
+    private var cachedFocusedElement: AXUIElement?
+    private var lastFocusedElementTime: Date = Date.distantPast
+    private let focusElementCacheTTL: TimeInterval = 1.0 // 1秒缓存时间
 
-    private init() {}
+    private init() {
+        // 监听应用切换，清除焦点元素缓存
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(applicationDidActivate),
+            name: NSWorkspace.didActivateApplicationNotification,
+            object: nil
+        )
+    }
+    
+    // Application switching observer
+    @objc private func applicationDidActivate(_ notification: Notification) {
+        // Clear focused element cache when user switches applications
+        clearFocusedElementCache()
+        Logger.debug("Application switched - focused element cache cleared")
+    }
+    
+    deinit {
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+    }
+
+    // 获取缓存的焦点元素，减少频繁的 Accessibility API 调用
+    private func getCachedFocusedElement() -> AXUIElement? {
+        let now = Date()
+        
+        // 检查缓存是否有效
+        if let cached = cachedFocusedElement,
+           now.timeIntervalSince(lastFocusedElementTime) < focusElementCacheTTL {
+            return cached
+        }
+        
+        // 缓存过期或不存在，重新获取
+        if let focused = InputManager.shared.getFocusedElementWithRetry(maxRetries: 3) {
+            cachedFocusedElement = focused
+            lastFocusedElementTime = now
+            return focused
+        }
+        
+        // 获取失败，清除缓存
+        cachedFocusedElement = nil
+        return nil
+    }
+    
+    // 清除焦点元素缓存（当应用切换时调用）
+    private func clearFocusedElementCache() {
+        cachedFocusedElement = nil
+        lastFocusedElementTime = Date.distantPast
+    }
 
         // 开始监听选中文本变化
     func startSelectionMonitoring() {
@@ -54,10 +106,8 @@ class SelectEventManager {
             self.startMouseEventMonitoring()
         }
         
-        // 使用较低频率的定时器进一步减少对系统的影响
-        Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
-            self.checkForTextSelection()
-        }
+        // 移除定时器，改为纯事件驱动的方式
+        // 菜单的隐藏将通过事件监听和菜单关闭回调来处理
     }
 
      // 监听鼠标事件
@@ -82,6 +132,9 @@ class SelectEventManager {
     private func handleMouseEvent(_ event: NSEvent) {
         switch event.type {
         case .leftMouseDown:
+            // 菜单的隐藏由 TranslationMenuWindow 自己的事件监听器处理
+            // 这里不需要额外的处理
+            
             // 检测双击
             let now = Date()
             let timeSinceLastClick = now.timeIntervalSince(lastDoubleClickTime)
@@ -129,40 +182,17 @@ class SelectEventManager {
         }
     }
     
-    // 检查文本选中状态
-    private func checkForTextSelection() {
-        // 如果选中文本监听被暂停，不执行任何操作
-        if isSelectionMonitoringPaused {
-            return
-        }
-        
-        // 如果菜单正在显示，不要重复检查
-        if isMenuShowing { 
-            return
-        }
-        
-        // 如果正在拖拽鼠标，不要检查（等待拖拽完成）
-        if isMouseDragging {
-            return
-        }
-        
-        // 如果刚刚完成鼠标拖拽，等待特殊检查方法处理
-        let timeSinceMouseUp = Date().timeIntervalSince(lastMouseUpTime)
-        if timeSinceMouseUp < 1.0 && lastMouseUpTime != Date.distantPast {
-            return
-        }
-        
-        // 防抖：至少间隔0.3秒才检查
-        let now = Date()
-        if now.timeIntervalSince(lastSelectionCheckTime) < 0.3 {
-            return
-        }
-        lastSelectionCheckTime = now
-        
-        // 只在定时器检查时隐藏菜单，不显示菜单
-        // 菜单只能通过鼠标拖拽选择后显示
-        hideMenuIfNoSelection()
+    // 重置菜单状态 - 现在由 TranslationMenuWindow 的 onMenuClosed 回调处理
+    // 这个方法保留以备将来使用
+    private func resetMenuState() {
+        lastSelectedText = ""
+        isMenuShowing = false
+        isWhatsAppMessageSelected = false
+        lastWhatsAppSelectedText = ""
+        isWeChatMessageSelected = false
+        lastWeChatSelectedText = ""
     }
+
     
     // 鼠标释放后的专门检查
     private func checkForTextSelectionAfterMouseUp() {
@@ -185,83 +215,7 @@ class SelectEventManager {
         }
     }
 
-       // 只隐藏菜单，不显示菜单的逻辑
-    private func hideMenuIfNoSelection() {
-        let startTime = Date()
-        
-        guard let selection = getSelectedText(checkSpecialApps: false) else {
-            // 如果没有选中文本，隐藏菜单并重置状态
-            if !lastSelectedText.isEmpty {
-                // 特殊处理：如果是 WhatsApp 消息且刚刚显示菜单，给更长时间
-                if isWhatsAppMessageSelected && AppDetectionManager.shared.isWhatsAppApp() {
-                    let timeSinceShow = Date().timeIntervalSince(whatsAppMessageShowTime)
-                    if timeSinceShow < 2.5 { // 给 WhatsApp 消息 2.2.5 秒的稳定时间
-                        Logger.info("WhatsApp message menu protection: keeping menu visible (no selection, \(String(format: "%.1f", timeSinceShow))s since show)")
-                        return
-                    }
-                }
-                
-                // 特殊处理：如果是 WeChat 消息且刚刚显示菜单，给更长时间
-                if isWeChatMessageSelected && AppDetectionManager.shared.isWeChatApp() {
-                    let timeSinceShow = Date().timeIntervalSince(weChatMessageShowTime)
-                    if timeSinceShow < 2.5 { // 给 WeChat 消息 2.2.5 秒的稳定时间
-                        Logger.info("WeChat message menu protection: keeping menu visible (no selection, \(String(format: "%.1f", timeSinceShow))s since show)")
-                        return
-                    }
-                }
-                
-                TranslationMenuWindow.shared.hide()
-                lastSelectedText = ""
-                isMenuShowing = false
-                isWhatsAppMessageSelected = false
-                isWeChatMessageSelected = false
-            }
-            
-            let processingTime = Date().timeIntervalSince(startTime)
-            if processingTime > 0.5 {  // 提高阈值，只在真正慢的时候警告
-                Logger.debug("hideMenuIfNoSelection took \(String(format: "%.3f", processingTime))s")
-            }
-            return
-        }
-        
-        // 如果选中文本发生变化，也隐藏菜单
-        let originalText = selection.text
-        if originalText != lastSelectedText && !lastSelectedText.isEmpty {
-            // 特殊处理：如果是 WhatsApp 消息且刚刚显示菜单，给更长时间
-            if isWhatsAppMessageSelected && AppDetectionManager.shared.isWhatsAppApp() {
-                let timeSinceShow = Date().timeIntervalSince(whatsAppMessageShowTime)
-                // 检查是否是同一个WhatsApp消息，如果是，保持菜单显示
-                if timeSinceShow < 2.5 && (originalText == lastWhatsAppSelectedText || originalText.isEmpty) {
-                    Logger.info("WhatsApp message menu protection: keeping menu visible (text changed, \(String(format: "%.1f", timeSinceShow))s since show, same message: \(originalText == lastWhatsAppSelectedText))")
-                    return
-                }
-            }
-            
-            // 特殊处理：如果是 WeChat 消息且刚刚显示菜单，给更长时间
-            if isWeChatMessageSelected && AppDetectionManager.shared.isWeChatApp() {
-                let timeSinceShow = Date().timeIntervalSince(weChatMessageShowTime)
-                // 检查是否是同一个WeChat消息，如果是，保持菜单显示
-                if timeSinceShow < 2.5 && (originalText == lastWeChatSelectedText || originalText.isEmpty) {
-                    Logger.info("WeChat message menu protection: keeping menu visible (text changed, \(String(format: "%.1f", timeSinceShow))s since show, same message: \(originalText == lastWeChatSelectedText))")
-                    return
-                }
-            }
-            
-            Logger.info("Hiding menu due to text change: '\(lastSelectedText)' -> '\(originalText)'")
-            TranslationMenuWindow.shared.hide()
-            lastSelectedText = ""
-            isMenuShowing = false
-            isWhatsAppMessageSelected = false
-            lastWhatsAppSelectedText = ""
-            isWeChatMessageSelected = false
-            lastWeChatSelectedText = ""
-        }
-        
-        let processingTime = Date().timeIntervalSince(startTime)
-        if processingTime > 0.2 {
-            Logger.warn("hideMenuIfNoSelection took \(String(format: "%.3f", processingTime))s - performance warning")
-        }
-    }
+
      
     
     // 键盘选择后的菜单显示逻辑 - 改为 public 以便 InputMonitor 调用
@@ -374,7 +328,7 @@ class SelectEventManager {
 
     // 获取当前选中的文本
     func getSelectedText(checkSpecialApps: Bool = true) -> (text: String, element: AXUIElement)? {
-        guard let focused = InputManager.shared.getFocusedElementWithRetry(maxRetries: 3) else {
+        guard let focused = getCachedFocusedElement() else {
             // print("[LOG] No focused element for selection")
             return nil
         }
@@ -862,6 +816,8 @@ class SelectEventManager {
         isSelectionMonitoringPaused = false
         Logger.info("Selection monitoring resumed")
     }
+    
+
     
     // MARK: - WeChat Message Detection
     

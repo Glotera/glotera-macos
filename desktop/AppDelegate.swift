@@ -50,6 +50,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 启动选中文本监听
         SelectEventManager.shared.startSelectionMonitoring()
         
+        // 延迟执行 Chrome Accessibility 预热，确保应用完全启动
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            AppDetectionManager.shared.chromeWarmUpAccessibility()
+        }
+        
         // Setup a timer to retry if permissions are granted later (check every 15 seconds, max 20 times)
         var retryCount = 0
         retryTimer = Timer.scheduledTimer(withTimeInterval: 15.0, repeats: true) { [weak self] timer in
@@ -109,6 +114,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self,
             selector: #selector(systemDidWakeUp),
             name: NSWorkspace.didWakeNotification,
+            object: nil
+        )
+        
+        // 监听应用切换，用于 Chrome Accessibility 预热
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(applicationDidActivate),
+            name: NSWorkspace.didActivateApplicationNotification,
             object: nil
         )
         
@@ -250,6 +263,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Logger.debug("Application became active - triggering immediate monitoring check")
         // 应用变为活跃时立即检查事件监听状态
         triggerImmediateMonitoringCheck()
+    }
+    
+    @objc private func applicationDidActivate(_ notification: Notification) {
+        // 检查是否切换到 Chrome，如果是则执行 Accessibility 预热
+        if let appInfo = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+           let bundleId = appInfo.bundleIdentifier,
+           bundleId.lowercased().contains("chrome") {
+            Logger.info("Chrome activated, performing accessibility warm-up")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                AppDetectionManager.shared.chromeWarmUpAccessibility()
+            }
+        }
     }
     
     @objc private func applicationDidResignActive() {
