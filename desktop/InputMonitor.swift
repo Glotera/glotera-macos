@@ -77,7 +77,7 @@ class InputMonitor {
     // 创建事件监听器的回调函数（供 AppDelegate 调用）
     func createEventTapCallback() -> CGEventTapCallBack {
         return { (proxy, type, event, refcon) -> Unmanaged<CGEvent>? in
-            
+            print("***key down*** \(type)")
             // 处理 Event Tap 被禁用的情况 - 优化恢复机制
             if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
                 let disableReason = type == .tapDisabledByTimeout ? "timeout" : "user input"
@@ -101,15 +101,15 @@ class InputMonitor {
             
             // 事件过滤：过滤掉自己发送的模拟事件
             if InputManager.shared.isEventSimulated(event) {
-                Logger.debug("Filtered out simulated event (keyCode: \(event.getIntegerValueField(.keyboardEventKeycode)))")
+                Logger.warn("Filtered out simulated event (keyCode: \(event.getIntegerValueField(.keyboardEventKeycode)))")
                 return Unmanaged.passUnretained(event)
             }
             
             // 检查是否正在发送模拟事件（额外的安全检查）
-            if InputManager.shared.isSendingSimulatedEvent() {
-                Logger.debug("Skipping event processing - currently sending simulated events")
-                return Unmanaged.passUnretained(event)
-            }
+            // if InputManager.shared.isSendingSimulatedEvent() {
+            //     Logger.warn("Skipping event processing - currently sending simulated events")
+            //     return Unmanaged.passUnretained(event)
+            // }
             
             // 极简的事件统计更新
             let shared = InputMonitor.shared
@@ -259,13 +259,13 @@ class InputMonitor {
         var detectionResult: (text: String, lang: String)?
         
         // First attempt: immediate detection
-        detectionResult = AXController.shared.detectTriggerAndExtract(focusedElement: focusedElement)
+        // detectionResult = AXController.shared.detectTriggerAndExtract(focusedElement: focusedElement)
         
-        if let result = detectionResult {
-            Logger.info("Immediate trigger detected: text='\(result.text)', lang='\(result.lang)'")
-            startTranslation(text: result.text, lang: result.lang, focusedElement: focusedElement)
-            return
-        }
+        // if let result = detectionResult {
+        //     Logger.info("Immediate trigger detected: text='\(result.text)', lang='\(result.lang)'")
+        //     startTranslation(text: result.text, lang: result.lang, focusedElement: focusedElement)
+        //     return
+        // }
         
         // Second attempt: delayed detection for some apps that need more time
         Logger.debug("Immediate detection failed, trying delayed detection...")
@@ -282,7 +282,8 @@ class InputMonitor {
         }
 
          // 检查是否为Apple Mail等模拟键盘应用，如果是，则执行智能检测逻辑
-        if AppDetectionManager.shared.isNeedSmartSelectionApp() {
+        let isSimulateKeyboardApp = true//AppDetectionManager.shared.isNeedSmartSelectionApp()
+        if isSimulateKeyboardApp {
             Logger.info("Simulate keyboard app detected, using smart clipboard-based detection.")
             DispatchQueue.global(qos: .userInitiated).async {
                 if let result = AXController.shared.detectTriggerForSmartSelection() {
