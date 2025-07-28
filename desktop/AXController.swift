@@ -13,34 +13,64 @@ class AXController {
     private var lastManuallyFocusedElement: AXUIElement? 
 
     
-    // 获取当前焦点输入框 - 增强版本
+    // 获取当前焦点输入框 - 智能缓存版本
     func getFocusedElement() -> AXUIElement? {
-        return InputManager.shared.getFocusedElementWithRetry(maxRetries: 3)
+        let appManager = AppDetectionManager.shared
+        
+        // Skip accessibility attempt if we know it fails for this app
+        if appManager.shouldUseClipboardDirectly() {
+            Logger.debug("Skipping accessibility attempt for known problematic app")
+            return nil
+        }
+        
+        Logger.debug("Attempting accessibility for app: \(appManager.getBundleId())")
+        let element = InputManager.shared.getFocusedElementWithRetry(maxRetries: 2) // Reduced retries for performance
+        
+        if element == nil {
+            Logger.warn("Failed to get focused element via accessibility")
+            appManager.recordAccessibilityFailure()
+        }
+        
+        return element
     }
 
     // MARK: - Trigger Detection
-    // 检测当前焦点输入框内容，提取触发标记和原文
+    // 智能检测当前焦点输入框内容，提取触发标记和原文 - 带缓存优化
     func detectTriggerAndExtract(focusedElement: AXUIElement? = nil) -> (text: String, lang: String)? {
-        Logger.debug("Starting trigger detection")
+        Logger.debug("Starting smart accessibility-aware trigger detection")
         
-        // 使用传入的焦点元素，如果没有传入则获取当前焦点元素
+        let appManager = AppDetectionManager.shared
+        
+        // Check if we should skip accessibility and use clipboard directly for this app
+        if appManager.shouldUseClipboardDirectly() {
+            Logger.info("Using clipboard directly for known accessibility-failed app")
+            return detectTriggerForSmartSelection()
+        }
+        
+        // Try accessibility approach first for unknown/working apps
         let focused = focusedElement ?? getFocusedElement()
-        guard let focused = focused else {
-            Logger.warn("No focused element found")
-            return nil
+        
+        if let focused = focused {
+            Logger.debug("Got focused element via accessibility")
+            
+            // 存储当前获取到的焦点元素，用于后续回填
+            self.lastManuallyFocusedElement = focused
+            Logger.debug("Stored focused element for potential replacement")
+            
+            let value = getInputValue(of: focused, focusedElement: focused)
+            if !value.isEmpty {
+                if let result = processContentForTrigger(value, focusedElement: focused) {
+                    return result
+                }
+            }
+        } else {
+            // Accessibility failed - record failure and fallback to clipboard
+            Logger.warn("Accessibility failed, recording failure and using clipboard fallback")
+            appManager.recordAccessibilityFailure()
+            return detectTriggerForSmartSelection()
         }
         
-        // 存储当前获取到的焦点元素，用于后续回填
-        self.lastManuallyFocusedElement = focused
-        Logger.debug("Stored focused element for potential replacement")
-        
-        let value = getInputValue(of: focused, focusedElement: focused)
-        if value.isEmpty {
-            Logger.warn("No value found in focused element")
-            return nil
-        }
-        
-        return processContentForTrigger(value, focusedElement: focused)
+        return nil
     }
     
     // 处理内容以检测触发器 - 简化优化版本
@@ -235,27 +265,29 @@ class AXController {
         Logger.info("Replacing input with translation result")
         
         // 新增：针对文本编辑器等场景的特殊回填逻辑
-        if  AppDetectionManager.shared.isNeedSimulateKeyboardApp() {
+        if  AppDetectionManager.shared.isNeedSmartSelectionApp() {
             Logger.info("Text editor detected. Using dedicated replacement method.")
             replaceTextEditorInput(with: text, completion: completion)
             return
         }
         
-        // 优先使用手动触发时保存的焦点元素，如果不存在，再尝试获取当前焦点
-        guard let focused = self.lastManuallyFocusedElement ?? getFocusedElement() else {
-            Logger.warn("No focused element to replace")
-            completion?()
-            return
+        if !AppDetectionManager.shared.shouldUseClipboardDirectly(){
+            // 优先使用手动触发时保存的焦点元素，如果不存在，再尝试获取当前焦点
+            guard let focused = self.lastManuallyFocusedElement ?? getFocusedElement() else {
+                Logger.warn("No focused element to replace")
+                completion?()
+                return
+            }
+            
+            // 清理已保存的元素，避免影响后续非手动触发的操作
+            self.lastManuallyFocusedElement = nil
         }
-        
-        // 清理已保存的元素，避免影响后续非手动触发的操作
-        self.lastManuallyFocusedElement = nil
         
         // 暂停选中文本监听，防止自动翻译回填时触发翻译菜单
         SelectEventManager.shared.pauseSelectionMonitoring() 
 
         // 使用原有的桌面应用替换方法
-        replaceWithClipboard(element: focused, text: text) {
+        replaceWithClipboard( text: text) {
                 completion?()
             
         }
@@ -470,7 +502,7 @@ class AXController {
     }
     
     // 使用剪贴板强力替换内容
-    private func replaceWithClipboard(element: AXUIElement, text: String, completion: @escaping () -> Void) {
+    private func replaceWithClipboard( text: String, completion: @escaping () -> Void) {
         Logger.info("Using robust clipboard force replace method for standard apps.")
         
         // 1. 保存原始剪贴板内容
@@ -512,6 +544,11 @@ class AXController {
         // 添加延迟，确保与InputMonitor的事件处理分离
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             Logger.info("Simulating Cmd+A select all")
+            
+            // 使用 InputManager 的事件标记机制
+            InputManager.shared.beginSimulatedEvent()
+            defer { InputManager.shared.endSimulatedEvent() }
+            
             let source = CGEventSource(stateID: .hidSystemState)
             
             // Cmd+A
@@ -526,13 +563,19 @@ class AXController {
                 aDown.flags = .maskCommand
                 aUp.flags = .maskCommand
                 
+                // 标记为模拟事件
+                cmdDown.flags.insert(InputManager.shared.getSimulatedEventFlag())
+                aDown.flags.insert(InputManager.shared.getSimulatedEventFlag())
+                aUp.flags.insert(InputManager.shared.getSimulatedEventFlag())
+                cmdUp.flags.insert(InputManager.shared.getSimulatedEventFlag())
+                
                 // 恢复使用原始tap位置，通过时序分离避免冲突
                 cmdDown.post(tap: .cghidEventTap)
                 aDown.post(tap: .cghidEventTap)
                 aUp.post(tap: .cghidEventTap)
                 cmdUp.post(tap: .cghidEventTap)
                 
-                Logger.debug("Simulated Cmd+A select all (with timing separation)")
+                Logger.debug("Simulated Cmd+A select all (with timing separation and event filtering)")
             } else {
                 Logger.warn("Failed to create Cmd+A events")
             }
@@ -544,6 +587,11 @@ class AXController {
         // 添加延迟，确保与InputMonitor的事件处理分离
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             Logger.info("Simulating Cmd+V paste")
+            
+            // 使用 InputManager 的事件标记机制
+            InputManager.shared.beginSimulatedEvent()
+            defer { InputManager.shared.endSimulatedEvent() }
+            
             let source = CGEventSource(stateID: .hidSystemState)
             
             // Cmd+V
@@ -558,13 +606,19 @@ class AXController {
                 vDown.flags = .maskCommand
                 vUp.flags = .maskCommand
                 
+                // 标记为模拟事件
+                cmdDown.flags.insert(InputManager.shared.getSimulatedEventFlag())
+                vDown.flags.insert(InputManager.shared.getSimulatedEventFlag())
+                vUp.flags.insert(InputManager.shared.getSimulatedEventFlag())
+                cmdUp.flags.insert(InputManager.shared.getSimulatedEventFlag())
+                
                 // 恢复使用原始tap位置，通过时序分离避免冲突
                 cmdDown.post(tap: .cghidEventTap)
                 vDown.post(tap: .cghidEventTap)
                 vUp.post(tap: .cghidEventTap)
                 cmdUp.post(tap: .cghidEventTap)
                 
-                Logger.debug("Simulated Cmd+V paste (with timing separation)")
+                Logger.debug("Simulated Cmd+V paste (with timing separation and event filtering)")
             } else {
                 Logger.warn("Failed to create Cmd+V events")
             }
@@ -630,8 +684,8 @@ class AXController {
         SelectEventManager.shared.stopSelectionMonitoring()
     }
 
-    // 通过剪贴板检测触发器（专为模拟键盘应用设计）
-    func detectTriggerViaClipboard() -> (text: String, lang: String)? {
+    // 通过剪贴板检测触发器（专为编辑器及邮件应用设计）
+    func detectTriggerForSmartSelection() -> (text: String, lang: String)? {
         Logger.info("Starting system-wide clipboard-based trigger detection.")
 
         let pasteboard = NSPasteboard.general
@@ -640,8 +694,13 @@ class AXController {
         // Clear clipboard to ensure we detect the new content
         pasteboard.clearContents()
         
-        // Send Shitf+cmd+left & shift+cmd+up
-        InputManager.shared.postSmartSelection()
+        if AppDetectionManager.shared.isNeedSmartSelectionApp(){
+            // Send Shitf+cmd+left & shift+cmd+up
+            InputManager.shared.postSmartSelection()
+        }else{
+            //Send Cmd+A
+            InputManager.shared.postSelectAll()
+        }
         
         // Add a delay for the selection to register
         Thread.sleep(forTimeInterval: 0.2)

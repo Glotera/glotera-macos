@@ -13,10 +13,16 @@ import ApplicationServices
 class InputManager {
     static let shared = InputManager()
     
-    // 防止死循环的标志
+    // 事件过滤相关属性
     private var isSendingEnterKey = false
     private var enterKeySentTime: Date?
-
+    private var _isSendingSimulatedEvent = false
+    private var simulatedEventStartTime: Date?
+    private var simulatedEventTimeout: TimeInterval = 0.5 // 500ms 超时
+    
+    // 事件标记常量
+    private let kEventFlagSimulated = CGEventFlags(rawValue: 1 << 24) // 使用未使用的标志位
+    
     private init() {} 
     
     // 带重试机制的焦点元素获取
@@ -341,6 +347,9 @@ class InputManager {
 
     // 发送Cmd+A
     func postSelectAll() {
+        beginSimulatedEvent()
+        defer { endSimulatedEvent() }
+        
         let source = CGEventSource(stateID: .hidSystemState)
         let cmdDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Command), keyDown: true)
         let aDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_A), keyDown: true)
@@ -350,16 +359,25 @@ class InputManager {
         cmdDown?.flags = .maskCommand
         aDown?.flags = .maskCommand
         
+        // 标记为模拟事件
+        markEventAsSimulated(cmdDown!)
+        markEventAsSimulated(aDown!)
+        markEventAsSimulated(aUp!)
+        markEventAsSimulated(cmdUp!)
+        
         cmdDown?.post(tap: .cghidEventTap)
         aDown?.post(tap: .cghidEventTap)
         aUp?.post(tap: .cghidEventTap)
         cmdUp?.post(tap: .cghidEventTap)
         
-        Logger.info("Posted global Cmd+A")
+        Logger.info("Posted global Cmd+A (simulated)")
     }
 
     // 发送Cmd+C
     func postCopy() {
+        beginSimulatedEvent()
+        defer { endSimulatedEvent() }
+        
         let source = CGEventSource(stateID: .hidSystemState)
         
         // 确保事件源有效
@@ -382,6 +400,12 @@ class InputManager {
         cmdDown.flags = .maskCommand
         cDown.flags = .maskCommand
         
+        // 标记为模拟事件
+        markEventAsSimulated(cmdDown)
+        markEventAsSimulated(cDown)
+        markEventAsSimulated(cUp)
+        markEventAsSimulated(cmdUp)
+        
         // 按顺序发送事件
         cmdDown.post(tap: .cghidEventTap)
         Thread.sleep(forTimeInterval: 0.05) // 短暂延迟确保按键顺序
@@ -391,25 +415,35 @@ class InputManager {
         Thread.sleep(forTimeInterval: 0.05)
         cmdUp.post(tap: .cghidEventTap)
         
-        Logger.info("Posted global Cmd+C copy command")
+        Logger.info("Posted global Cmd+C copy command (simulated)")
     }
 
     // 发送右箭头键以取消全选
     func postRightArrowKey() {
+        beginSimulatedEvent()
+        defer { endSimulatedEvent() }
+        
         let source = CGEventSource(stateID: .hidSystemState)
         let rightArrowKeyCode = 124 as CGKeyCode // kVK_RightArrow
         
         let downEvent = CGEvent(keyboardEventSource: source, virtualKey: rightArrowKeyCode, keyDown: true)
-        downEvent?.post(tap: .cghidEventTap)
-        
         let upEvent = CGEvent(keyboardEventSource: source, virtualKey: rightArrowKeyCode, keyDown: false)
+        
+        // 标记为模拟事件
+        markEventAsSimulated(downEvent!)
+        markEventAsSimulated(upEvent!)
+        
+        downEvent?.post(tap: .cghidEventTap)
         upEvent?.post(tap: .cghidEventTap)
         
-        Logger.info("Posted Right Arrow key to deselect text after misfire.")
+        Logger.info("Posted Right Arrow key to deselect text after misfire (simulated)")
     }
 
     // 发送粘贴命令Cmd+V
     func postPaste() {
+        beginSimulatedEvent()
+        defer { endSimulatedEvent() }
+        
         let source = CGEventSource(stateID: .hidSystemState)
         let cmdDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Command), keyDown: true)
         let vDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: true)
@@ -419,18 +453,27 @@ class InputManager {
         cmdDown?.flags = .maskCommand
         vDown?.flags = .maskCommand
         
+        // 标记为模拟事件
+        markEventAsSimulated(cmdDown!)
+        markEventAsSimulated(vDown!)
+        markEventAsSimulated(vUp!)
+        markEventAsSimulated(cmdUp!)
+        
         cmdDown?.post(tap: .cghidEventTap)
         vDown?.post(tap: .cghidEventTap)
         vUp?.post(tap: .cghidEventTap)
         cmdUp?.post(tap: .cghidEventTap)
         
-        Logger.info("Posted Cmd+V (Paste)")
+        Logger.info("Posted Cmd+V (Paste) (simulated)")
     }
 
     // 为文本编辑器发送智能选择命令（选择光标前的内容）
     // Shift+Cmd+Left 选择当前行到行首
     // Shift+Cmd+Up 选择当前行到文档开头
     func postSmartSelection() {
+        beginSimulatedEvent()
+        defer { endSimulatedEvent() }
+        
         Logger.info("Using optimized smart selection - selecting content before cursor")
         
         let source = CGEventSource(stateID: .hidSystemState)
@@ -447,10 +490,13 @@ class InputManager {
         Logger.info("Step 1 - Sending Shift+Cmd+Left to select to line start")
         let leftDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_LeftArrow), keyDown: true)
         leftDown?.flags = [.maskShift, .maskCommand]
-        leftDown?.post(tap: .cghidEventTap)
+        markEventAsSimulated(leftDown!)
         
         let leftUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_LeftArrow), keyDown: false)
         leftUp?.flags = [.maskShift, .maskCommand]
+        markEventAsSimulated(leftUp!)
+        
+        leftDown?.post(tap: .cghidEventTap)
         leftUp?.post(tap: .cghidEventTap)
         
         // 减少等待时间，提高响应速度
@@ -461,16 +507,19 @@ class InputManager {
         Logger.info("Step 2 - Sending Shift+Cmd+Up to extend selection to document start")
         let upDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_UpArrow), keyDown: true)
         upDown?.flags = [.maskShift, .maskCommand]
-        upDown?.post(tap: .cghidEventTap)
+        markEventAsSimulated(upDown!)
         
         let upUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_UpArrow), keyDown: false)
         upUp?.flags = [.maskShift, .maskCommand]
+        markEventAsSimulated(upUp!)
+        
+        upDown?.post(tap: .cghidEventTap)
         upUp?.post(tap: .cghidEventTap)
         
         // 减少等待时间，提高响应速度
         Thread.sleep(forTimeInterval: 0.05)
         
-        Logger.info("Smart selection completed - should have selected all content before cursor")
+        Logger.info("Smart selection completed - should have selected all content before cursor (simulated)")
     }
 
     // 发送回车键事件
@@ -572,6 +621,9 @@ class InputManager {
     
     // 使用CGEvent发送微信Enter键（备用方法）
     private func sendWeChatEnterKeyViaCGEvent() {
+        beginSimulatedEvent()
+        defer { endSimulatedEvent() }
+        
         Logger.info("WeChat: Sending Enter key via CGEvent")
         
         let source = CGEventSource(stateID: .hidSystemState)
@@ -582,13 +634,17 @@ class InputManager {
             enterKeyDown.flags = []
             enterKeyUp.flags = []
             
+            // 标记为模拟事件
+            markEventAsSimulated(enterKeyDown)
+            markEventAsSimulated(enterKeyUp)
+            
             // 发送按下事件
             enterKeyDown.post(tap: .cghidEventTap)
             
             // 稍微延迟后发送释放事件
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
                 enterKeyUp.post(tap: .cghidEventTap)
-                Logger.info("WeChat: Enter key sent via CGEvent")
+                Logger.info("WeChat: Enter key sent via CGEvent (simulated)")
             }
         } else {
             Logger.error("WeChat: Failed to create CGEvent Enter key events")
@@ -597,15 +653,22 @@ class InputManager {
     
     // 标准的Enter键发送
     private func sendEnterKeyStandard() {
+        beginSimulatedEvent()
+        defer { endSimulatedEvent() }
+        
         Logger.info("Sending Enter key (standard method)")
         
         let source = CGEventSource(stateID: .hidSystemState)
         if let enterKeyDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Return), keyDown: true),
            let enterKeyUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Return), keyDown: false) {
             
+            // 标记为模拟事件
+            markEventAsSimulated(enterKeyDown)
+            markEventAsSimulated(enterKeyUp)
+            
             enterKeyDown.post(tap: .cghidEventTap)
             enterKeyUp.post(tap: .cghidEventTap)
-            Logger.info("Standard: Enter key sent successfully")
+            Logger.info("Standard: Enter key sent successfully (simulated)")
         }
     }
 
@@ -653,6 +716,49 @@ class InputManager {
                 }  
             }  
         }  
+    }
+
+    // MARK: - Event Filtering Methods
+    
+    // 开始标记模拟事件
+    func beginSimulatedEvent() {
+        _isSendingSimulatedEvent = true
+        simulatedEventStartTime = Date()
+        Logger.debug("Begin simulated event mode")
+    }
+    
+    // 结束标记模拟事件
+    func endSimulatedEvent() {
+        _isSendingSimulatedEvent = false
+        simulatedEventStartTime = nil
+        Logger.debug("End simulated event mode")
+    }
+    
+    // 检查是否正在发送模拟事件
+    func isSendingSimulatedEvent() -> Bool {
+        // 检查超时
+        if let startTime = simulatedEventStartTime,
+           Date().timeIntervalSince(startTime) > simulatedEventTimeout {
+            Logger.warn("Simulated event timeout, auto-clearing")
+            endSimulatedEvent()
+            return false
+        }
+        return _isSendingSimulatedEvent
+    }
+    
+    // 标记事件为模拟事件
+    private func markEventAsSimulated(_ event: CGEvent) {
+        event.flags.insert(kEventFlagSimulated)
+    }
+    
+    // 检查事件是否为模拟事件
+    func isEventSimulated(_ event: CGEvent) -> Bool {
+        return event.flags.contains(kEventFlagSimulated)
+    }
+    
+    // 获取模拟事件标志
+    func getSimulatedEventFlag() -> CGEventFlags {
+        return kEventFlagSimulated
     }
 
 }

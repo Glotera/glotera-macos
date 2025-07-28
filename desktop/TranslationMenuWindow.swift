@@ -274,19 +274,29 @@ class TranslationMenuWindow: NSWindow {
  
     // 输入文本
     private func typeText(_ text: String) {
+        // 使用 InputManager 的事件标记机制
+        InputManager.shared.beginSimulatedEvent()
+        defer { InputManager.shared.endSimulatedEvent() }
+        
         for char in text.unicodeScalars {
             if let event = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true) {
                 var unichar = UniChar(char.value)
                 event.keyboardSetUnicodeString(stringLength: 1, unicodeString: &unichar)
+                
+                // 标记为模拟事件
+                event.flags.insert(InputManager.shared.getSimulatedEventFlag())
                 event.post(tap: .cghidEventTap)
                 
                 if let keyUpEvent = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) {
                      keyUpEvent.keyboardSetUnicodeString(stringLength: 1, unicodeString: &unichar)
+                     
+                     // 标记为模拟事件
+                     keyUpEvent.flags.insert(InputManager.shared.getSimulatedEventFlag())
                      keyUpEvent.post(tap: .cghidEventTap)
                 }
             }
         }
-        Logger.info("Typed text: '\(text)'")
+        Logger.info("Typed text: '\(text)' (simulated)")
     }
     
     // 使用Base64编码来安全传递文本到JavaScript，避免转义问题

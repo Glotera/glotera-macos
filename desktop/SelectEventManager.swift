@@ -117,14 +117,7 @@ class SelectEventManager {
             DispatchQueue.main.async {
                 self?.handleMouseEvent(event)
             }
-        }
-        
-        // 移除键盘事件监听，避免与 InputMonitor 的 CGEvent 监听冲突
-        // keyboardEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
-        //     DispatchQueue.main.async {
-        //         self?.handleKeyboardEvent(event)
-        //     }
-        // }
+        } 
         
         Logger.info("Mouse event monitoring started (keyboard monitoring delegated to InputMonitor)")
     }
@@ -326,16 +319,25 @@ class SelectEventManager {
 
       
 
-    // 获取当前选中的文本
+    // 获取当前选中的文本 - 智能缓存版本
     func getSelectedText(checkSpecialApps: Bool = true) -> (text: String, element: AXUIElement)? {
+        let appManager = AppDetectionManager.shared
+        
+        // For known problematic apps, skip accessibility and use clipboard method
+        if appManager.shouldUseClipboardDirectly() {
+            Logger.info("Using clipboard selection for known accessibility-failed app")
+            return getSelectedTextViaClipboard()
+        }
+        
+        // Try accessibility first for unknown/working apps
         guard let focused = getCachedFocusedElement() else {
-            // print("[LOG] No focused element for selection")
-            return nil
+            Logger.info("No focused element via accessibility, recording failure")
+            appManager.recordAccessibilityFailure()
+            return getSelectedTextViaClipboard()
         }
         
         // 首先尝试通过AX API获取选中文本
         if let selectedText = getSelectedTextAttribute(of: focused), !selectedText.isEmpty {
-            // Logger.debug("[LOG] Got selected text via AX: '\(selectedText)'")
             return (text: selectedText, element: focused)
         }
         
@@ -373,8 +375,46 @@ class SelectEventManager {
                 return (text: wechatResult.text, element: wechatResult.element)
             }
         }
-         
-        return nil
+        
+        // If all accessibility methods fail, record failure and try clipboard
+        Logger.warn("All accessibility methods failed, using clipboard fallback")
+        appManager.recordAccessibilityFailure()
+        return getSelectedTextViaClipboard()
+    }
+    
+    // New clipboard-based selection method
+    private func getSelectedTextViaClipboard() -> (text: String, element: AXUIElement)? {
+        Logger.info("Getting selected text via clipboard method")
+        
+        let pasteboard = NSPasteboard.general
+        let originalContent = pasteboard.string(forType: .string)
+        
+        // Clear and copy current selection
+        pasteboard.clearContents()
+        InputManager.shared.postCopy()
+        Thread.sleep(forTimeInterval: 0.2)
+        
+        guard let selectedText = pasteboard.string(forType: .string), 
+              !selectedText.isEmpty, 
+              selectedText.trimmingCharacters(in: .whitespacesAndNewlines).count >= 3 else {
+            
+            // Restore original clipboard
+            if let originalContent = originalContent {
+                pasteboard.clearContents()
+                pasteboard.setString(originalContent, forType: .string)
+            }
+            return nil
+        }
+        
+        // Restore original clipboard
+        if let originalContent = originalContent {
+            pasteboard.clearContents()
+            pasteboard.setString(originalContent, forType: .string)
+        }
+        
+        // Return dummy element since we can't get the real focused element
+        let systemWide = AXUIElementCreateSystemWide()
+        return (text: selectedText, element: systemWide)
     }
     
     // 获取 WhatsApp 聊天历史文本

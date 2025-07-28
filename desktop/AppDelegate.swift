@@ -327,18 +327,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         Logger.debug("Attempting quick event tap re-enable...")
         
-        // 先禁用再启用，确保状态重置
+        // 先禁用再启用，确保状态重置，增加小延迟确保系统处理
         CGEvent.tapEnable(tap: eventTap, enable: false)
+        usleep(10000) // 10ms delay
         CGEvent.tapEnable(tap: eventTap, enable: true)
+        
+        // 给系统一点时间处理状态变化
+        usleep(20000) // 20ms delay
         
         // 验证是否成功
         let isEnabled = CGEvent.tapIsEnabled(tap: eventTap)
         let finalValid = CFMachPortIsValid(eventTap)
-        
-        Logger.info("Quick event tap recovery result - Enabled: \(isEnabled), Valid: \(finalValid)")
-        
+       
         if isEnabled && finalValid {
             isEventMonitoringActive = true
+            
             Logger.info("Quick event tap recovery successful")
             return true
         } else {
@@ -400,7 +403,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 创建事件监听器 - 使用更稳定的配置
         let eventMask = (1 << CGEventType.keyDown.rawValue)
         let callback = inputMonitor.createEventTapCallback()
-        
+         
+       
         eventTap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .tailAppendEventTap, // 改为 tail 位置，减少与其他应用冲突
@@ -419,7 +423,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // 添加到 RunLoop
             CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes) 
             
-            // 启用事件监听
+            // 启用事件监听，增加小延迟确保系统处理
+            usleep(50000) // 50ms delay
             CGEvent.tapEnable(tap: eventTap, enable: true) 
             
             // 标记为活跃状态
