@@ -187,7 +187,7 @@ public class CallbackLogDestination: LogDestination {
 /// 主要的日志工具类
 public class Logger {
     /// 当前日志等级，只有等于或高于此等级的日志才会被输出
-    public static var currentLevel: LogLevel = .debug
+    public static var currentLevel: LogLevel = .info
     
     /// 日志输出目标列表
     private static var destinations: [LogDestination] = [ConsoleLogDestination()]

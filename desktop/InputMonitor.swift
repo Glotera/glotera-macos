@@ -77,39 +77,37 @@ class InputMonitor {
     // 创建事件监听器的回调函数（供 AppDelegate 调用）
     func createEventTapCallback() -> CGEventTapCallBack {
         return { (proxy, type, event, refcon) -> Unmanaged<CGEvent>? in
-            // 处理 Event Tap 被禁用的情况
+            
+            // 处理 Event Tap 被禁用的情况 - 优化恢复机制
             if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
                 let disableReason = type == .tapDisabledByTimeout ? "timeout" : "user input"
                 Logger.warn("Event tap disabled by \(disableReason), attempting immediate recovery")
                 
-                // 立即提交恢复任务到后台，不阻塞回调
-                DispatchQueue.global(qos: .utility).async {
-                    // 先尝试立即快速恢复
-                    if let appDelegate = InputMonitor.shared.appDelegate {
-                        var recovered = false
-                        
-                        // 尝试3次快速恢复，间隔递增
-                        for attempt in 1...3 {
-                            if appDelegate.quickEnableEventTap() {
-                                Logger.info("Event tap quick recovery successful on attempt \(attempt)")
-                                recovered = true
-                                break
-                            } else {
-                                Logger.warn("Quick recovery attempt \(attempt) failed")
-                                if attempt < 3 {
-                                    Thread.sleep(forTimeInterval: Double(attempt) * 0.1) // 0.1s, 0.2s delays
-                                }
-                            }
-                        }
-                        
-                        if !recovered {
-                            DispatchQueue.main.async {
-                                Logger.warn("All quick recovery attempts failed, performing full restart")
-                                InputMonitor.shared.appDelegate?.restartEventMonitoring()
-                            }
+                // 快速尝试重新启用，不阻塞回调
+                if let appDelegate = InputMonitor.shared.appDelegate {
+                    let recovered = appDelegate.quickEnableEventTap()
+                    if recovered {
+                        Logger.info("Event tap quick recovery successful")
+                    } else {
+                        // 只有在快速恢复失败时才异步处理完整重启
+                        Logger.warn("Quick recovery failed, scheduling full restart")
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            InputMonitor.shared.appDelegate?.restartEventMonitoring()
                         }
                     }
                 }
+                return Unmanaged.passUnretained(event)
+            }
+            
+            // 事件过滤：过滤掉自己发送的模拟事件
+            if InputManager.shared.isEventSimulated(event) {
+                Logger.debug("Filtered out simulated event (keyCode: \(event.getIntegerValueField(.keyboardEventKeycode)))")
+                return Unmanaged.passUnretained(event)
+            }
+            
+            // 检查是否正在发送模拟事件（额外的安全检查）
+            if InputManager.shared.isSendingSimulatedEvent() {
+                Logger.debug("Skipping event processing - currently sending simulated events")
                 return Unmanaged.passUnretained(event)
             }
             
@@ -134,20 +132,60 @@ class InputMonitor {
                 }
                 
                 if keyCode == kVK_Space { // 空格键
-                    shared.lastSpaceKeyTime = Date()
+                    shared.lastSpaceKeyTime = currentTime
                     shared.spaceKeyEventCount += 1
-                    // 立即提交处理任务，不在回调中等待
-                    DispatchQueue.global(qos: .userInitiated).async {
-                        // 在后台线程中获取焦点元素，避免阻塞事件回调
-                        let focusedElement = AXController.shared.getFocusedElement()
-                        DispatchQueue.main.async {
-                            shared.handleSpaceKey(focusedElement: focusedElement)
+                    
+                    // 重要：直接在事件回调中处理时间敏感的双击检测
+                    // 避免异步调度导致的时序问题，使用严格的时间检查
+                    let isDoubleSpace = shared.lastSpaceTime != nil && 
+                                      currentTime.timeIntervalSince(shared.lastSpaceTime!) < 0.4 &&
+                                      currentTime.timeIntervalSince(shared.lastSpaceTime!) > 0.05 // 避免过快的重复检测
+                    
+                    if isDoubleSpace {
+                        // 双击空格：立即标记并异步处理，但保持时序准确性
+                        print(" ")
+                        print("===========================================")
+                        Logger.debug("Double space detected in callback (interval: \(String(format: "%.3f", currentTime.timeIntervalSince(shared.lastSpaceTime!)))s)")
+                        shared.lastSpaceTime = nil // 立即重置避免重复触发
+                        
+                        // 更严格的验证：检查事件间隔是否有非空格非修饰键
+                        let nonSpaceEvents = shared.keyEventsBetweenSpaces.filter { keyCode in
+                            return keyCode != kVK_Space && 
+                                   keyCode != kVK_Command && 
+                                   keyCode != kVK_Shift && 
+                                   keyCode != kVK_Option && 
+                                   keyCode != kVK_Control &&
+                                   keyCode != kVK_CapsLock &&
+                                   keyCode != kVK_Function
+                        }
+                        
+                        if nonSpaceEvents.isEmpty {
+                            // 验证通过，高优先级异步处理翻译逻辑
+                            DispatchQueue.main.async {
+                                shared.handleValidatedDoubleSpace()
+                            }
+                        } else {
+                            Logger.debug("Double space validation failed: found \(nonSpaceEvents.count) non-space keys: \(nonSpaceEvents)")
+                        }
+                        
+                        shared.keyEventsBetweenSpaces.removeAll()
+                        let finishTime = Date()
+                        Logger.info("Double Space Time: \(finishTime.timeIntervalSince(currentTime))s")
+                    } else {
+                        // 第一次空格：重置状态，开始新的检测周期
+                        shared.lastSpaceTime = currentTime
+                        shared.keyEventsBetweenSpaces.removeAll()
+                        
+                        if shared.lastSpaceTime == nil {
+                            Logger.debug("First space detected, waiting for second space")
                         }
                     }
                 } else if keyCode == kVK_Return || keyCode == kVK_ANSI_KeypadEnter { // 回车键
                     // 快速检查，避免复杂逻辑
                     if shared.shouldInterceptEnter() {
                         // 立即提交处理任务
+                        print(" ")
+                        print("===========================================")
                         DispatchQueue.global(qos: .userInitiated).async {
                             DispatchQueue.main.async {
                                 shared.handleInterceptedEnter()
@@ -196,6 +234,88 @@ class InputMonitor {
     }
 
     static let shared = InputMonitor()
+    
+    // 新的优化方法：处理已验证的双击空格
+    func handleValidatedDoubleSpace() {
+        let bundleId = AppDetectionManager.shared.getBundleId()
+        Logger.info("Processing validated double space for app: \(bundleId)")
+        
+        // Skip terminal apps
+        if AppDetectionManager.shared.isTerminalApp() {
+            Logger.info("Terminal app detected, ignoring space key trigger.")
+            return
+        }
+        
+        // 防止过于频繁的触发
+        if let lastTime = lastTranslationTime, Date().timeIntervalSince(lastTime) < 1.0 {
+            Logger.debug("Skipping double space - too soon after last translation")
+            return
+        }
+        
+        // Get focused element with fresh attempt (no caching issues)
+        let focusedElement = AXController.shared.getFocusedElement()
+        
+        // Universal smart detection with retry mechanism
+        var detectionResult: (text: String, lang: String)?
+        
+        // First attempt: immediate detection
+        detectionResult = AXController.shared.detectTriggerAndExtract(focusedElement: focusedElement)
+        
+        if let result = detectionResult {
+            Logger.info("Immediate trigger detected: text='\(result.text)', lang='\(result.lang)'")
+            startTranslation(text: result.text, lang: result.lang, focusedElement: focusedElement)
+            return
+        }
+        
+        // Second attempt: delayed detection for some apps that need more time
+        Logger.debug("Immediate detection failed, trying delayed detection...")
+        let delayTime: TimeInterval
+        
+        if AppDetectionManager.shared.isDiscordApp() {
+            delayTime = 0.2
+        } else if AppDetectionManager.shared.isWeChatApp() {
+            delayTime = 0.15
+        } else if AppDetectionManager.shared.isWebEnvironment() {
+            delayTime = 0.1
+        } else {
+            delayTime = 0.05
+        }
+
+         // 检查是否为Apple Mail等模拟键盘应用，如果是，则执行智能检测逻辑
+        if AppDetectionManager.shared.isNeedSmartSelectionApp() {
+            Logger.info("Simulate keyboard app detected, using smart clipboard-based detection.")
+            DispatchQueue.global(qos: .userInitiated).async {
+                if let result = AXController.shared.detectTriggerForSmartSelection() {
+                    // 成功检测到触发词，启动翻译
+                    DispatchQueue.main.async {
+                        self.startTranslation(text: result.text, lang: result.lang, focusedElement: focusedElement)
+                    }
+                } else {
+                    // 未检测到触发词（误触），发送右箭头键恢复
+                    Logger.info("Simulate keyboard app misfire detected. No trigger in clipboard. Recovering.")
+                    DispatchQueue.main.async {
+                            AXController.shared.postRightArrowKey()
+                    }
+                }
+            }
+            return // Simulate keyboard app 逻辑结束
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + delayTime) {
+            Logger.info("Attempting delayed trigger detection (delay: \(delayTime)s)")
+            
+            // Try with a fresh focused element for delayed detection
+            let freshFocusedElement = AXController.shared.getFocusedElement()
+            
+            if let result = AXController.shared.detectTriggerAndExtract(focusedElement: freshFocusedElement) {
+                Logger.info("Delayed trigger detected: text='\(result.text)', lang='\(result.lang)'")
+                self.startTranslation(text: result.text, lang: result.lang, focusedElement: freshFocusedElement)
+            } else {
+                Logger.info("No trigger detected after delay, canceling selection.")
+                self.cancelSelectionAfterMisfire()
+            }
+        }
+    }
 
     func handleSpaceKey(focusedElement: AXUIElement?) {
         let currentTime = Date()
@@ -237,10 +357,10 @@ class InputMonitor {
             }
              
             // 检查是否为Apple Mail等模拟键盘应用，如果是，则执行智能检测逻辑
-            if AppDetectionManager.shared.isNeedSimulateKeyboardApp() {
+            if AppDetectionManager.shared.isNeedSmartSelectionApp() {
                 Logger.info("Simulate keyboard app detected, using smart clipboard-based detection.")
                 DispatchQueue.global(qos: .userInitiated).async {
-                    if let result = AXController.shared.detectTriggerViaClipboard() {
+                    if let result = AXController.shared.detectTriggerForSmartSelection() {
                         // 成功检测到触发词，启动翻译
                         DispatchQueue.main.async {
                             self.startTranslation(text: result.text, lang: result.lang, focusedElement: focusedElement)
@@ -330,6 +450,8 @@ class InputMonitor {
                     // 回填翻译结果
                     AXController.shared.replaceInput(with: translationResult.translated) {
                         Logger.debug("Auto-translation replacement completed")
+                        
+                        
                         // 翻译完成后清除缓存的应用信息
                         EnvironmentManager.shared.clearTriggerAppInfo()
                     }
@@ -499,6 +621,7 @@ class InputMonitor {
                             // 翻译完成后清除缓存的应用信息
                             EnvironmentManager.shared.clearTriggerAppInfo()
                         }
+                        
                     }
                 case .failure(let error):
                     Logger.warn("Translation failed: \(error.localizedDescription)")
@@ -603,9 +726,11 @@ class InputMonitor {
         totalKeyEventCount = 0
         lastEventTime = Date()
         lastSpaceKeyTime = Date()
+        lastSpaceTime = nil // Reset double-space tracking
+        keyEventsBetweenSpaces.removeAll() // Clear event tracking
         // Clear app detection cache when resetting
         cachedAppInfo = nil
-        Logger.info("Event counters and app cache reset")
+        Logger.info("Event counters, double-space tracking, and app cache reset")
     }
     
     // 清除应用检测缓存（当应用切换时手动调用）

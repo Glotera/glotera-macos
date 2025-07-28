@@ -3,6 +3,7 @@ import Carbon
 import CoreFoundation
 import ApplicationServices
 
+
 /// Application information structure for detection and management
 struct AppInfo {
     let bundleId: String
@@ -13,7 +14,7 @@ struct AppInfo {
     var javaScriptPermissionsEnabled: Bool
 }
 
-/// High-performance application detection manager
+/// High-performance application detection manager with accessibility caching
 class AppDetectionManager {
     static let shared = AppDetectionManager()
     
@@ -82,7 +83,110 @@ class AppDetectionManager {
             "mail.126.com",  "mail.sina.com"
         ]
     
-    private init() {}
+    // MARK: - Failed Accessibility Apps Cache
+    private var failedAccessibilityApps: Set<String> = []
+    private let userDefaults = UserDefaults.standard
+    private let failedAppsKey = "failed_accessibility_apps"
+    
+    private init() {
+        loadFailedAppsFromDisk()
+    }
+    
+    // MARK: - Failed Accessibility Apps Methods
+    
+    /// Check if we should skip accessibility and use clipboard directly
+    func shouldUseClipboardDirectly(for bundleId: String? = nil) -> Bool {
+        let targetBundleId = bundleId ?? getBundleId()
+        
+        if failedAccessibilityApps.contains(targetBundleId) {
+            Logger.debug("Using clipboard directly for known failed app: \(targetBundleId)")
+            return true
+        }
+        
+        //for testing, need to reset false
+        return true
+    }
+    
+    /// Record accessibility failure and enable clipboard fallback
+    func recordAccessibilityFailure(for bundleId: String? = nil) {
+        let targetBundleId = bundleId ?? getBundleId()
+        
+        if !failedAccessibilityApps.contains(targetBundleId) {
+            Logger.warn("Accessibility failed for \(targetBundleId) - adding to failed apps cache")
+            failedAccessibilityApps.insert(targetBundleId)
+            saveFailedAppsToDisk()
+        }
+    }
+    
+    /// Reset accessibility status for an app (useful for testing or updates)
+    func resetAccessibilityStatus(for bundleId: String? = nil) {
+        let targetBundleId = bundleId ?? getBundleId()
+        
+        if failedAccessibilityApps.contains(targetBundleId) {
+            Logger.info("Removing \(targetBundleId) from failed accessibility apps")
+            failedAccessibilityApps.remove(targetBundleId)
+            saveFailedAppsToDisk()
+        }
+    }
+    
+    /// Get debug info for failed apps
+    func getAccessibilityDebugInfo() -> String {
+        var info = "Failed Accessibility Apps Cache:\n"
+        
+        if failedAccessibilityApps.isEmpty {
+            info += "  No failed apps cached yet - all apps will try accessibility first\n"
+            return info
+        }
+        
+        for bundleId in failedAccessibilityApps.sorted() {
+            // Try to get app name
+            let appName = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first?.localizedName ?? 
+                         getAppNameFromBundleId(bundleId)
+            
+            info += "  ❌ \(appName) (\(bundleId)): Using clipboard fallback\n"
+        }
+        
+        return info
+    }
+    
+    // MARK: - Private Failed Apps Cache Methods
+    
+    private func loadFailedAppsFromDisk() {
+        guard let failedAppsArray = userDefaults.array(forKey: failedAppsKey) as? [String] else {
+            Logger.debug("No failed accessibility apps found on disk")
+            return
+        }
+        
+        failedAccessibilityApps = Set(failedAppsArray)
+        Logger.info("Loaded \(failedAccessibilityApps.count) failed accessibility apps from disk")
+        
+        // Log loaded failed apps for debugging
+        for bundleId in failedAccessibilityApps.sorted() {
+            Logger.debug("  Failed app: \(bundleId)")
+        }
+    }
+    
+    private func saveFailedAppsToDisk() {
+        let failedAppsArray = Array(failedAccessibilityApps).sorted()
+        userDefaults.set(failedAppsArray, forKey: failedAppsKey)
+        Logger.debug("Saved \(failedAppsArray.count) failed accessibility apps to disk")
+    }
+    
+    private func getAppNameFromBundleId(_ bundleId: String) -> String {
+        // Simple mapping for common apps
+        switch bundleId {
+        case "com.google.Chrome": return "Google Chrome"
+        case "com.tencent.xinWeChat": return "WeChat"
+        case "net.whatsapp.WhatsApp": return "WhatsApp"
+        case "com.hnc.Discord": return "Discord"
+        case "com.apple.Safari": return "Safari"
+        case "com.microsoft.edgemac": return "Microsoft Edge"
+        default:
+            // Extract app name from bundle ID
+            let components = bundleId.components(separatedBy: ".")
+            return components.last?.capitalized ?? "Unknown App"
+        }
+    }
     
     // MARK: - Public Browser Detection Methods
     
@@ -128,7 +232,8 @@ class AppDetectionManager {
     
     // MARK: - Public Application Type Detection Methods
 
-    func isNeedSimulateKeyboardApp() -> Bool {
+    //文本编辑或者邮件编辑时，需要使用智能选择
+    func isNeedSmartSelectionApp() -> Bool {
         return isMailApp() || isTextEditorApp() || isWebMailPage()
     }
     
@@ -171,28 +276,7 @@ class AppDetectionManager {
         
         return bundleId == "com.hnc.Discord" || bundleId == "com.discord.Discord"
     }
-    
-    /// Check if current application is Discord or other chat app
-    // func isDiscordOrChatApp() -> Bool {
-    //     guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
-    //           let bundleId = frontmostApp.bundleIdentifier else {
-    //         return false
-    //     }
-        
-    //     // Discord specific detection
-    //     if bundleId == "com.hnc.Discord" || bundleId == "com.discord.Discord" {
-    //         Logger.info("Detected Discord app: \(frontmostApp.localizedName ?? "Unknown") (\(bundleId))")
-    //         return true
-    //     } 
-        
-    //     if chatAppBundleIds.contains(bundleId) {
-    //         Logger.info("Detected chat app: \(frontmostApp.localizedName ?? "Unknown") (\(bundleId))")
-    //         return true
-    //     }
-        
-    //     return false
-    // }
-    
+     
     /// Check if current application is a terminal
     func isTerminalApp() -> Bool {
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication,

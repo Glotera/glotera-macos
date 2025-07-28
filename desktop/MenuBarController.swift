@@ -64,6 +64,12 @@ class MenuBarController: NSObject, NSMenuDelegate {
         releaseNotesItem.target = self
         menu.addItem(releaseNotesItem)
         
+        // Debug menu item (only in development/debug builds)
+        #if DEBUG
+        let debugItem = NSMenuItem(title: "Debug Accessibility Status", action: #selector(showAccessibilityDebugInfo), keyEquivalent: "")
+        debugItem.target = self
+        menu.addItem(debugItem)
+        #endif
 
         menu.addItem(NSMenuItem.separator())
          
@@ -143,6 +149,33 @@ class MenuBarController: NSObject, NSMenuDelegate {
         Logger.info("Opening release notes page: \(releaseNotesURL)")
         NSWorkspace.shared.open(url)
     }
+    
+    #if DEBUG
+    @objc func showAccessibilityDebugInfo() {
+        Logger.info("Debug Accessibility Status menu clicked")
+        
+        let debugInfo = AppDetectionManager.shared.getAccessibilityDebugInfo()
+        Logger.info("Accessibility Debug Info:\n\(debugInfo)")
+        
+        // Show in alert dialog
+        let alert = NSAlert()
+        alert.messageText = "Accessibility Status Debug"
+        alert.informativeText = debugInfo
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Reset Current App")
+        alert.addButton(withTitle: "Reset All Apps")
+        
+        let response = alert.runModal()
+        if response == .alertSecondButtonReturn {
+            AppDetectionManager.shared.resetAccessibilityStatus()
+            Logger.info("Reset accessibility status for current app")
+        } else if response == .alertThirdButtonReturn {
+            // Reset all apps (would need additional implementation)
+            Logger.info("Reset all accessibility status requested")
+            // For now, just log - could implement full reset if needed
+        }
+    }
+    #endif
     
     @objc func checkForUpdates() {
         Logger.info("Check for Updates menu clicked")
