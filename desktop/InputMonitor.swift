@@ -188,11 +188,11 @@ class InputMonitor {
                         // 立即提交处理任务
                         print(" ")
                         Logger.info("===========================================")
-                        DispatchQueue.global(qos: .userInitiated).async {
-                            DispatchQueue.main.async {
-                                shared.handleInterceptedEnter()
-                            }
+                        
+                        DispatchQueue.main.async {
+                            shared.handleInterceptedEnter()
                         }
+                        
                         return nil // 阻止回车事件
                     }
                 } else if keyCode == kVK_Tab { // Tab键
@@ -390,26 +390,7 @@ class InputMonitor {
         // 如果最近通过菜单进行了划词翻译，不拦截回车
         if let selectionTime = lastSelectionTranslationTime, Date().timeIntervalSince(selectionTime) < 2.0 {
             return false
-        } 
-
-        // 快速检查当前输入框内容是否有触发词 @ # 等
-        // if let focused = AXController.shared.getFocusedElement(),
-        //    let value = AXController.shared.getValue(of: focused) {
-        //     // 简单检查是否包含语言代码的前缀字符
-            
-        //     let content = value.lowercased()
-        //     if !content.isEmpty && (content.contains("@") || content.contains("#")) {
-        //         return true
-        //     }
-            
-        //     // // 检查常见的语言代码模式
-        //     // let quickPatterns = ["@en", "#en", "@zh", "#zh", "@id", "#id", " en ", " zh ", " id "]
-        //     // for pattern in quickPatterns {
-        //     //     if content.contains(pattern) {
-        //     //         return true
-        //     //     }
-        //     // } 
-        // }
+        }  
         
         return true
     }
@@ -419,18 +400,23 @@ class InputMonitor {
         Logger.info("Handling intercepted Enter key")
         
         // 获取当前焦点元素，避免重复调用
-        let focusedElement = AXController.shared.getFocusedElement()
-        
-        if let result = AXController.shared.detectTriggerAndExtract(focusedElement: focusedElement) {
-            Logger.info("Trigger detected via intercepted Enter: text=\(result.text), lang=\(result.lang)")
-            
-            // 开始翻译，完成后自动发送
-            startTranslationWithAutoSend(text: result.text, lang: result.lang, focusedElement: focusedElement)
-        } else {
-            Logger.warn("No trigger found, sending original Enter key")
-            // 如果没有检测到触发器，发送原始回车键
-            InputManager.shared.sendEnterKey()
+        let focusedElement = AXController.shared.getFocusedElement() 
+        DispatchQueue.global(qos: .userInitiated).async {
+            if let result = AXController.shared.detectTriggerAndExtract(focusedElement: focusedElement) {
+                // 成功检测到触发词，启动翻译
+                Logger.info("Trigger detected via intercepted Enter: text=\(result.text), lang=\(result.lang)")
+                DispatchQueue.main.async {
+                    self.startTranslationWithAutoSend(text: result.text, lang: result.lang, focusedElement: focusedElement)
+                }
+            } else {
+                Logger.warn("No trigger found, sending original Enter key")
+                // 如果没有检测到触发器，发送原始回车键
+                DispatchQueue.main.async {
+                    InputManager.shared.sendEnterKey()
+                }
+            }
         }
+
     }
     
     // 翻译完成后自动发送
