@@ -77,7 +77,7 @@ class InputMonitor {
     // 创建事件监听器的回调函数（供 AppDelegate 调用）
     func createEventTapCallback() -> CGEventTapCallBack {
         return { (proxy, type, event, refcon) -> Unmanaged<CGEvent>? in
-            print("***key down*** \(type)")
+            
             // 处理 Event Tap 被禁用的情况 - 优化恢复机制
             if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
                 let disableReason = type == .tapDisabledByTimeout ? "timeout" : "user input"

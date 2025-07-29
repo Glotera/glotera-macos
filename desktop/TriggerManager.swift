@@ -231,7 +231,9 @@ class TriggerManager {
     
     /// Detect trigger in content and return extracted text and language
     func detectTrigger(in content: String) -> (text: String, lang: String)? {
-        return TriggerPatternCache.shared.detectTrigger(in: content)
+        // 预处理内容，处理Mac系统双击空格键生成句号的情况
+        let preprocessedContent = preprocessContentForMacDoubleSpace(content)
+        return TriggerPatternCache.shared.detectTrigger(in: preprocessedContent)
     }
     
     /// Get all configured triggers
@@ -296,6 +298,9 @@ class TriggerManager {
     func processContentWithDefaultTriggers(_ content: String) -> (text: String, lang: String)? {
         Logger.info("TriggerManager: Using fallback default trigger processing")
         
+        // 预处理内容，处理Mac系统双击空格键生成句号的情况
+        let preprocessedContent = preprocessContentForMacDoubleSpace(content)
+        
         // 默认触发器模式
         let patterns = [
             #"(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\s*$"#,      // 标准模式
@@ -306,8 +311,8 @@ class TriggerManager {
         
         for (index, pattern) in patterns.enumerated() {
             if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) {
-                let nsValue = content as NSString
-                let results = regex.matches(in: content, options: [], range: NSRange(location: 0, length: nsValue.length))
+                let nsValue = preprocessedContent as NSString
+                let results = regex.matches(in: preprocessedContent, options: [], range: NSRange(location: 0, length: nsValue.length))
                 
                 if let match = results.first, match.numberOfRanges >= 3 {
                     let textRange = match.range(at: 1)
@@ -397,5 +402,70 @@ class TriggerManager {
             return String(content[start..<end])
         }
         return ""
+    }
+    
+    // MARK: - Mac System Double Space Handling
+    
+    /// Preprocess content to handle Mac system's double space to period conversion
+    private func preprocessContentForMacDoubleSpace(_ content: String) -> String {
+        // Mac系统双击空格键会在触发词后面紧挨着增加句号，这会影响触发词检测
+        // 我们需要处理以下几种情况：
+        // 1. "Hello world  #en." -> "Hello world  #en" (移除触发词后的句号)
+        // 2. "Hello world  #en。" -> "Hello world  #en" (移除触发词后的中文句号)
+        // 3. "Hello world  @zh." -> "Hello world  @zh" (移除触发词后的句号)
+        // 4. "Hello world  @zh。" -> "Hello world  @zh" (移除触发词后的中文句号)
+        
+        var processedContent = content
+        
+        // 模式1：@或# + 语言代码 + 英文句号（结尾）
+        let pattern1 = #"([@#][a-z]{2})\.\s*$"#
+        if let regex = try? NSRegularExpression(pattern: pattern1, options: [.caseInsensitive]) {
+            processedContent = regex.stringByReplacingMatches(
+                in: processedContent,
+                options: [],
+                range: NSRange(location: 0, length: processedContent.count),
+                withTemplate: "$1"
+            )
+        }
+        
+        // 模式2：@或# + 语言代码 + 中文句号（结尾）
+        let pattern2 = #"([@#][a-z]{2})。\s*$"#
+        if let regex = try? NSRegularExpression(pattern: pattern2, options: [.caseInsensitive]) {
+            processedContent = regex.stringByReplacingMatches(
+                in: processedContent,
+                options: [],
+                range: NSRange(location: 0, length: processedContent.count),
+                withTemplate: "$1"
+            )
+        }
+        
+        // 模式3：@或# + 语言代码 + 英文句号 + 其他内容（非结尾）
+        let pattern3 = #"([@#][a-z]{2})\.(?=\s|$)"#
+        if let regex = try? NSRegularExpression(pattern: pattern3, options: [.caseInsensitive]) {
+            processedContent = regex.stringByReplacingMatches(
+                in: processedContent,
+                options: [],
+                range: NSRange(location: 0, length: processedContent.count),
+                withTemplate: "$1"
+            )
+        }
+        
+        // 模式4：@或# + 语言代码 + 中文句号 + 其他内容（非结尾）
+        let pattern4 = #"([@#][a-z]{2})。(?=\s|$)"#
+        if let regex = try? NSRegularExpression(pattern: pattern4, options: [.caseInsensitive]) {
+            processedContent = regex.stringByReplacingMatches(
+                in: processedContent,
+                options: [],
+                range: NSRange(location: 0, length: processedContent.count),
+                withTemplate: "$1"
+            )
+        }
+        
+        // 如果内容被修改了，记录日志
+        if processedContent != content {
+            Logger.debug("TriggerManager: Preprocessed content for Mac double space: '\(content)' -> '\(processedContent)'")
+        }
+        
+        return processedContent
     }
 }
