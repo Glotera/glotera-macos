@@ -68,6 +68,7 @@ class MenuBarController: NSObject, NSMenuDelegate {
         //#if DEBUG
         menu.addItem(NSMenuItem.separator())
         
+        #if DEBUG
         let debugMenu = NSMenu()
         let debugMenuItem = NSMenuItem(title: "Debug", action: nil, keyEquivalent: "")
         debugMenuItem.submenu = debugMenu
@@ -84,7 +85,7 @@ class MenuBarController: NSObject, NSMenuDelegate {
         debugMenu.addItem(accessibilityDebugItem)
         
         menu.addItem(debugMenuItem)
-        //#endif
+        #endif
 
         menu.addItem(NSMenuItem.separator())
          
