@@ -51,7 +51,7 @@ class AXController {
         let focused = focusedElement ?? getFocusedElement()
         
         if let focused = focused {
-            Logger.debug("Got focused element via accessibility")
+            Logger.info("Got focused element via accessibility")
             
             // 存储当前获取到的焦点元素，用于后续回填
             self.lastManuallyFocusedElement = focused
@@ -687,6 +687,15 @@ class AXController {
     // 通过剪贴板检测触发器（专为编辑器及邮件应用设计）
     func detectTriggerForSmartSelection() -> (text: String, lang: String)? {
         Logger.info("Starting system-wide clipboard-based trigger detection.")
+        
+        if AppDetectionManager.shared.isWhatsAppApp(){  
+            // Logger.info("WhatsApp app detected, force to get focused element")
+            // 在使用强制剪切板方案时，如果不执行下面获取焦点元素的代码，后面在模拟 Cmd+A时，内容就会被自动清除
+            // 有可能是只能通过Accessibility访问，Whatsapp才认为是合法的请求
+            let sysWide = AXUIElementCreateSystemWide()
+            var focusedApp: CFTypeRef?
+            AXUIElementCopyAttributeValue(sysWide, kAXFocusedApplicationAttribute as CFString, &focusedApp)
+        } 
 
         let pasteboard = NSPasteboard.general
         // let originalContent = saveOriginalPasteboardContent()

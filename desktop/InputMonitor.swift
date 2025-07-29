@@ -164,7 +164,7 @@ class InputMonitor {
                         if nonSpaceEvents.isEmpty {
                             // 验证通过，高优先级异步处理翻译逻辑
                             DispatchQueue.main.async {
-                                shared.handleValidatedDoubleSpace()
+                                shared.handleDoubleSpaceKey()
                             }
                         } else {
                             Logger.debug("Double space validation failed: found \(nonSpaceEvents.count) non-space keys: \(nonSpaceEvents)")
@@ -238,7 +238,7 @@ class InputMonitor {
     static let shared = InputMonitor()
     
     // 新的优化方法：处理已验证的双击空格
-    func handleValidatedDoubleSpace() {
+    func handleDoubleSpaceKey() {
         let bundleId = AppDetectionManager.shared.getBundleId()
         Logger.info("Processing validated double space for app: \(bundleId)")
         
@@ -255,165 +255,24 @@ class InputMonitor {
         }
         
         // Get focused element with fresh attempt (no caching issues)
-        let focusedElement = AXController.shared.getFocusedElement()
-        
-        // Universal smart detection with retry mechanism
-        // var detectionResult: (text: String, lang: String)?
-        
-        // First attempt: immediate detection
-        // detectionResult = AXController.shared.detectTriggerAndExtract(focusedElement: focusedElement)
-        
-        // if let result = detectionResult {
-        //     Logger.info("Immediate trigger detected: text='\(result.text)', lang='\(result.lang)'")
-        //     startTranslation(text: result.text, lang: result.lang, focusedElement: focusedElement)
-        //     return
-        // }
-        
-        // Second attempt: delayed detection for some apps that need more time
-        Logger.debug("Immediate detection failed, trying delayed detection...")
-        let delayTime: TimeInterval
-        
-        if AppDetectionManager.shared.isDiscordApp() {
-            delayTime = 0.2
-        } else if AppDetectionManager.shared.isWeChatApp() {
-            delayTime = 0.15
-        } else if AppDetectionManager.shared.isWebEnvironment() {
-            delayTime = 0.1
-        } else {
-            delayTime = 0.05
-        }
-
-         // 检查是否为Apple Mail等模拟键盘应用，如果是，则执行智能检测逻辑
-        let isSimulateKeyboardApp = true//AppDetectionManager.shared.isNeedSmartSelectionApp()
-        if isSimulateKeyboardApp {
-            Logger.info("Simulate keyboard app detected, using smart clipboard-based detection.")
-            DispatchQueue.global(qos: .userInitiated).async {
-                if let result = AXController.shared.detectTriggerForSmartSelection() {
-                    // 成功检测到触发词，启动翻译
-                    DispatchQueue.main.async {
-                        self.startTranslation(text: result.text, lang: result.lang, focusedElement: focusedElement)
-                    }
-                } else {
-                    // 未检测到触发词（误触），发送右箭头键恢复
-                    Logger.info("Simulate keyboard app misfire detected. No trigger in clipboard. Recovering.")
-                    DispatchQueue.main.async {
-                            AXController.shared.postRightArrowKey()
-                    }
-                }
-            }
-            return // Simulate keyboard app 逻辑结束
-        }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + delayTime) {
-            Logger.info("Attempting delayed trigger detection (delay: \(delayTime)s)")
-            
-            // Try with a fresh focused element for delayed detection
-            let freshFocusedElement = AXController.shared.getFocusedElement()
-            
-            if let result = AXController.shared.detectTriggerAndExtract(focusedElement: freshFocusedElement) {
-                Logger.info("Delayed trigger detected: text='\(result.text)', lang='\(result.lang)'")
-                self.startTranslation(text: result.text, lang: result.lang, focusedElement: freshFocusedElement)
-            } else {
-                Logger.info("No trigger detected after delay, canceling selection.")
-                self.cancelSelectionAfterMisfire()
-            }
-        }
-    }
-
-    func handleSpaceKey(focusedElement: AXUIElement?) {
-        let currentTime = Date()
-        
-        // 检查是否为双击空格 - 放宽验证条件，提高检测可靠性
-        if let lastTime = lastSpaceTime, currentTime.timeIntervalSince(lastTime) < 0.4 {
-            // 这是第二次点击，进行宽松的验证
-            Logger.debug("Double space validation: checking keyboard events between spaces")
-            
-            // 验证1: 检查两次空格之间是否有其他键盘事件 
-            // 分析键盘事件，过滤掉空格键本身和修饰键
-            let nonSpaceEvents = keyEventsBetweenSpaces.filter { 
-                $0 != kVK_Space && 
-                $0 != kVK_Command && 
-                $0 != kVK_Shift && 
-                $0 != kVK_Option && 
-                $0 != kVK_Control 
-            } 
-            
-            if !nonSpaceEvents.isEmpty {
-                Logger.debug("Double space validation failed: found \(nonSpaceEvents.count) non-space key events between spaces, ignoring as misfire")
-                self.lastSpaceTime = nil
-                self.lastSpaceKeyEventCount = 0
-                self.keyEventsBetweenSpaces.removeAll()
-                return
-            }
-            
-            // 验证通过，重置状态
-            self.lastSpaceTime = nil
-            self.lastSpaceKeyEventCount = 0
-            self.keyEventsBetweenSpaces.removeAll()
-            
-            Logger.info("Double space validation passed, proceeding with bundleId: \(AppDetectionManager.shared.getBundleId())")
-
-            // 如果当前是终端应用，则直接忽略，暂不做处理
-            if AppDetectionManager.shared.isTerminalApp() {
-                Logger.info("Terminal app detected, ignoring space key trigger.")
-                return
-            }
-             
-            // 检查是否为Apple Mail等模拟键盘应用，如果是，则执行智能检测逻辑
-            if AppDetectionManager.shared.isNeedSmartSelectionApp() {
-                Logger.info("Simulate keyboard app detected, using smart clipboard-based detection.")
-                DispatchQueue.global(qos: .userInitiated).async {
-                    if let result = AXController.shared.detectTriggerForSmartSelection() {
-                        // 成功检测到触发词，启动翻译
-                        DispatchQueue.main.async {
-                            self.startTranslation(text: result.text, lang: result.lang, focusedElement: focusedElement)
-                        }
-                    } else {
-                        // 未检测到触发词（误触），发送右箭头键恢复
-                        Logger.info("Simulate keyboard app misfire detected. No trigger in clipboard. Recovering.")
-                        DispatchQueue.main.async {
-                             AXController.shared.postRightArrowKey()
-                        }
-                    }
-                }
-                return // Simulate keyboard app 逻辑结束
-            }
-
-            // --- 以下为标准应用的常规流程 ---
-            Logger.info("Double space in standard app, checking for trigger characters.")   
-            
-            // 首先尝试标准检测，使用传入的焦点元素
-            if let result = AXController.shared.detectTriggerAndExtract(focusedElement: focusedElement) { 
-                Logger.info("Standard trigger detected: text='\(result.text)', lang='\(result.lang)'")
-                startTranslation(text: result.text, lang: result.lang, focusedElement: focusedElement)
-                return
-            }
-            
-            Logger.warn("Standard detection failed, trying delayed detection...")
-            // 如果标准检测失败，先尝试延迟检测，如果还是失败则取消选中
-            // 如果标准检测失败，等待一小段时间后重试 (Discord需要更长的延迟)
-            let delayTime = AppDetectionManager.shared.isDiscordApp() ? 0.2 : 0.05
-            
-            DispatchQueue.main.asyncAfter(deadline: .now() + delayTime) {
-                Logger.info("Attempting delayed trigger detection (delay: \(delayTime)s)")
-                if let result = AXController.shared.detectTriggerAndExtract(focusedElement: focusedElement) {
-                    Logger.info("Delayed trigger detected: text='\(result.text)', lang='\(result.lang)'")
+        let focusedElement = AXController.shared.getFocusedElement()  
+        DispatchQueue.global(qos: .userInitiated).async {
+            if let result = AXController.shared.detectTriggerAndExtract(focusedElement: focusedElement) {
+                // 成功检测到触发词，启动翻译
+                DispatchQueue.main.async {
                     self.startTranslation(text: result.text, lang: result.lang, focusedElement: focusedElement)
-                } else {
-                    Logger.info("No trigger detected after delay, canceling selection.")
-                    // 没有检测到触发指令，立即取消选中状态
-                    self.cancelSelectionAfterMisfire()
+                }
+            } else {
+                // 未检测到触发词（误触），发送右箭头键恢复
+                Logger.info("Simulate keyboard app misfire detected. No trigger in clipboard. Recovering.")
+                DispatchQueue.main.async {
+                        AXController.shared.postRightArrowKey()
                 }
             }
-        } else {
-            // 这是第一次点击，记录时间和键盘事件计数
-            self.lastSpaceTime = currentTime
-            self.lastSpaceKeyEventCount = totalKeyEventCount
-            self.keyEventsBetweenSpaces.removeAll() // 清空之前的事件记录
-            Logger.debug("Single space detected, waiting for second space. Key event count: \(totalKeyEventCount)")
         }
-    }
- 
+        return // Simulate keyboard app 逻辑结束
+        
+    } 
   
     private func startTranslation(text: String, lang: String, focusedElement: AXUIElement? = nil) {
         // 记录翻译时间，用于健康检查的智能调整
