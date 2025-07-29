@@ -103,7 +103,7 @@ class InputMonitor {
             if InputManager.shared.isEventSimulated(event) {
                 let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
                 let flags = event.flags
-                Logger.debug("Filtered out simulated event (keyCode: \(keyCode), flags: \(flags))")
+                Logger.info("Filtered out simulated event (keyCode: \(keyCode), flags: \(flags))")
                 return Unmanaged.passUnretained(event)
             }
             
