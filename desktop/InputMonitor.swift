@@ -101,7 +101,9 @@ class InputMonitor {
             
             // 事件过滤：过滤掉自己发送的模拟事件
             if InputManager.shared.isEventSimulated(event) {
-                Logger.warn("Filtered out simulated event (keyCode: \(event.getIntegerValueField(.keyboardEventKeycode)))")
+                let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+                let flags = event.flags
+                Logger.debug("Filtered out simulated event (keyCode: \(keyCode), flags: \(flags))")
                 return Unmanaged.passUnretained(event)
             }
             
@@ -144,7 +146,7 @@ class InputMonitor {
                     if isDoubleSpace {
                         // 双击空格：立即标记并异步处理，但保持时序准确性
                         print(" ")
-                        print("===========================================")
+                        Logger.info("===========================================")
                         Logger.debug("Double space detected in callback (interval: \(String(format: "%.3f", currentTime.timeIntervalSince(shared.lastSpaceTime!)))s)")
                         shared.lastSpaceTime = nil // 立即重置避免重复触发
                         
@@ -185,7 +187,7 @@ class InputMonitor {
                     if shared.shouldInterceptEnter() {
                         // 立即提交处理任务
                         print(" ")
-                        print("===========================================")
+                        Logger.info("===========================================")
                         DispatchQueue.global(qos: .userInitiated).async {
                             DispatchQueue.main.async {
                                 shared.handleInterceptedEnter()
@@ -256,7 +258,7 @@ class InputMonitor {
         let focusedElement = AXController.shared.getFocusedElement()
         
         // Universal smart detection with retry mechanism
-        var detectionResult: (text: String, lang: String)?
+        // var detectionResult: (text: String, lang: String)?
         
         // First attempt: immediate detection
         // detectionResult = AXController.shared.detectTriggerAndExtract(focusedElement: focusedElement)
@@ -532,25 +534,25 @@ class InputMonitor {
         } 
 
         // 快速检查当前输入框内容是否有触发词 @ # 等
-        if let focused = AXController.shared.getFocusedElement(),
-           let value = AXController.shared.getValue(of: focused) {
-            // 简单检查是否包含语言代码的前缀字符
+        // if let focused = AXController.shared.getFocusedElement(),
+        //    let value = AXController.shared.getValue(of: focused) {
+        //     // 简单检查是否包含语言代码的前缀字符
             
-            let content = value.lowercased()
-            if !content.isEmpty && (content.contains("@") || content.contains("#")) {
-                return true
-            }
+        //     let content = value.lowercased()
+        //     if !content.isEmpty && (content.contains("@") || content.contains("#")) {
+        //         return true
+        //     }
             
-            // // 检查常见的语言代码模式
-            // let quickPatterns = ["@en", "#en", "@zh", "#zh", "@id", "#id", " en ", " zh ", " id "]
-            // for pattern in quickPatterns {
-            //     if content.contains(pattern) {
-            //         return true
-            //     }
-            // } 
-        }
+        //     // // 检查常见的语言代码模式
+        //     // let quickPatterns = ["@en", "#en", "@zh", "#zh", "@id", "#id", " en ", " zh ", " id "]
+        //     // for pattern in quickPatterns {
+        //     //     if content.contains(pattern) {
+        //     //         return true
+        //     //     }
+        //     // } 
+        // }
         
-        return false
+        return true
     }
     
     // 处理被拦截的回车键
@@ -767,7 +769,7 @@ class InputMonitor {
         // 延迟检查，让 Cmd+A 操作完成
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             // 通知 AXController 检查文本选择
-            SelectEventManager.shared.checkForTextSelectionAfterKeyboardSelection()
+            // SelectEventManager.shared.checkForTextSelectionAfterKeyboardSelection()
         }
     }  
 } 

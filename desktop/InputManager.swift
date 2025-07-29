@@ -21,7 +21,7 @@ class InputManager {
     private var simulatedEventTimeout: TimeInterval = 0.5 // 500ms 超时
     
     // 事件标记常量
-    private let kEventFlagSimulated = CGEventFlags(rawValue: 1 << 24) // 使用未使用的标志位
+    private let kEventFlagSimulated = CGEventFlags(rawValue: 1 << 30) // 使用bit 30，避免与系统事件冲突
     
     private init() {} 
     
@@ -748,12 +748,40 @@ class InputManager {
     
     // 标记事件为模拟事件
     private func markEventAsSimulated(_ event: CGEvent) {
-        event.flags.insert(kEventFlagSimulated)
+        // Only mark keyboard events and use custom data field
+        let eventType = event.type
+        if eventType == .keyDown || eventType == .keyUp {
+            event.flags.insert(kEventFlagSimulated)
+        }
     }
     
     // 检查事件是否为模拟事件
     func isEventSimulated(_ event: CGEvent) -> Bool {
-        return event.flags.contains(kEventFlagSimulated)
+        // 首先检查事件类型 - 只处理键盘事件
+        let eventType = event.type
+        guard eventType == .keyDown || eventType == .keyUp else {
+            // 非键盘事件直接返回false，避免处理鼠标事件
+            return false
+        }
+        
+        // 检查标志位
+        let hasSimulatedFlag = event.flags.contains(kEventFlagSimulated)
+        
+        // 如果标志位匹配，还需要检查是否在模拟事件时间窗口内
+        if hasSimulatedFlag {
+            // 检查是否在模拟事件发送期间
+            if isSendingSimulatedEvent() {
+                Logger.debug("Keyboard event confirmed as simulated (flag + time window)")
+                return true
+            } else {
+                // 标志位存在但不在时间窗口内，可能是残留的标志位，清除它
+                Logger.debug("Found simulated flag on keyboard event but not in time window, clearing flag")
+                event.flags.remove(kEventFlagSimulated)
+                return false
+            }
+        }
+        
+        return false
     }
     
     // 获取模拟事件标志
