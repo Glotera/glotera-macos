@@ -134,6 +134,7 @@ class SelectEventManager {
             
             if timeSinceLastClick < 0.5 && timeSinceLastClick > 0.1 {
                 // 双击检测
+                Logger.info("===========================================")
                 Logger.info("Double click detected")
                 lastDoubleClickTime = now
                 
@@ -164,6 +165,7 @@ class SelectEventManager {
             if isMouseDragging {
                 lastMouseUpTime = Date()
                 // 延迟检查，给文本选择时间稳定
+                Logger.info("===========================================")
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                     self.checkForTextSelectionAfterMouseUp()
                 }
@@ -188,7 +190,7 @@ class SelectEventManager {
 
     
     // 鼠标释放后的专门检查
-    private func checkForTextSelectionAfterMouseUp() {
+    private func checkForTextSelectionAfterMouseUp() { 
         Logger.info("Checking text selection after mouse up")
         
         // 等待一个更长的延迟，确保选择完全稳定
@@ -199,17 +201,15 @@ class SelectEventManager {
     }
     
     // 双击后的文本选择检查
-    private func checkForTextSelectionAfterDoubleClick() {
-        Logger.debug("Checking text selection after double click")
+    private func checkForTextSelectionAfterDoubleClick() { 
+        Logger.info("Checking text selection after double click")
         
         // 等待延迟，确保双击选择完全稳定
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             self.checkSelectedTextAndShowMenu(selectionType: "mouse")
         }
     }
-
-
-     
+ 
     
     // 键盘选择后的菜单显示逻辑 - 改为 public 以便 InputMonitor 调用
     func checkForTextSelectionAfterKeyboardSelection() {
@@ -226,30 +226,9 @@ class SelectEventManager {
         let startTime = Date()
         
         guard let selection = getSelectedText() else {
-            // 如果没有选中文本，隐藏菜单并重置状态
-            if !lastSelectedText.isEmpty {
-                // 特殊处理：如果是 WhatsApp 消息且刚刚显示菜单，给更长时间
-                if isWhatsAppMessageSelected && AppDetectionManager.shared.isWhatsAppApp() {
-                    let timeSinceShow = Date().timeIntervalSince(whatsAppMessageShowTime)
-                    if timeSinceShow < 2.5 { // 给 WhatsApp 消息 2.5 秒的稳定时间
-                        Logger.info("WhatsApp message menu protection in showMenu: keeping menu visible (\(String(format: "%.1f", timeSinceShow))s since show)")
-                        return
-                    }
-                }
-                
-                Logger.info("Hiding menu in checkSelectedTextAndShowMenu - no selection found")
-                TranslationMenuWindow.shared.hide()
-                lastSelectedText = ""
-                isMenuShowing = false
-                isWhatsAppMessageSelected = false
-                isWeChatMessageSelected = false
-                lastWhatsAppSelectedText = ""
-            }
-            
-            let processingTime = Date().timeIntervalSince(startTime)
-            if processingTime > 0.2 {
-                Logger.warn("checkSelectedTextAndShowMenu (\(selectionType)) took \(String(format: "%.3f", processingTime))s - performance warning")
-            }
+            // If accessibility fails, try async clipboard method
+            Logger.info("Accessibility failed, trying async clipboard method")
+            tryClipboardSelectionAsync(selectionType: selectionType, startTime: startTime)
             return
         }
         
@@ -326,14 +305,16 @@ class SelectEventManager {
         // For known problematic apps, skip accessibility and use clipboard method
         if appManager.shouldUseClipboardDirectly() {
             Logger.info("Using clipboard selection for known accessibility-failed app")
-            return getSelectedTextViaClipboard()
+            // Return nil to trigger async clipboard method
+            return nil
         }
         
         // Try accessibility first for unknown/working apps
         guard let focused = getCachedFocusedElement() else {
             Logger.info("No focused element via accessibility, recording failure")
             appManager.recordAccessibilityFailure()
-            return getSelectedTextViaClipboard()
+            // Return nil to trigger async clipboard method
+            return nil
         }
         
         // 首先尝试通过AX API获取选中文本
@@ -379,42 +360,126 @@ class SelectEventManager {
         // If all accessibility methods fail, record failure and try clipboard
         Logger.warn("All accessibility methods failed, using clipboard fallback")
         appManager.recordAccessibilityFailure()
-        return getSelectedTextViaClipboard()
+        // Return nil to trigger async clipboard method
+        return nil
     }
     
-    // New clipboard-based selection method
-    private func getSelectedTextViaClipboard() -> (text: String, element: AXUIElement)? {
-        Logger.info("Getting selected text via clipboard method")
-        
+    
+    // Async clipboard selection method for force clipboard mode
+    private func tryClipboardSelectionAsync(selectionType: String, startTime: Date) {
         let pasteboard = NSPasteboard.general
         let originalContent = pasteboard.string(forType: .string)
         
         // Clear and copy current selection
         pasteboard.clearContents()
         InputManager.shared.postCopy()
-        Thread.sleep(forTimeInterval: 0.2)
         
-        guard let selectedText = pasteboard.string(forType: .string), 
-              !selectedText.isEmpty, 
-              selectedText.trimmingCharacters(in: .whitespacesAndNewlines).count >= 3 else {
+        // Schedule clipboard reading after allowing event processing time
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            guard let self = self else { return }
+            
+            guard let selectedText = pasteboard.string(forType: .string),
+                  !selectedText.isEmpty,
+                  selectedText.trimmingCharacters(in: .whitespacesAndNewlines).count >= 3 else {
+                
+                // Restore original clipboard
+                if let originalContent = originalContent {
+                    pasteboard.clearContents()
+                    pasteboard.setString(originalContent, forType: .string)
+                }
+                
+                // Hide menu if no selection found
+                if !self.lastSelectedText.isEmpty {
+                    Logger.info("Hiding menu - no clipboard selection found")
+                    TranslationMenuWindow.shared.hide()
+                    self.lastSelectedText = ""
+                    self.isMenuShowing = false
+                    self.isWhatsAppMessageSelected = false
+                    self.isWeChatMessageSelected = false
+                    self.lastWhatsAppSelectedText = ""
+                }
+                
+                let processingTime = Date().timeIntervalSince(startTime)
+                if processingTime > 0.2 {
+                    Logger.warn("checkSelectedTextAndShowMenu (\(selectionType)) clipboard took \(String(format: "%.3f", processingTime))s - performance warning")
+                }
+                return
+            }
             
             // Restore original clipboard
             if let originalContent = originalContent {
                 pasteboard.clearContents()
                 pasteboard.setString(originalContent, forType: .string)
             }
-            return nil
+            
+            // Process the selected text
+            self.processSelectedText(selectedText, selectionType: selectionType, startTime: startTime)
+        }
+    }
+    
+    // Process selected text and show menu
+    private func processSelectedText(_ text: String, selectionType: String, startTime: Date) {
+        let processingTime = Date().timeIntervalSince(startTime)
+        if processingTime > 0.2 {
+            Logger.warn("checkSelectedTextAndShowMenu (\(selectionType)) took \(String(format: "%.3f", processingTime))s - performance warning")
         }
         
-        // Restore original clipboard
-        if let originalContent = originalContent {
-            pasteboard.clearContents()
-            pasteboard.setString(originalContent, forType: .string)
+        // Check if this is likely a translation result
+        if isLikelyTranslationResult(text) {
+            Logger.info("Skipping menu for likely translation result: '\(text)'")
+            return
         }
         
-        // Return dummy element since we can't get the real focused element
-        let systemWide = AXUIElementCreateSystemWide()
-        return (text: selectedText, element: systemWide)
+        // Filter out too short text, but keep original format
+        let originalText = text
+        let trimmedForCheck = originalText.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        if trimmedForCheck.count < 3 {
+            if !lastSelectedText.isEmpty {
+                TranslationMenuWindow.shared.hide()
+                lastSelectedText = ""
+                isMenuShowing = false
+            }
+            return
+        }
+        
+        // Use original text (preserving whitespace) for comparison and passing
+        if originalText != lastSelectedText {
+            lastSelectedText = originalText
+            isMenuShowing = true
+            
+            Logger.debug("Selected text after \(selectionType) selection: '\(originalText)' (length: \(originalText.count))")
+            
+            // ⭐️ Key: Record app info before showing translation menu
+            EnvironmentManager.shared.recordTriggerApp()
+            
+            // Mark selection translation start
+            InputMonitor.shared.markSelectionTranslationStart()
+            
+            // Get selection position and app info
+            let mouseLocation = NSEvent.mouseLocation
+            let systemWide = AXUIElementCreateSystemWide()
+            let dummyAppInfo = AppDetectionManager.shared.getAppInfo(for: systemWide)
+            
+            // Show translation menu
+            TranslationMenuWindow.shared.show(
+                for: originalText,
+                from: systemWide,
+                at: mouseLocation,
+                browserInfo: dummyAppInfo.isBrowser ? dummyAppInfo : nil
+            )
+            
+            // Set close callback
+            TranslationMenuWindow.shared.onMenuClosed = { [weak self] in
+                self?.isMenuShowing = false
+                self?.lastSelectedText = ""
+                self?.isWhatsAppMessageSelected = false
+                self?.lastWhatsAppSelectedText = ""
+                self?.isWeChatMessageSelected = false
+                self?.lastWeChatSelectedText = ""
+                Logger.debug("Menu closed callback triggered - flags reset")
+            }
+        }
     }
     
     // 获取 WhatsApp 聊天历史文本
