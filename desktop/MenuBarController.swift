@@ -64,12 +64,27 @@ class MenuBarController: NSObject, NSMenuDelegate {
         releaseNotesItem.target = self
         menu.addItem(releaseNotesItem)
         
-        // Debug menu item (only in development/debug builds)
-        #if DEBUG
-        let debugItem = NSMenuItem(title: "Debug Accessibility Status", action: #selector(showAccessibilityDebugInfo), keyEquivalent: "")
-        debugItem.target = self
-        menu.addItem(debugItem)
-        #endif
+        // Debug menu (only in development/debug builds)
+        //#if DEBUG
+        menu.addItem(NSMenuItem.separator())
+        
+        let debugMenu = NSMenu()
+        let debugMenuItem = NSMenuItem(title: "Debug", action: nil, keyEquivalent: "")
+        debugMenuItem.submenu = debugMenu
+        
+        // Force Clipboard Mode toggle
+        let isForceClipboardEnabled = AppDetectionManager.shared.isForceClipboardModeEnabled()
+        let forceClipboardItem = NSMenuItem(title: "Force Clipboard Mode: \(isForceClipboardEnabled ? "ON" : "OFF")", action: #selector(toggleForceClipboardMode), keyEquivalent: "")
+        forceClipboardItem.target = self
+        debugMenu.addItem(forceClipboardItem)
+        
+        // Accessibility Debug Info
+        let accessibilityDebugItem = NSMenuItem(title: "Accessibility Debug Info", action: #selector(showAccessibilityDebugInfo), keyEquivalent: "")
+        accessibilityDebugItem.target = self
+        debugMenu.addItem(accessibilityDebugItem)
+        
+        menu.addItem(debugMenuItem)
+        //#endif
 
         menu.addItem(NSMenuItem.separator())
          
@@ -151,6 +166,27 @@ class MenuBarController: NSObject, NSMenuDelegate {
     }
     
     #if DEBUG
+    @objc func toggleForceClipboardMode() {
+        AppDetectionManager.shared.toggleForceClipboardMode()
+        
+        // Update menu item title to reflect current state
+        if let menu = statusItem.menu {
+            for item in menu.items {
+                if let submenu = item.submenu {
+                    for subItem in submenu.items {
+                        if subItem.action == #selector(toggleForceClipboardMode) {
+                            let isEnabled = AppDetectionManager.shared.isForceClipboardModeEnabled()
+                            subItem.title = "Force Clipboard Mode: \(isEnabled ? "ON" : "OFF")"
+                            break
+                        }
+                    }
+                }
+            }
+        }
+        
+        Logger.info("Force clipboard mode toggled")
+    }
+    
     @objc func showAccessibilityDebugInfo() {
         Logger.info("Debug Accessibility Status menu clicked")
         

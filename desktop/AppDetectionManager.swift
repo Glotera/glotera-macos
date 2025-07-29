@@ -88,6 +88,9 @@ class AppDetectionManager {
     private let userDefaults = UserDefaults.standard
     private let failedAppsKey = "failed_accessibility_apps"
     
+    // MARK: - Debug Options
+    private var forceClipboardMode = false // 强制开启剪切板方案
+    
     private init() {
         loadFailedAppsFromDisk()
     }
@@ -96,6 +99,12 @@ class AppDetectionManager {
     
     /// Check if we should skip accessibility and use clipboard directly
     func shouldUseClipboardDirectly(for bundleId: String? = nil) -> Bool {
+        // 如果强制开启剪切板方案，直接返回true
+        if forceClipboardMode {
+            Logger.debug("Force clipboard mode enabled - using clipboard directly")
+            return true
+        }
+        
         let targetBundleId = bundleId ?? getBundleId()
         
         if failedAccessibilityApps.contains(targetBundleId) {
@@ -103,8 +112,7 @@ class AppDetectionManager {
             return true
         }
         
-        //for testing, need to reset false
-        return true
+        return false
     }
     
     /// Record accessibility failure and enable clipboard fallback
@@ -135,18 +143,40 @@ class AppDetectionManager {
         
         if failedAccessibilityApps.isEmpty {
             info += "  No failed apps cached yet - all apps will try accessibility first\n"
-            return info
+        } else {
+            for bundleId in failedAccessibilityApps.sorted() {
+                // Try to get app name
+                let appName = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first?.localizedName ?? 
+                             getAppNameFromBundleId(bundleId)
+                
+                info += "  ❌ \(appName) (\(bundleId)): Using clipboard fallback\n"
+            }
         }
         
-        for bundleId in failedAccessibilityApps.sorted() {
-            // Try to get app name
-            let appName = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first?.localizedName ?? 
-                         getAppNameFromBundleId(bundleId)
-            
-            info += "  ❌ \(appName) (\(bundleId)): Using clipboard fallback\n"
-        }
+        info += "\nDebug Options:\n"
+        info += "  Force Clipboard Mode: \(forceClipboardMode ? "✅ Enabled" : "❌ Disabled")\n"
         
         return info
+    }
+    
+    // MARK: - Debug Control Methods
+    
+    /// Toggle force clipboard mode
+    func toggleForceClipboardMode() {
+        forceClipboardMode.toggle()
+        Logger.info("Force clipboard mode \(forceClipboardMode ? "enabled" : "disabled")")
+        
+        // 如果当前状态被置为false，则清除failed apps
+        if !forceClipboardMode {
+            Logger.info("Force clipboard mode disabled, clearing failed accessibility apps cache")
+            failedAccessibilityApps.removeAll()
+            saveFailedAppsToDisk()
+        }
+    }
+    
+    /// Get current force clipboard mode status
+    func isForceClipboardModeEnabled() -> Bool {
+        return forceClipboardMode
     }
     
     // MARK: - Private Failed Apps Cache Methods
