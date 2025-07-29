@@ -70,6 +70,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 添加应用生命周期监听
         setupApplicationLifecycleMonitoring()
         
+        // 检查并显示双击空格键提示（仅在首次启动时）
+        checkAndShowDoubleSpaceTip()
+        
         // Note: Adaptive monitoring will start automatically after successful event tap setup
     }
     
@@ -304,6 +307,60 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Logger.info("Public restart method called")
         restartEventMonitoringInternal()
     }
+    
+    // MARK: - Double Space Tip
+    
+    /// Check and show double space tip on first launch
+    private func checkAndShowDoubleSpaceTip() {
+        let hasShownDoubleSpaceTip = UserDefaults.standard.bool(forKey: "hasShownDoubleSpaceTip")
+        
+        if !hasShownDoubleSpaceTip {
+            // 延迟显示，确保应用完全启动
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                self.showDoubleSpaceTip()
+            }
+        }
+    }
+    
+    /// Show double space tip dialog
+    private func showDoubleSpaceTip() {
+        let alert = NSAlert()
+        alert.messageText = "Glotera Usage Guide"
+        alert.informativeText = """
+        Glotera uses double-space as the translation trigger.To avoid conflicts with system features, we recommend:
+        
+        1. Open [System Settings]
+        2. Scroll down to click [Keyboard]
+        3. Find [Input Sources] then click [Edit]
+        4. Finally, turn off [Add period with double-space]
+        
+        This ensures Glotera's double-space translation feature works properly.
+        """
+        alert.addButton(withTitle: "Got it") 
+        alert.addButton(withTitle: "Don't show again")
+        
+        let response = alert.runModal()
+        
+        switch response {
+        case .alertFirstButtonReturn:
+            // "Got it" - open system settings and mark as shown
+            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.keyboard")!)
+            UserDefaults.standard.set(true, forKey: "hasShownDoubleSpaceTip")
+        case .alertSecondButtonReturn:
+            // "Don't show again" - mark as shown permanently
+            UserDefaults.standard.set(true, forKey: "hasShownDoubleSpaceTip")
+        default:
+            break
+        }
+    }
+    
+    /// Open system keyboard settings
+    private func openSystemKeyboardSettings() {
+        // 直接打开系统设置
+        
+    }
+    
+    // MARK: - Event Tap Health Monitoring
     
     // 尝试快速重新启用 Event Tap（不完全重建）
     public func quickEnableEventTap() -> Bool {
