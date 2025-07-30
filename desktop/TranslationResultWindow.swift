@@ -339,8 +339,8 @@ class TranslationResultWindow: NSWindow {
         // Record interaction
         recordInteraction()
         
-        // 简短显示复制成功提示
-        // 这里可以添加一个临时的"已复制"提示
+        // 复制后关闭翻译浮窗
+        self.hide()
     }
     
     override var canBecomeKey: Bool {
