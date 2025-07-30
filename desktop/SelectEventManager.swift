@@ -21,7 +21,17 @@ class SelectEventManager {
     private var keyboardEventMonitor: Any?
     private var lastDoubleClickTime: Date = Date.distantPast
     private var doubleClickCheckScheduled: Bool = false
-    private var lastCtrlATime: Date = Date.distantPast 
+    private var lastDoubleClickHandledTime: Date = Date.distantPast // 新增：上次处理双击的时间
+    private let doubleClickIgnoreInterval: TimeInterval = 1.0 // 1秒内忽略后续双击
+    private var clickCount: Int = 0
+    private var firstClickTime: Date = Date.distantPast
+    private var doubleClickWindow: TimeInterval = 0.5 // 双击时间窗口
+    private var lastCtrlATime: Date = Date.distantPast
+    
+    // 鼠标拖拽检测相关变量
+    private var mouseDownLocation: NSPoint = NSPoint.zero
+    private let dragThreshold: CGFloat = 10.0 // 10像素的移动阈值
+    private var isMouseDownOnTextElement: Bool = false // 标记鼠标是否在文本元素上按下 
     
     // 用于跟踪最近的自动翻译操作
     private var lastAutoTranslationTime: Date = Date.distantPast
@@ -128,23 +138,33 @@ class SelectEventManager {
             // 菜单的隐藏由 TranslationMenuWindow 自己的事件监听器处理
             // 这里不需要额外的处理
             
-            // 检测双击
+            // 记录鼠标按下位置
+            mouseDownLocation = event.locationInWindow
+            
+            // 检测鼠标按下位置下的元素是否为文本元素
+            isMouseDownOnTextElement = isMouseOverTextElement(at: event.locationInWindow)
+            Logger.debug("Mouse down on text element: \(isMouseDownOnTextElement)")
+            
+            // 简化版双击容错检测
             let now = Date()
+            let timeSinceLastHandled = now.timeIntervalSince(lastDoubleClickHandledTime)
             let timeSinceLastClick = now.timeIntervalSince(lastDoubleClickTime)
             
             if timeSinceLastClick < 0.5 && timeSinceLastClick > 0.1 {
-                // 双击检测
-                Logger.info("===========================================")
-                Logger.info("Double click detected")
-                lastDoubleClickTime = now
-                
-                // 防止重复调度：只在没有已调度的检查时才调度新的检查
-                if !doubleClickCheckScheduled {
-                    doubleClickCheckScheduled = true
-                    // 延迟检查双击选择的文本
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        self.checkForTextSelectionAfterDoubleClick()
-                        self.doubleClickCheckScheduled = false
+                // 检查3秒内是否已处理过双击
+                if timeSinceLastHandled < doubleClickIgnoreInterval {
+                    Logger.info("Double click ignored (within 1s interval)")
+                } else {
+                    Logger.info("===========================================")
+                    Logger.info("Double click detected and handled")
+                    lastDoubleClickHandledTime = now
+                    lastDoubleClickTime = now
+                    if !doubleClickCheckScheduled {
+                        doubleClickCheckScheduled = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            self.checkForTextSelectionAfterDoubleClick()
+                            self.doubleClickCheckScheduled = false
+                        }
                     }
                 }
             } else {
@@ -155,9 +175,24 @@ class SelectEventManager {
             isMouseDragging = false
             
         case .leftMouseDragged:
-            // 鼠标拖拽中，标记为拖拽状态
-            if !isMouseDragging {
-                isMouseDragging = true
+            // 只有在文本元素上的拖拽才被认为是文本选择
+            guard isMouseDownOnTextElement else {
+                Logger.debug("Mouse dragged but not on text element, ignoring")
+                return
+            }
+            
+            // 计算鼠标移动距离
+            let currentLocation = event.locationInWindow
+            let distance = sqrt(pow(currentLocation.x - mouseDownLocation.x, 2) + pow(currentLocation.y - mouseDownLocation.y, 2))
+            
+            // 只有当移动距离超过阈值时才认为是真正的拖拽
+            if distance > dragThreshold {
+                if !isMouseDragging {
+                    isMouseDragging = true
+                    Logger.info("set isMouseDragging true (distance: \(String(format: "%.1f", distance))px) on text element")
+                }
+            } else {
+                Logger.debug("Mouse moved but below threshold: \(String(format: "%.1f", distance))px < \(dragThreshold)px")
             }
             
         case .leftMouseUp:
@@ -229,6 +264,11 @@ class SelectEventManager {
             // If accessibility fails, try async clipboard method
             Logger.info("Accessibility failed, trying async clipboard method")
             tryClipboardSelectionAsync(selectionType: selectionType, startTime: startTime)
+            return
+        }
+
+        if selection.text == "false_trigger" {
+            Logger.info("false selection trigger, finish!")
             return
         }
         
@@ -318,8 +358,17 @@ class SelectEventManager {
         }
         
         // 首先尝试通过AX API获取选中文本
-        if let selectedText = getSelectedTextAttribute(of: focused), !selectedText.isEmpty {
-            return (text: selectedText, element: focused)
+        if let selectedText = getSelectedTextAttribute(of: focused) {
+            Logger.debug("getSelectedTextAttribute returned: '\(selectedText)' (length: \(selectedText.count), isEmpty: \(selectedText.isEmpty))")
+            if !selectedText.isEmpty {
+                Logger.debug("Returning selected text from AX API")
+                return (text: selectedText, element: focused)
+            } else {
+                Logger.debug("Selected text is empty, false trigger, finish!")
+                return (text: "false_trigger", element: focused)
+            }
+        } else {
+            Logger.debug("getSelectedTextAttribute returned nil")
         }
         
         // 如果在浏览器环境中，尝试通过JavaScript获取选中文本
@@ -869,6 +918,7 @@ class SelectEventManager {
         }
         
         if result == .success, let text = selectedTextValue as? String {
+            Logger.info("Get selected text successfully: '\(text)' (length: \(text.count))")
             // 对于极大的选中文本，截断以避免后续处理问题
             if text.count > 10000 {
                 Logger.warn("Selected text too large (\(text.count) chars), truncating to 10000 chars")
@@ -1123,5 +1173,67 @@ class SelectEventManager {
     static func isWeChatHistoryMessage(_ element: AXUIElement) -> Bool {
         let elementHash = Unmanaged.passUnretained(element).toOpaque().hashValue
         return shared.wechatHistoryMessageElements.contains(elementHash)
+    }
+    
+    // 检测鼠标位置下的元素是否为文本元素
+    private func isMouseOverTextElement(at location: NSPoint) -> Bool {
+        // 将屏幕坐标转换为CGPoint（屏幕坐标系原点在左下角）
+        let screenFrame = NSScreen.main?.frame ?? NSRect.zero
+        let cgPoint = CGPoint(x: location.x, y: screenFrame.height - location.y)
+        
+        // 获取系统的 UI 元素访问对象
+        let systemWideElement = AXUIElementCreateSystemWide()
+        
+        // 查找鼠标位置下的元素
+        var elementUnderMouse: AXUIElement?
+        let result = AXUIElementCopyElementAtPosition(systemWideElement, Float(cgPoint.x), Float(cgPoint.y), &elementUnderMouse)
+        
+        guard result == .success, let mouseElement = elementUnderMouse else {
+            Logger.debug("Failed to get element under mouse")
+            return false
+        }
+        
+        // 检查元素角色
+        var role: CFTypeRef?
+        let roleResult = AXUIElementCopyAttributeValue(mouseElement, kAXRoleAttribute as CFString, &role)
+        
+        guard roleResult == .success, let roleString = role as? String else {
+            Logger.debug("Failed to get element role")
+            return false
+        }
+        
+        // 定义文本相关的角色
+        let textRoles = [
+            "AXTextField",      // 文本输入框
+            "AXTextArea",       // 文本区域
+            "AXStaticText",     // 静态文本
+            "AXGenericElement", // 通用元素（可能包含文本）
+            "AXGroup"           // 组元素（可能包含文本）
+        ]
+        
+        let isTextRole = textRoles.contains(roleString)
+        Logger.debug("Element under mouse has role: \(roleString), isTextRole: \(isTextRole)")
+        
+        // 如果是文本角色，进一步检查是否可编辑
+        if isTextRole {
+            var editable: CFTypeRef?
+            let editableResult = AXUIElementCopyAttributeValue(mouseElement, kAXValueAttribute as CFString, &editable)
+            
+            if editableResult == .success {
+                Logger.debug("Element is editable or has value")
+                return true
+            }
+            
+            // 检查是否有子元素包含文本
+            var children: CFTypeRef?
+            let childrenResult = AXUIElementCopyAttributeValue(mouseElement, kAXChildrenAttribute as CFString, &children)
+            
+            if childrenResult == .success, let childrenArray = children as? NSArray, childrenArray.count > 0 {
+                Logger.debug("Element has \(childrenArray.count) children, likely contains text")
+                return true
+            }
+        }
+        
+        return isTextRole
     }
 }

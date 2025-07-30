@@ -614,7 +614,7 @@ class InputMonitor {
         // 延迟检查，让 Cmd+A 操作完成
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             // 通知 AXController 检查文本选择
-            // SelectEventManager.shared.checkForTextSelectionAfterKeyboardSelection()
+            SelectEventManager.shared.checkForTextSelectionAfterKeyboardSelection()
         }
     }  
 } 
