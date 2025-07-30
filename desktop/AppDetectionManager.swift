@@ -386,6 +386,11 @@ class AppDetectionManager {
     /// Get application information for a specific element
     func getAppInfo(for element: AXUIElement) -> AppInfo {
         let pid = getPid(for: element)
+        return getAppInfo(for: pid)
+    }
+    
+    /// Get application information for a specific PID
+    func getAppInfo(for pid: pid_t) -> AppInfo {
         var appName = "Unknown"
         var bundleId = ""
         
@@ -427,8 +432,27 @@ class AppDetectionManager {
         var pid: pid_t = 0
         let result = AXUIElementGetPid(element, &pid)
         if result != .success {
-            Logger.error("Failed to get PID for element")
+            // 获取前台应用信息用于调试
+            let frontmostApp = NSWorkspace.shared.frontmostApplication
+            let bundleId = frontmostApp?.bundleIdentifier ?? "unknown"
+            let appName = frontmostApp?.localizedName ?? "unknown"
+            
+            Logger.warn("Failed to get PID for element (result: \(result)), using frontmost app as fallback - \(appName) (\(bundleId))")
+            
+            // 回退到前台应用的 PID
+            if let frontmostApp = frontmostApp {
+                return frontmostApp.processIdentifier
+            }
+            return 0
         }
+        
+        // 成功获取 PID，记录详细信息
+        if let app = NSRunningApplication(processIdentifier: pid) {
+            let bundleId = app.bundleIdentifier ?? "unknown"
+            let appName = app.localizedName ?? "unknown"
+            Logger.debug("Successfully got PID \(pid) for element - \(appName) (\(bundleId))")
+        }
+        
         return pid
     }
     

@@ -119,7 +119,15 @@ class TranslationMenuWindow: NSWindow {
         self.sourceElement = element
         self.lastMousePosition = location
         self.cachedBrowserInfo = browserInfo
-        self.sourceElementPid = AppDetectionManager.shared.getPid(for: element)
+        
+        // 直接使用前台应用的 PID，避免从系统级元素获取 PID 失败
+        if let frontmostApp = NSWorkspace.shared.frontmostApplication {
+            self.sourceElementPid = frontmostApp.processIdentifier
+            Logger.debug("Using frontmost app PID: \(frontmostApp.processIdentifier) for \(frontmostApp.localizedName ?? "unknown")")
+        } else {
+            self.sourceElementPid = 0
+            Logger.warn("No frontmost application found")
+        }
         
         setupEventHandlers()
         

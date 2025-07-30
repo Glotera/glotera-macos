@@ -458,15 +458,17 @@ class SelectEventManager {
             
             // Get selection position and app info
             let mouseLocation = NSEvent.mouseLocation
-            let systemWide = AXUIElementCreateSystemWide()
-            let dummyAppInfo = AppDetectionManager.shared.getAppInfo(for: systemWide)
+            
+            // 使用前台应用信息而不是系统级元素
+            let frontmostApp = NSWorkspace.shared.frontmostApplication
+            let appInfo = AppDetectionManager.shared.getAppInfo(for: frontmostApp?.processIdentifier ?? 0)
             
             // Show translation menu
             TranslationMenuWindow.shared.show(
                 for: originalText,
-                from: systemWide,
+                from: AXUIElementCreateSystemWide(), // 仍然传递系统级元素，但不会用于获取PID
                 at: mouseLocation,
-                browserInfo: dummyAppInfo.isBrowser ? dummyAppInfo : nil
+                browserInfo: appInfo.isBrowser ? appInfo : nil
             )
             
             // Set close callback
