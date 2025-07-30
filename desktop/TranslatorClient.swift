@@ -1008,7 +1008,7 @@ extension TranslatorClient: URLSessionDataDelegate {
     
     /// Fetch current quota information without consuming usage
     func fetchQuotaInfo(completion: @escaping (Result<QuotaInfo, TranslationError>) -> Void) {
-        Logger.info("Fetching quota info from server")
+        Logger.debug("Fetching quota info from server")
         
         AuthenticationHelper.shared.getAuthenticatedHeaders { [weak self] headers in
             guard let self = self,

@@ -209,7 +209,7 @@ class MenuBarController: NSObject, NSMenuDelegate {
         } else if response == .alertThirdButtonReturn {
             // Reset all apps (would need additional implementation)
             Logger.info("Reset all accessibility status requested")
-            // For now, just log - could implement full reset if needed
+            AppDetectionManager.shared.resetAllAccessibilityStatus()
         }
     }
     #endif
@@ -1003,7 +1003,7 @@ class MenuBarController: NSObject, NSMenuDelegate {
                     self?.lastQuotaInfo = quotaInfo
                     self?.lastQuotaFetchTime = Date()
                     self?.updateQuotaInCurrentMenu(quotaInfo) // Update current menu in place
-                    Logger.info("Quota info loaded automatically: \(quotaInfo.quotaDescription)")
+                    Logger.debug("Quota info loaded automatically: \(quotaInfo.quotaDescription)")
                 case .failure(let error):
                     Logger.error("Failed to fetch quota info automatically: \(error.localizedDescription)")
                     // Even on failure, we might have quota info in the error
@@ -1070,12 +1070,12 @@ class MenuBarController: NSObject, NSMenuDelegate {
     // MARK: - NSMenuDelegate
     
     func menuWillOpen(_ menu: NSMenu) {
-        Logger.info("Menu will open - checking for fresh quota information")
+        Logger.debug("Menu will open - checking for fresh quota information")
         
         // Force refresh quota info when menu opens if cache is stale
         if let lastFetchTime = lastQuotaFetchTime,
            Date().timeIntervalSince(lastFetchTime) > quotaCacheInterval {
-            Logger.info("Quota cache is stale, refreshing before menu opens")
+            Logger.debug("Quota cache is stale, refreshing before menu opens")
             fetchQuotaInfoIfNeeded()
         }
     }

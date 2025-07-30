@@ -41,13 +41,14 @@ class AppDetectionManager {
     private let textEditorBundleIds = [
         "com.apple.Notes",
         "com.apple.TextEdit",
+        //"notion.id",
         "com.coderforart.One-Markdown",
         "com.microsoft.Word",
         "com.microsoft.Excel",
         "com.microsoft.Powerpoint",
         "com.microsoft.OneNote",
-        "com.cursor.Cursor",
-        "com.trae.TRAE",
+        //"com.todesktop.230313mzl4w4u92",//cursor
+        //"com.trae.app",//trae
         "com.microsoft.VSCode",
         "com.jetbrains.intellij",
         "com.sublimetext.4"
@@ -120,7 +121,7 @@ class AppDetectionManager {
         let targetBundleId = bundleId ?? getBundleId()
         
         if !failedAccessibilityApps.contains(targetBundleId) {
-            Logger.warn("Accessibility failed for \(targetBundleId) - adding to failed apps cache")
+            Logger.error("Accessibility failed for \(targetBundleId) - adding to failed apps cache")
             failedAccessibilityApps.insert(targetBundleId)
             saveFailedAppsToDisk()
         }
@@ -134,6 +135,17 @@ class AppDetectionManager {
             Logger.info("Removing \(targetBundleId) from failed accessibility apps")
             failedAccessibilityApps.remove(targetBundleId)
             saveFailedAppsToDisk()
+        }
+    }
+
+    /// Reset all failed accessibility apps (clear the cache for all apps)
+    func resetAllAccessibilityStatus() {
+        if !failedAccessibilityApps.isEmpty {
+            Logger.info("Resetting all failed accessibility apps (clearing cache)")
+            failedAccessibilityApps.removeAll()
+            saveFailedAppsToDisk()
+        } else {
+            Logger.debug("No failed accessibility apps to reset")
         }
     }
     
