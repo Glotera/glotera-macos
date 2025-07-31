@@ -356,30 +356,8 @@ class SelectEventManager {
             // Return nil to trigger async clipboard method
             return nil
         }
-        
-        // 首先尝试通过AX API获取选中文本
-        if let selectedText = getSelectedTextAttribute(of: focused) {
-            Logger.debug("getSelectedTextAttribute returned: '\(selectedText)' (length: \(selectedText.count), isEmpty: \(selectedText.isEmpty))")
-            if !selectedText.isEmpty {
-                Logger.debug("Returning selected text from AX API")
-                return (text: selectedText, element: focused)
-            } else {
-                Logger.debug("Selected text is empty, false trigger, finish!")
-                return (text: "false_trigger", element: focused)
-            }
-        } else {
-            Logger.debug("getSelectedTextAttribute returned nil")
-        }
-        
-        // 如果在浏览器环境中，尝试通过JavaScript获取选中文本
-        if AppDetectionManager.shared.isWebEnvironment() {
-            if let selectedText = AppleScriptManager.shared.getWebSelectedText(), !selectedText.isEmpty {
-                Logger.info("Got selected text via Web: '\(selectedText)'")
-                return (text: selectedText, element: focused)
-            }
-        }
-        
-        // 只在实际选择事件时检查特殊应用消息（避免鼠标悬停时的无用日志）
+
+        // 先处理特殊应用
         if checkSpecialApps {
             // 特殊处理：WhatsApp 聊天历史 - 使用鼠标位置定位正确的消息
             if let whatsappResult = getWhatsAppChatHistoryTextWithMousePosition() { 
@@ -405,6 +383,30 @@ class SelectEventManager {
                 return (text: wechatResult.text, element: wechatResult.element)
             }
         }
+        
+        // 再尝试通过AX API标准方法获取选中文本
+        if let selectedText = getSelectedTextAttribute(of: focused) {
+            Logger.debug("getSelectedTextAttribute returned: '\(selectedText)' (length: \(selectedText.count), isEmpty: \(selectedText.isEmpty))")
+            if !selectedText.isEmpty {
+                Logger.debug("Returning selected text from AX API")
+                return (text: selectedText, element: focused)
+            } else {
+                Logger.debug("Selected text is empty, false trigger, finish!")
+                return (text: "false_trigger", element: focused)
+            }
+        } else {
+            Logger.debug("getSelectedTextAttribute returned nil")
+        }
+        
+        // 如果在浏览器环境中，尝试通过JavaScript获取选中文本
+        if AppDetectionManager.shared.isWebEnvironment() {
+            if let selectedText = AppleScriptManager.shared.getWebSelectedText(), !selectedText.isEmpty {
+                Logger.info("Got selected text via Web: '\(selectedText)'")
+                return (text: selectedText, element: focused)
+            }
+        }
+        
+
         
         // If all accessibility methods fail, record failure and try clipboard
         // Logger.warn("All accessibility methods failed, using clipboard fallback")
@@ -914,7 +916,7 @@ class SelectEventManager {
         
         // 性能监控：如果处理时间过长，记录警告
         if processingTime > 0.2 {
-            Logger.warn("AXUIElementCopyAttributeValue took \(String(format: "%.3f", processingTime))s - performance warning")
+            Logger.debug("AXUIElementCopyAttributeValue took \(String(format: "%.3f", processingTime))s - performance warning")
         }
         
         if result == .success, let text = selectedTextValue as? String {
