@@ -287,7 +287,7 @@ class SelectEventManager {
         let originalText = selection.text
         let trimmedForCheck = originalText.trimmingCharacters(in: .whitespacesAndNewlines)
         
-        if trimmedForCheck.count < 3 {
+        if trimmedForCheck.count < 1 {
             if !lastSelectedText.isEmpty {
                 TranslationMenuWindow.shared.hide()
                 lastSelectedText = ""
@@ -352,7 +352,7 @@ class SelectEventManager {
         // Try accessibility first for unknown/working apps
         guard let focused = getCachedFocusedElement() else {
             Logger.info("No focused element via accessibility, recording failure")
-            appManager.recordAccessibilityFailure()
+            //appManager.recordAccessibilityFailure()
             // Return nil to trigger async clipboard method
             return nil
         }
@@ -407,8 +407,8 @@ class SelectEventManager {
         }
         
         // If all accessibility methods fail, record failure and try clipboard
-        Logger.warn("All accessibility methods failed, using clipboard fallback")
-        appManager.recordAccessibilityFailure()
+        // Logger.warn("All accessibility methods failed, using clipboard fallback")
+        // appManager.recordAccessibilityFailure()
         // Return nil to trigger async clipboard method
         return nil
     }
@@ -470,7 +470,7 @@ class SelectEventManager {
     private func processSelectedText(_ text: String, selectionType: String, startTime: Date) {
         let processingTime = Date().timeIntervalSince(startTime)
         if processingTime > 0.2 {
-            Logger.warn("checkSelectedTextAndShowMenu (\(selectionType)) took \(String(format: "%.3f", processingTime))s - performance warning")
+            Logger.debug("checkSelectedTextAndShowMenu (\(selectionType)) took \(String(format: "%.3f", processingTime))s - performance warning")
         }
         
         // Check if this is likely a translation result
@@ -483,7 +483,7 @@ class SelectEventManager {
         let originalText = text
         let trimmedForCheck = originalText.trimmingCharacters(in: .whitespacesAndNewlines)
         
-        if trimmedForCheck.count < 3 {
+        if trimmedForCheck.count < 1 {
             if !lastSelectedText.isEmpty {
                 TranslationMenuWindow.shared.hide()
                 lastSelectedText = ""
