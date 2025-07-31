@@ -348,7 +348,6 @@ class InputManager {
     // 发送Cmd+A
     func postSelectAll() {
         beginSimulatedEvent()
-        defer { endSimulatedEvent() }
         
         let source = CGEventSource(stateID: .hidSystemState)
         let cmdDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Command), keyDown: true)
@@ -371,12 +370,16 @@ class InputManager {
         cmdUp?.post(tap: .cghidEventTap)
         
         Logger.info("Posted global Cmd+A (simulated)")
+        
+        // 延迟结束模拟事件模式，确保事件被正确处理
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            self.endSimulatedEvent()
+        }
     }
 
     // 发送Cmd+C
     func postCopy() {
         beginSimulatedEvent()
-        defer { endSimulatedEvent() }
         
         let source = CGEventSource(stateID: .hidSystemState)
         
@@ -416,12 +419,16 @@ class InputManager {
         cmdUp.post(tap: .cghidEventTap)
         
         Logger.info("Posted global Cmd+C copy command (simulated)")
+        
+        // 延迟结束模拟事件模式，确保事件被正确处理
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            self.endSimulatedEvent()
+        }
     }
 
     // 发送右箭头键以取消全选
     func postRightArrowKey() {
         beginSimulatedEvent()
-        defer { endSimulatedEvent() }
         
         let source = CGEventSource(stateID: .hidSystemState)
         let rightArrowKeyCode = 124 as CGKeyCode // kVK_RightArrow
@@ -437,12 +444,16 @@ class InputManager {
         upEvent?.post(tap: .cghidEventTap)
         
         Logger.info("Posted Right Arrow key to deselect text after misfire (simulated)")
+        
+        // 延迟结束模拟事件模式，确保事件被正确处理
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            self.endSimulatedEvent()
+        }
     }
 
     // 发送粘贴命令Cmd+V
     func postPaste() {
         beginSimulatedEvent()
-        defer { endSimulatedEvent() }
         
         let source = CGEventSource(stateID: .hidSystemState)
         let cmdDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Command), keyDown: true)
@@ -465,6 +476,11 @@ class InputManager {
         cmdUp?.post(tap: .cghidEventTap)
         
         Logger.info("Posted Cmd+V (Paste) (simulated)")
+        
+        // 延迟结束模拟事件模式，确保事件被正确处理
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            self.endSimulatedEvent()
+        }
     }
 
     // 为文本编辑器发送智能选择命令（选择光标前的内容）
@@ -472,7 +488,6 @@ class InputManager {
     // Shift+Cmd+Up 选择当前行到文档开头
     func postSmartSelection() {
         beginSimulatedEvent()
-        defer { endSimulatedEvent() }
         
         Logger.info("Using optimized smart selection - selecting content before cursor")
         
@@ -520,6 +535,11 @@ class InputManager {
         Thread.sleep(forTimeInterval: 0.05)
         
         Logger.info("Smart selection completed - should have selected all content before cursor (simulated)")
+        
+        // 延迟结束模拟事件模式，确保事件被正确处理
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            self.endSimulatedEvent()
+        }
     }
 
     // 发送回车键事件
@@ -622,7 +642,6 @@ class InputManager {
     // 使用CGEvent发送微信Enter键（备用方法）
     private func sendWeChatEnterKeyViaCGEvent() {
         beginSimulatedEvent()
-        defer { endSimulatedEvent() }
         
         Logger.info("WeChat: Sending Enter key via CGEvent")
         
@@ -649,12 +668,16 @@ class InputManager {
         } else {
             Logger.error("WeChat: Failed to create CGEvent Enter key events")
         }
+        
+        // 延迟结束模拟事件模式，确保事件被正确处理
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            self.endSimulatedEvent()
+        }
     }
     
     // 标准的Enter键发送
     private func sendEnterKeyStandard() {
         beginSimulatedEvent()
-        defer { endSimulatedEvent() }
         
         Logger.info("Sending Enter key (standard method)")
         
@@ -669,6 +692,11 @@ class InputManager {
             enterKeyDown.post(tap: .cghidEventTap)
             enterKeyUp.post(tap: .cghidEventTap)
             Logger.info("Standard: Enter key sent successfully (simulated)")
+        }
+        
+        // 延迟结束模拟事件模式，确保事件被正确处理
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            self.endSimulatedEvent()
         }
     }
 

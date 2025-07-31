@@ -27,6 +27,7 @@ class AXController {
         let element = InputManager.shared.getFocusedElementWithRetry(maxRetries: 2) // Reduced retries for performance
         
         if element == nil {
+            // 只在获取焦点失败时才记录权限失败
             Logger.warn("Failed to get focused element via accessibility")
             appManager.recordAccessibilityFailure()
         }
@@ -66,7 +67,7 @@ class AXController {
         } else {
             // Accessibility failed - record failure and fallback to clipboard
             Logger.warn("Accessibility failed, recording failure and using clipboard fallback")
-            appManager.recordAccessibilityFailure()
+            // appManager.recordAccessibilityFailure()
             return detectTriggerForSmartSelection()
         }
         
@@ -547,7 +548,6 @@ class AXController {
             
             // 使用 InputManager 的事件标记机制
             InputManager.shared.beginSimulatedEvent()
-            defer { InputManager.shared.endSimulatedEvent() }
             
             let source = CGEventSource(stateID: .hidSystemState)
             
@@ -579,6 +579,11 @@ class AXController {
             } else {
                 Logger.warn("Failed to create Cmd+A events")
             }
+            
+            // 延迟结束模拟事件模式，确保事件被正确处理
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                InputManager.shared.endSimulatedEvent()
+            }
         }
     }
     
@@ -590,7 +595,6 @@ class AXController {
             
             // 使用 InputManager 的事件标记机制
             InputManager.shared.beginSimulatedEvent()
-            defer { InputManager.shared.endSimulatedEvent() }
             
             let source = CGEventSource(stateID: .hidSystemState)
             
@@ -621,6 +625,11 @@ class AXController {
                 Logger.debug("Simulated Cmd+V paste (with timing separation and event filtering)")
             } else {
                 Logger.warn("Failed to create Cmd+V events")
+            }
+            
+            // 延迟结束模拟事件模式，确保事件被正确处理
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                InputManager.shared.endSimulatedEvent()
             }
         }
     }
