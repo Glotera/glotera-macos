@@ -134,10 +134,13 @@ struct LanguageConfigView: View {
                         .buttonStyle(.bordered)
                     }
                     
-                    Button("Save") {
-                        viewModel.saveConfigs()
+                    // Only show Save button for configurable categories
+                    if selectedCategory != .about {
+                        Button("Save") {
+                            viewModel.saveConfigs()
+                        }
+                        .buttonStyle(.borderedProminent)
                     }
-                    .buttonStyle(.borderedProminent)
                     
                     Button("Close") {
                         onClose()
@@ -654,6 +657,7 @@ struct AboutView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         InfoRow(label: "macOS Version", value: getSystemVersion())
                         InfoRow(label: "System Architecture", value: getSystemArchitecture())
+                        InfoRow(label: "Chip Type", value: getChipType())
                         InfoRow(label: "Process ID", value: String(ProcessInfo.processInfo.processIdentifier))
                         InfoRow(label: "Uptime", value: getSystemUptime())
                     }
@@ -697,6 +701,137 @@ struct AboutView: View {
         #else
         return "Unknown"
         #endif
+    }
+    
+    private func getChipType() -> String {
+        #if arch(arm64)
+        // 使用 IOKit 获取更准确的芯片信息
+        if let chipType = getAppleSiliconChipType() {
+            return chipType
+        }
+        #endif
+        
+        // 回退到品牌字符串方法
+        var size = 0
+        sysctlbyname("machdep.cpu.brand_string", nil, &size, nil, 0)
+        
+        if size > 0 {
+            var cpuBrand = [CChar](repeating: 0, count: size)
+            sysctlbyname("machdep.cpu.brand_string", &cpuBrand, &size, nil, 0)
+            let brandString = String(cString: cpuBrand)
+            
+            #if arch(arm64)
+            if brandString.contains("Apple") {
+                return brandString
+            }
+            #else
+            if brandString.contains("Intel") {
+                if brandString.contains("Core") {
+                    if brandString.contains("i3") {
+                        return "Intel Core i3"
+                    } else if brandString.contains("i5") {
+                        return "Intel Core i5"
+                    } else if brandString.contains("i7") {
+                        return "Intel Core i7"
+                    } else if brandString.contains("i9") {
+                        return "Intel Core i9"
+                    }
+                    return "Intel Core"
+                } else if brandString.contains("Xeon") {
+                    return "Intel Xeon"
+                }
+                return "Intel Processor"
+            }
+            #endif
+            
+            return brandString
+        }
+        
+        return getSystemArchitecture()
+    }
+    
+    private func getAppleSiliconChipType() -> String? {
+        // 方法1: 使用 sysctl 获取芯片标识符
+        var size = 0
+        sysctlbyname("machdep.cpu.brand_string", nil, &size, nil, 0)
+        
+        if size > 0 {
+            var cpuBrand = [CChar](repeating: 0, count: size)
+            sysctlbyname("machdep.cpu.brand_string", &cpuBrand, &size, nil, 0)
+            let brandString = String(cString: cpuBrand)
+            
+            // 直接返回品牌字符串，它通常包含完整的芯片信息
+            if brandString.contains("Apple") {
+                return brandString
+            }
+        }
+        
+        // 方法2: 使用平台标识符获取芯片信息
+        if let platformInfo = getPlatformInfo() {
+            return platformInfo
+        }
+        
+        return nil
+    }
+    
+    private func getPlatformInfo() -> String? {
+        // 尝试获取平台标识符
+        var size = 0
+        sysctlbyname("hw.machine", nil, &size, nil, 0)
+        
+        if size > 0 {
+            var machine = [CChar](repeating: 0, count: size)
+            sysctlbyname("hw.machine", &machine, &size, nil, 0)
+            let machineString = String(cString: machine)
+            
+            // 根据机器标识符判断芯片类型
+            switch machineString {
+            case let x where x.hasPrefix("Mac14,2"):
+                return "Apple M2 Pro"
+            case let x where x.hasPrefix("Mac14,3"):
+                return "Apple M2 Max"
+            case let x where x.hasPrefix("Mac14,5"):
+                return "Apple M2"
+            case let x where x.hasPrefix("Mac14,6"):
+                return "Apple M2"
+            case let x where x.hasPrefix("Mac14,7"):
+                return "Apple M2 Pro"
+            case let x where x.hasPrefix("Mac14,8"):
+                return "Apple M2 Max"
+            case let x where x.hasPrefix("Mac14,9"):
+                return "Apple M2 Ultra"
+            case let x where x.hasPrefix("Mac14,10"):
+                return "Apple M2 Ultra"
+            case let x where x.hasPrefix("Mac15,2"):
+                return "Apple M3 Pro"
+            case let x where x.hasPrefix("Mac15,3"):
+                return "Apple M3 Max"
+            case let x where x.hasPrefix("Mac15,4"):
+                return "Apple M3"
+            case let x where x.hasPrefix("Mac15,5"):
+                return "Apple M3"
+            case let x where x.hasPrefix("Mac15,6"):
+                return "Apple M3 Pro"
+            case let x where x.hasPrefix("Mac15,7"):
+                return "Apple M3 Max"
+            case let x where x.hasPrefix("Mac15,8"):
+                return "Apple M3 Ultra"
+            case let x where x.hasPrefix("Mac15,9"):
+                return "Apple M3 Ultra"
+            case let x where x.hasPrefix("Mac13,1"):
+                return "Apple M1"
+            case let x where x.hasPrefix("Mac13,2"):
+                return "Apple M1 Pro"
+            case let x where x.hasPrefix("Mac13,3"):
+                return "Apple M1 Max"
+            case let x where x.hasPrefix("Mac13,4"):
+                return "Apple M1 Ultra"
+            default:
+                return nil
+            }
+        }
+        
+        return nil
     }
     
     private func getSystemUptime() -> String {
