@@ -48,6 +48,11 @@ class AXController {
             return detectTriggerForSmartSelection()
         }
         
+        if appManager.isNeedSmartSelectionApp() {
+            Logger.info("Using smart selection directly")
+            return detectTriggerForSmartSelection()
+        }
+        
         // Try accessibility approach first for unknown/working apps
         let focused = focusedElement ?? getFocusedElement()
         
@@ -508,10 +513,10 @@ class AXController {
         
         // 1. 保存原始剪贴板内容
         let pasteboard = NSPasteboard.general
-        // let originalContent = pasteboard.string(forType: .string)
+        let originalContent = pasteboard.string(forType: .string)
         
         // 2. 首先执行全选。这可能会被某些应用（如飞书）拦截，它们会自动将被选中的文本复制到剪贴板
-        simulateSelectAll()
+        InputManager.shared.postSelectAll()
         
         // 3. 等待全选操作完成，然后立即设置剪贴板并粘贴，以覆盖应用可能进行的自动复制
         // simulateSelectAll() 内部有0.2秒延迟，我们等待0.3秒以确保其完成
@@ -522,18 +527,18 @@ class AXController {
             pasteboard.clearContents()
             guard pasteboard.setString(text, forType: .string) else {
                 Logger.error("Robust Replace: Failed to set clipboard with translation.")
-//                self.restorePasteboardContent(originalContent)
+                self.restorePasteboardContent(originalContent)
                 completion()
                 return
             }
             
             // 5. 立即执行粘贴
-            self.simulatePaste()
+            InputManager.shared.postPaste()
             
             // 6. 安排恢复剪贴板的操作
             // simulatePaste() 内部有0.2秒延迟，我们等待0.4秒以确保粘贴完成
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                // self.restorePasteboardContent(originalContent)
+                self.restorePasteboardContent(originalContent)
                 self.checkAndRecoverEventTapAfterTranslation()
                 completion()
             }
@@ -637,15 +642,16 @@ class AXController {
        // 专用于替换选中文本的粘贴方法（不执行全选）
     func replaceSelectionWithPaste(with text: String, for pid: pid_t, completion: @escaping () -> Void) {
         let pasteboard = NSPasteboard.general
+        let originalContent = pasteboard.string(forType: .string)
 
-        // 1. 设置剪贴板，不再恢复
+        // 1. 设置剪贴板
         pasteboard.clearContents()
         guard pasteboard.setString(text, forType: .string) else {
             Logger.warn("Failed to set clipboard for selection replacement.")
             completion()
             return
         }
-        Logger.debug("Clipboard set with text: '\(text)'. Original content will not be restored.")
+        Logger.debug("Clipboard set with text: '\(text)'. Will restore original content after paste.")
 
         // 2. 尝试激活目标应用
         guard let targetApp = NSRunningApplication(processIdentifier: pid) else {
@@ -672,7 +678,11 @@ class AXController {
                 
                 // 等待一小会儿，让剪贴板在系统级别同步
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    self.simulatePaste()
+                    InputManager.shared.postPaste()
+                    // 延迟恢复剪贴板内容，确保粘贴操作完成
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        self.restorePasteboardContent(originalContent)
+                    }
                     completion()
                 }
             } else {
@@ -682,7 +692,11 @@ class AXController {
                     Logger.warn("Timeout waiting for app with pid \(pid) to activate. Pasting anyway as a fallback.")
                     
                     // 即使超时，也尝试粘贴
-                    self.simulatePaste()
+                    InputManager.shared.postPaste()
+                    // 延迟恢复剪贴板内容，确保粘贴操作完成
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        self.restorePasteboardContent(originalContent)
+                    }
                     completion()
                 }
             }
@@ -707,7 +721,7 @@ class AXController {
         } 
 
         let pasteboard = NSPasteboard.general
-        // let originalContent = saveOriginalPasteboardContent()
+        let originalContent = pasteboard.string(forType: .string)
         
         // Clear clipboard to ensure we detect the new content
         pasteboard.clearContents()
@@ -751,8 +765,13 @@ class AXController {
         
         guard let text = copiedText, !text.isEmpty else {
             Logger.error("No content found in clipboard after all copy attempts.")
+            // Restore original clipboard content when no content found
+            restorePasteboardContent(originalContent)
             return nil
         }
+        
+        // Restore original clipboard content before processing
+        restorePasteboardContent(originalContent)
         
         // Check if the copied text contains our trigger
         return processContentForTrigger(text)
@@ -770,6 +789,7 @@ class AXController {
         
         // 简化的回填方法：直接设置翻译结果到剪贴板，然后粘贴
         let pasteboard = NSPasteboard.general
+        let originalContent = pasteboard.string(forType: .string)
         
         // 清空剪贴板并设置翻译结果
         pasteboard.clearContents()
@@ -789,8 +809,28 @@ class AXController {
         // 减少粘贴前等待时间
         Thread.sleep(forTimeInterval: 0.2) 
         InputManager.shared.postPaste()
-         
+        restorePasteboardContent(originalContent)
         completion?()
+    }
+    
+    // 恢复剪贴板原始内容
+    private func restorePasteboardContent(_ originalContent: String?) {
+        guard let originalContent = originalContent else {
+            Logger.debug("No original clipboard content to restore")
+            return
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            let pasteboard = NSPasteboard.general
+            
+            // 清空剪贴板并恢复原始内容
+            pasteboard.clearContents()
+            if pasteboard.setString(originalContent, forType: .string) {
+                Logger.debug("Successfully restored original clipboard content")
+            } else {
+                Logger.warn("Failed to restore original clipboard content")
+            }
+        }
     }
     
 
