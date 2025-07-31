@@ -59,13 +59,6 @@ class InputManager {
             return nil
         }
 
-        // 检查是否是 Chrome，如果是则执行 Accessibility 预热
-        let chromeBundleId = "com.google.Chrome"
-        if chromeBundleId == AppDetectionManager.shared.getBundleId() {
-            Logger.info("Chrome detected, performing accessibility warm-up")
-            AppDetectionManager.shared.chromeWarmUpAccessibility()
-        }
-
         // 1. 使用system-wide获取焦点应用
         let sysWide = AXUIElementCreateSystemWide()
         var focusedApp: CFTypeRef?
