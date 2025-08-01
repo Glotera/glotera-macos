@@ -151,7 +151,7 @@ class AXController {
      
     
     // 标准获取方法，支持Web环境和桌面应用
-    private func getStandardValue(of element: AXUIElement, isWeb: Bool) -> String? {
+    func getStandardValue(of element: AXUIElement, isWeb: Bool) -> String? {
         
         // 首先尝试标准方法，获取输入框内容 
         var value: CFTypeRef?
@@ -412,10 +412,19 @@ class AXController {
             
             if isWhatsApp {
                 // WhatsApp 消息历史元素（不可编辑，应显示浮动窗口）
-                if roleString == "AXGenericElement" || roleString == "AXGroup" || roleString == "AXStaticText" {
-                    Logger.info("WhatsApp message element detected as non-editable (showing floating window)")
+                if roleString == "AXGenericElement" || roleString == "AXStaticText" || roleString == "AXGroup" {
+                    Logger.info("WhatsApp element: \(roleString) detected as non-editable (showing floating window)")
                     return false
                 }
+                
+                // Whatsapp 新版本在双击鼠标或Cmd+A选中时，焦点元素是AXGroup，需要再往下检查
+//                if roleString == "AXGroup" {
+//                    if let child = findTextArea(in: element){
+//                        Logger.info("Whatsapp input element is AXGroup but contains AXTextArea: \(child)")
+//                        return true
+//                    }
+//                    return false
+//                }
                 
                 // WhatsApp 输入框元素（可编辑，应该粘贴翻译结果）
                 if roleString == "AXTextField" || roleString == "AXTextArea" {
@@ -505,6 +514,26 @@ class AXController {
         }
 
         return false
+    }
+    
+    private func findTextArea(in element: AXUIElement) -> AXUIElement? {
+        var children: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children)
+        
+        if result == .success, let elements = children as? [AXUIElement] {
+            for child in elements {
+                var roleRef: CFTypeRef?
+                if AXUIElementCopyAttributeValue(child, kAXRoleAttribute as CFString, &roleRef) == .success,
+                   let role = roleRef as? String, role == kAXTextAreaRole as String {
+                    return child
+                }
+                // 递归查找
+                if let found = findTextArea(in: child) {
+                    return found
+                }
+            }
+        }
+        return nil
     }
     
     // 使用剪贴板强力替换内容
