@@ -359,6 +359,14 @@ class SelectEventManager {
 
         // 先处理特殊应用
         if checkSpecialApps {
+            // 对于Wechat、Whatsapp特殊应用，首先使用标准方式获取，因为用户有可能选中的是输入框，而不是历史消息内容
+            if let selectedText = getSelectedTextAttribute(of: focused) {
+                if !selectedText.isEmpty {
+                    Logger.debug("Returning selected text from AX API for special apps")
+                    return (text: selectedText, element: focused)
+                }  
+            } 
+
             // 特殊处理：WhatsApp 聊天历史 - 使用鼠标位置定位正确的消息
             if let whatsappResult = getWhatsAppChatHistoryTextWithMousePosition() { 
                 // 标记这是 WhatsApp 消息选择
@@ -769,7 +777,7 @@ class SelectEventManager {
         // 如果直接获取失败，尝试遍历父元素
         var currentElement: AXUIElement? = mouseElement
         var depth = 0
-        let maxDepth = 5 // 限制遍历深度，防止无限循环
+        let maxDepth = 3 // 限制遍历深度，防止无限循环
         
         while currentElement != nil && depth < maxDepth {
             if let messageText = getWhatsAppMessageFromElement(currentElement!) {
@@ -809,6 +817,10 @@ class SelectEventManager {
         case "AXStaticText":
             // 对于静态文本，直接尝试获取内容
             return getMessageFromElementDirectly(element)
+        case "AXTextArea":
+            // 对于输入框文本，直接获取内容
+            Logger.info("Whatsapp AXTextArea element, return value directly")
+            return AXController.shared.getStandardValue(of: element, isWeb: false)
         default:
             // 对于其他类型，尝试直接获取消息
             Logger.info("Trying direct message extraction for role: \(roleString)")
