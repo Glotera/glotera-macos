@@ -589,7 +589,9 @@ class SelectEventManager {
             // 检查是否包含 WhatsApp 消息的特征
             if labelString.contains(",") && (labelString.contains("message") || labelString.contains("Your message")) {
                 Logger.info("Found WhatsApp message in Label attribute")
-                return parseWhatsAppMessage(labelString)
+                if let chatMessage = ContentProcessor.shared.parseWhatsAppMessage(labelString) {
+                    return chatMessage.content
+                }
             }
         } else {
             Logger.info("AXGenericElement Label: empty or failed (result: \(labelResult))")
@@ -611,9 +613,9 @@ class SelectEventManager {
             if result == .success, let stringValue = value as? String, !stringValue.isEmpty {
                 Logger.info("AXGenericElement \(attributeName): '\(stringValue)'")
                 
-                if let parsedContent = parseWhatsAppMessage(stringValue) {
-                    Logger.info("Successfully parsed WhatsApp message from \(attributeName): '\(parsedContent)'")
-                    return parsedContent
+                if let chatMessage = ContentProcessor.shared.parseWhatsAppMessage(stringValue) {
+                    Logger.info("Successfully parsed WhatsApp message from \(attributeName): '\(chatMessage.content)'")
+                    return chatMessage.content
                 }
             }
         }
@@ -683,9 +685,9 @@ class SelectEventManager {
                             if childResult == .success, let childStringValue = childValue as? String, !childStringValue.isEmpty {
                                 Logger.info("Child \(i) \(attributeName): '\(childStringValue)'")
                                 
-                                if let parsedContent = parseWhatsAppMessage(childStringValue) {
-                                    Logger.info("Successfully parsed WhatsApp message from child \(i) \(attributeName): '\(parsedContent)'")
-                                    return parsedContent
+                                if let chatMessage = ContentProcessor.shared.parseWhatsAppMessage(childStringValue) {
+                                    Logger.info("Successfully parsed WhatsApp message from child \(i) \(attributeName): '\(chatMessage.content)'")
+                                    return chatMessage.content
                                 }
                             }
                         }
@@ -717,9 +719,9 @@ class SelectEventManager {
             if result == .success, let stringValue = value as? String, !stringValue.isEmpty {
                 Logger.info("Element \(attributeName): '\(stringValue)'")
                 
-                if let parsedContent = parseWhatsAppMessage(stringValue) {
-                    Logger.info("Successfully parsed WhatsApp message from element \(attributeName): '\(parsedContent)'")
-                    return parsedContent
+                if let chatMessage = ContentProcessor.shared.parseWhatsAppMessage(stringValue) {
+                    Logger.info("Successfully parsed WhatsApp message from element \(attributeName): '\(chatMessage.content)'")
+                    return chatMessage.content
                 }
             }
         }
@@ -828,93 +830,7 @@ class SelectEventManager {
         }
     }
     
-    // 解析 WhatsApp 消息格式 - 改进版本，支持消息内容包含逗号
-    private func parseWhatsAppMessage(_ rawText: String) -> String? {
-        Logger.debug("Attempting to parse WhatsApp message: '\(rawText)'")
-        
-        // WhatsApp 消息格式：Your message, [Message Content with possible commas], July22, at08:38, Sent to John Warhol, Red
-        // 从后往前解析，避免消息内容中的逗号干扰
-        let parts = rawText.components(separatedBy: ",")
-        
-        guard parts.count >= 2 else {
-            Logger.warn("WhatsApp message format invalid, parts count: \(parts.count)")
-            return nil
-        }
-        
-        // 从后往前找发送人信息 (包含 "Send to" 或 "Receive from")
-        var senderIndex = -1
-        for i in stride(from: parts.count - 1, through: 0, by: -1) {
-            let part = parts[i].trimmingCharacters(in: .whitespacesAndNewlines)
-            if part.lowercased().contains("send to") || part.lowercased().contains("receive from") || part.lowercased().contains("sent to") || part.lowercased().contains("received from") {
-                senderIndex = i
-                break
-            }
-        }
-        
-        if senderIndex == -1 {
-            // 没有找到发送人信息，使用原有简单解析
-            Logger.info("No sender info found, using simple parsing")
-            let messageType = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
-            let messageContent = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
-            Logger.info("Message type: '\(messageType)', Content: '\(messageContent)'")
-            return messageContent.isEmpty ? nil : messageContent
-        }
-        
-        // 找到发送人信息，往前找时间信息
-        var timeIndex = -1
-        if senderIndex > 1 {
-            // 检查发送人信息前面一个或两个位置是否是时间
-            for i in stride(from: senderIndex - 1, through: max(0, senderIndex - 2), by: -1) {
-                let part = parts[i].trimmingCharacters(in: .whitespacesAndNewlines)
-                if part.lowercased().hasPrefix("at") || part.contains(":") {
-                    timeIndex = i
-                    break
-                }
-            }
-        }
-        
-        // 找时间信息前面的日期
-        var dateIndex = -1
-        if timeIndex > 0 {
-            let part = parts[timeIndex - 1].trimmingCharacters(in: .whitespacesAndNewlines)
-            // 检查是否是日期格式 (如 "July22", "July 22", 月份名称等)
-            let datePattern = #"(?i)(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s*\d+"#
-            if part.range(of: datePattern, options: .regularExpression) != nil {
-                dateIndex = timeIndex - 1
-            }
-        }
-        
-        // 确定消息内容的结束位置
-        var contentEndIndex = parts.count - 1
-        if dateIndex > 1 {
-            contentEndIndex = dateIndex - 1
-        } else if timeIndex > 1 {
-            contentEndIndex = timeIndex - 1
-        } else if senderIndex > 1 {
-            contentEndIndex = senderIndex - 1
-        }
-        
-        // 提取消息内容 (从第2部分到contentEndIndex)
-        if contentEndIndex >= 1 {
-            var contentParts: [String] = []
-            for i in 1...contentEndIndex {
-                contentParts.append(parts[i])
-            }
-            let messageContent = contentParts.joined(separator: ",").trimmingCharacters(in: .whitespacesAndNewlines)
-            
-            let messageType = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
-            Logger.debug("Parsed - Type: '\(messageType)', Content: '\(messageContent)'")
-            
-            if !messageContent.isEmpty {
-                return messageContent
-            }
-        }
-        
-        // 如果解析失败，回退到简单解析
-        Logger.info("Advanced parsing failed, falling back to simple parsing")
-        let messageContent = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
-        return messageContent.isEmpty ? nil : messageContent
-    }
+
 
      
     // 获取选中文本属性
