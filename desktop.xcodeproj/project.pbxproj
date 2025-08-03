@@ -58,6 +58,8 @@
 		APP1D3T3CT10N4M4N4G3R1 /* AppDetectionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = APP1D3T3CT10N4M4N4G3R /* AppDetectionManager.swift */; };
 		C3D4E5F67890123456789ABC /* LoggerExample.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E5F67890123456789ABCDE /* LoggerExample.swift */; };
 		QU0TA5AL3RT4W1ND0W567890 /* QuotaAlertWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = QU0TA5AL3RT4W1ND0W123456 /* QuotaAlertWindow.swift */; };
+		CH4TTR4NSL4T10NW1ND0W123 /* ChatTranslationWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = CH4TTR4NSL4T10NW1ND0W456 /* ChatTranslationWindow.swift */; };
+		CH4TTR4NSL4T10NM4N4G3R789 /* ChatTranslationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CH4TTR4NSL4T10NM4N4G3R012 /* ChatTranslationManager.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -117,6 +119,8 @@
 		9BE4ED7D2E012FF1002AC2AE /* TranslateAgent.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TranslateAgent.swift; sourceTree = "<group>"; };
 		9BE4ED8F2E012FF1002AC2AE /* UpdateManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = UpdateManager.swift; sourceTree = "<group>"; };
 		ADA243CF57A742A49C392A18 /* language-iso-639.json */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.json; path = "language-iso-639.json"; sourceTree = "<group>"; };
+		CH4TTR4NSL4T10NW1ND0W456 /* ChatTranslationWindow.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ChatTranslationWindow.swift; sourceTree = "<group>"; };
+		CH4TTR4NSL4T10NM4N4G3R012 /* ChatTranslationManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ChatTranslationManager.swift; sourceTree = "<group>"; };
 		AF1783DB55484ACEBCF74A5F /* TriggerManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TriggerManager.swift; sourceTree = "<group>"; };
 		APP1D3T3CT10N4M4N4G3R /* AppDetectionManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AppDetectionManager.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6789012345678AB /* Logger.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Logger.swift; sourceTree = "<group>"; };
@@ -233,6 +237,8 @@
 				B45302DE637A47119CC26C78 /* StreamBuffer.swift */,
 				FF66A75F38EB4DF48E1475C8 /* PerformanceTelemetry.swift */,
 				9BE4ED8F2E012FF1002AC2AE /* UpdateManager.swift */,
+				CH4TTR4NSL4T10NW1ND0W456 /* ChatTranslationWindow.swift */,
+				CH4TTR4NSL4T10NM4N4G3R012 /* ChatTranslationManager.swift */,
 			);
 			path = desktop;
 			sourceTree = "<group>";
@@ -424,6 +430,8 @@
 				60B4B7922E0BA3D800A08883 /* EnvironmentManager.swift in Sources */,
 				60B4B7942E0BA3D800A08884 /* SessionManager.swift in Sources */,
 				9BE4ED902E012FF1002AC2AE /* UpdateManager.swift in Sources */,
+				CH4TTR4NSL4T10NW1ND0W123 /* ChatTranslationWindow.swift in Sources */,
+				CH4TTR4NSL4T10NM4N4G3R789 /* ChatTranslationManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
