@@ -163,7 +163,7 @@ extension UpdateManager: SPUUpdaterDelegate {
             ? "\(baseURL)/api/appcast.xml?channel=beta"
             : "\(baseURL)/api/appcast.xml"
         
-        Logger.info("Providing feed URL: \(feedURL) for channel: \(currentChannel)")
+        Logger.debug("Providing feed URL: \(feedURL) for channel: \(currentChannel)")
         return feedURL
     }
     

@@ -36,6 +36,7 @@
 		60B4B7912E0BA3D800A08883 /* UserManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60B4B7902E0BA3D800A08883 /* UserManager.swift */; };
 		60B4B7922E0BA3D800A08883 /* EnvironmentManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60B4B78F2E0BA3D800A08883 /* EnvironmentManager.swift */; };
 		60B4B7942E0BA3D800A08884 /* SessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60B4B7932E0BA3D800A08884 /* SessionManager.swift */; };
+		60B4B7952E0BA3D800A08885 /* MessageDatabaseManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60B4B7962E0BA3D800A08885 /* MessageDatabaseManager.swift */; };
 		699EE3F2FC6540FCA65332A7 /* JavaScriptManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DE8D9B3826C4050ACD8E820 /* JavaScriptManager.swift */; };
 		98AA1C8369C74BEAA4D3EB3B /* PerformanceTelemetry.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF66A75F38EB4DF48E1475C8 /* PerformanceTelemetry.swift */; };
 		9BE4ED582E012FC5002AC2AE /* desktopTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BE4ED572E012FC5002AC2AE /* desktopTests.swift */; };
@@ -98,6 +99,7 @@
 		60B4B78F2E0BA3D800A08883 /* EnvironmentManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnvironmentManager.swift; sourceTree = "<group>"; };
 		60B4B7902E0BA3D800A08883 /* UserManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserManager.swift; sourceTree = "<group>"; };
 		60B4B7932E0BA3D800A08884 /* SessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManager.swift; sourceTree = "<group>"; };
+		60B4B7962E0BA3D800A08885 /* MessageDatabaseManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageDatabaseManager.swift; sourceTree = "<group>"; };
 		9BE4ED422E012FC2002AC2AE /* Glotera.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Glotera.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		9BE4ED532E012FC5002AC2AE /* desktopTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = desktopTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		9BE4ED572E012FC5002AC2AE /* desktopTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = desktopTests.swift; sourceTree = "<group>"; };
@@ -211,6 +213,7 @@
 				608349422E18F981008EBB87 /* SimpleMemoryManager.swift */,
 				60B4B78F2E0BA3D800A08883 /* EnvironmentManager.swift */,
 				60B4B7932E0BA3D800A08884 /* SessionManager.swift */,
+				60B4B7962E0BA3D800A08885 /* MessageDatabaseManager.swift */,
 				60B4B7902E0BA3D800A08883 /* UserManager.swift */,
 				9BE4ED7A2E012FF1002AC2AE /* AppDelegate.swift */,
 				9BE4ED762E012FF1002AC2AE /* Assets.xcassets */,
@@ -429,6 +432,7 @@
 				602693092E2E09A50046465E /* SelectEventManager.swift in Sources */,
 				60B4B7922E0BA3D800A08883 /* EnvironmentManager.swift in Sources */,
 				60B4B7942E0BA3D800A08884 /* SessionManager.swift in Sources */,
+				60B4B7952E0BA3D800A08885 /* MessageDatabaseManager.swift in Sources */,
 				9BE4ED902E012FF1002AC2AE /* UpdateManager.swift in Sources */,
 				CH4TTR4NSL4T10NW1ND0W123 /* ChatTranslationWindow.swift in Sources */,
 				CH4TTR4NSL4T10NM4N4G3R789 /* ChatTranslationManager.swift in Sources */,

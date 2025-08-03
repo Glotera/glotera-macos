@@ -255,6 +255,12 @@ class ChatTranslationManager: NSObject {
         
         // Check if this is a supported chat application using AppDetectionManager
         if AppDetectionManager.shared.isChatApp(bundleId: bundleId) {
+            // Check if this is the same app we're already monitoring
+            if bundleId == lastActiveAppBundleId {
+                // Same app, no need to reinitialize
+                return
+            }
+            
             // Clean the app name by removing invisible Unicode characters
             let rawAppName = app.localizedName ?? "Unknown"
             let cleanAppName = rawAppName.trimmingCharacters(in: .whitespacesAndNewlines)

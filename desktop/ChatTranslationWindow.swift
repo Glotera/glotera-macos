@@ -15,6 +15,9 @@ class ChatTranslationWindow: NSWindow {
     private var messageUpdateTimer: Timer?
     private var messageHashes: Set<String> = [] // Track existing message hashes for deduplication
     private let maxMessagesLimit = 100 // Limit total messages to prevent memory issues
+    private var currentSessionId: String = "default"
+    private var lastMessageTimestamp: Date?
+    private var isFetchingMessages: Bool = false // Track if fetchWhatsAppMessages is currently running
     
     init() {
         // Initial window size for chat translation
@@ -36,6 +39,9 @@ class ChatTranslationWindow: NSWindow {
         
         setupContent()
         setupWindowBehavior()
+        
+        // Start message monitoring once during initialization
+        startMessageMonitoring()
         
         // Register with SimpleMemoryManager
         SimpleMemoryManager.shared.registerWindow(self)
@@ -78,11 +84,7 @@ class ChatTranslationWindow: NSWindow {
         // Reset user movement state when switching to a new app
         isUserMoved = false
         
-        // Clear previous messages and tracking
-        messages = []
-        messageHashes.removeAll()
-        
-        // Update the view with app information by recreating it
+        // Update the view with app information
         updateChatTranslationView()
         
         // Position window next to the IM application
@@ -91,23 +93,61 @@ class ChatTranslationWindow: NSWindow {
         // Show the window
         self.makeKeyAndOrderFront(nil)
         
-        // Start monitoring messages if it's WhatsApp
-        if appInfo.bundleId == "net.whatsapp.WhatsApp" {
-            startMessageMonitoring()
+        Logger.info("Chat translation window shown for app: \(appInfo.appName)")
+    }
+    
+    /// Load recent messages from database
+    private func loadRecentMessagesFromDatabase() {
+        let dbManager = MessageDatabaseManager.shared
+        
+        // Clear current messages before loading from database
+        messages.removeAll()
+        messageHashes.removeAll()
+        
+        let recentRecords = dbManager.getRecentMessages(forApp: "WhatsApp", sessionId: currentSessionId, limit: 50)
+        
+        Logger.info("Loading \(recentRecords.count) recent messages from database for session: \(currentSessionId)")
+        
+        for record in recentRecords {
+            // Convert database record to ChatMessage with translation fields
+            let message = ChatMessage(
+                sender: record.sender,
+                content: record.content,
+                timestamp: formatTimestamp(record.contentTimestamp),
+                isFromMe: record.sender == "You",
+                contentTranslation: record.contentTranslation,
+                contentLanguage: record.contentLanguage,
+                contentTranslationLanguage: record.contentTranslationLanguage,
+                contentHash: record.contentHash
+            )
+             
+            // Add to messages array and tracking set
+            messages.append(message)
+            messageHashes.insert(message.messageHash)
         }
         
-        Logger.info("Chat translation window shown for app: \(appInfo.appName)")
+        // Get the timestamp of the last message for filtering new messages
+        lastMessageTimestamp = dbManager.getLastMessageTimestamp(forApp: "WhatsApp", sessionId: currentSessionId)
+        if let lastTimestamp = lastMessageTimestamp {
+            Logger.info("Last message timestamp for session \(currentSessionId): \(lastTimestamp)")
+        } else {
+            Logger.info("No previous messages found for session \(currentSessionId)")
+        }
+        
+        // Update UI after loading messages
+        updateChatTranslationView()
+    }
+    
+    /// Format timestamp from Date to string
+    private func formatTimestamp(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US")
+        formatter.dateFormat = "MMMM d, HH:mm"
+        return formatter.string(from: date)
     }
     
     /// Hide the window
     func hideWindow() {
-        // Stop message monitoring
-        stopMessageMonitoring()
-        
-        // Clear message tracking when hiding
-        messages = []
-        messageHashes.removeAll()
-        
         // Clear the data model
         chatTranslationData?.clear()
         
@@ -292,16 +332,10 @@ class ChatTranslationWindow: NSWindow {
     
     /// Start monitoring WhatsApp messages
     private func startMessageMonitoring() {
-        // Stop any existing timer
-        stopMessageMonitoring()
-        
         // Start a timer to periodically check for new messages
         messageUpdateTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             self?.fetchWhatsAppMessages()
         }
-        
-        // Fetch messages immediately
-        fetchWhatsAppMessages()
         
         Logger.info("Started WhatsApp message monitoring")
     }
@@ -315,65 +349,210 @@ class ChatTranslationWindow: NSWindow {
     
     /// Fetch WhatsApp messages using Accessibility API
     private func fetchWhatsAppMessages() {
+        // Check if already fetching messages to prevent overlapping executions
+        guard !isFetchingMessages else {
+            Logger.debug("Skipping fetchWhatsAppMessages - previous execution still in progress")
+            return
+        }
+        
         guard let activeApp = NSWorkspace.shared.frontmostApplication,
               activeApp.bundleIdentifier == "net.whatsapp.WhatsApp" else {
             return
         }
         
-        let extractedMessages = extractWhatsAppMessages(from: activeApp)
+        Logger.info("Start to fetch Whatsapp messages ...")
         
-        // Filter out messages we already have
-        let newMessages = extractedMessages.filter { message in
-            !messageHashes.contains(message.messageHash)
+        // Set fetching flag to prevent overlapping executions
+        isFetchingMessages = true
+        
+        // Extract messages from WhatsApp with timestamp filtering
+        let extractedMessages = extractWhatsAppMessages(from: activeApp, filterAfterTimestamp: lastMessageTimestamp)
+        
+        // Check if chat session has changed
+        if let newSessionId = getCurrentChatSessionId() {
+            if newSessionId != currentSessionId {
+                Logger.info("Chat session changed from '\(currentSessionId)' to '\(newSessionId)'")
+                currentSessionId = newSessionId
+                loadRecentMessagesFromDatabase()
+            }
+        }
+        
+        if let lastTimestamp = lastMessageTimestamp {
+            Logger.info("Extracted messages filtered after timestamp: \(lastTimestamp)")
+        } else {
+            Logger.info("No timestamp filter applied - will only process truly new messages")
         }
         
         // Only process if there are actually new messages
-        if !newMessages.isEmpty {
-            Logger.info("Found \(newMessages.count) new messages")
+        if !extractedMessages.isEmpty {
+            Logger.info("Found \(extractedMessages.count) new messages")
             
-            // Add new messages to tracking
-            for newMessage in newMessages {
-                messageHashes.insert(newMessage.messageHash)
+            // Process messages with translation in background
+            Task {
+                await self.processNewMessages(extractedMessages)
+                // Reset fetching flag after processing is complete
+                await MainActor.run {
+                    self.isFetchingMessages = false
+                }
             }
-            
-            // Append new messages directly to the observable data (like a real IM app)
-            DispatchQueue.main.async { [weak self] in
-                guard let self = self else { return }
-                
-                // Initialize data model if needed
-                if self.chatTranslationData == nil {
-                    self.updateChatTranslationView()
-                    return
-                }
-                
-                // Simply append new messages one by one (like a real IM app)
-                for newMessage in newMessages {
-                    self.messages.append(newMessage)
-                    self.chatTranslationData?.appendMessage(newMessage)
-                }
-                
-                // Limit messages if needed (but only occasionally to avoid frequent trimming)
-                if self.messages.count > self.maxMessagesLimit + 20 { // Add buffer to avoid frequent trimming
-                    let excess = self.messages.count - self.maxMessagesLimit
-                    let removedMessages = Array(self.messages.prefix(excess))
-                    
-                    // Remove hashes for old messages
-                    for removedMessage in removedMessages {
-                        self.messageHashes.remove(removedMessage.messageHash)
-                    }
-                    
-                    self.messages = Array(self.messages.suffix(self.maxMessagesLimit))
-                    
-                    // Update the observable data to match (this might cause a refresh)
-                    self.chatTranslationData?.messages = self.messages
-                    
-                    Logger.info("Trimmed message history to \(self.maxMessagesLimit) messages")
-                }
-                
-                Logger.info("Appended \(newMessages.count) new messages (total: \(self.messages.count))")
-            }
+        } else {
+            // Reset fetching flag if no new messages to process
+            isFetchingMessages = false
         }
         // Do absolutely nothing if no new messages - no logging, no updates, nothing
+    }
+    
+    /// Process new messages with translation
+    private func processNewMessages(_ newMessages: [ChatMessage]) async {
+        let dbManager = MessageDatabaseManager.shared
+        
+        for message in newMessages {
+            // Calculate content hash
+            let contentHash = dbManager.calculateContentHash(message.content)
+            
+            var finalTranslation: String?
+            var finalLanguage: String?
+            var finalTranslationLanguage: String?
+            
+            // Check if message already exists in database
+            Logger.debug("Checking database for message with content hash: \(contentHash)")
+            if let existingRecord = dbManager.getMessage(byContentHash: contentHash) {
+                // Use existing translation
+                finalTranslation = existingRecord.contentTranslation
+                finalLanguage = existingRecord.contentLanguage
+                finalTranslationLanguage = existingRecord.contentTranslationLanguage
+                
+                Logger.info("Found existing translation for message: \(message.content.prefix(30))...")
+            } else {
+                Logger.info("No existing translation found, will translate message: \(message.content.prefix(30))...")
+                // Detect language and translate， 不需要检测原始语言是什么，LLM会返回结果
+//                let detectedLanguage = detectLanguage(message.content)
+//                finalLanguage = detectedLanguage
+                
+                // Always translate to user's preferred language
+                let targetLanguage = getUserPreferredLanguage()
+                finalTranslationLanguage = targetLanguage
+                
+                // Translate message using non-streaming mode
+                do {
+                    let translationResult = try await translateMessage(message.content, to: targetLanguage) 
+                    finalLanguage = translationResult.fromLanguage ?? ""
+                    finalTranslation = translationResult.translated
+                    
+                    Logger.info("Translated message: \(message.content.prefix(30))... -> \(translationResult.translated.prefix(30))...")
+                    Logger.info("Detected source language: \(finalLanguage)")
+                
+                    // Save to database
+                    let timestamp = parseTimestamp(message.timestamp) ?? Date()
+                    let messageRecord = MessageRecord(
+                        sender: message.sender,
+                        content: message.content,
+                        contentHash: contentHash,
+                        contentLanguage: finalLanguage ?? "",
+                        contentTranslation: finalTranslation ?? "",
+                        contentTranslationLanguage: targetLanguage,
+                        contentTimestamp: timestamp,
+                        chatApp: "WhatsApp",
+                        sessionId: currentSessionId
+                    )
+                    
+                    _ = dbManager.insertMessage(messageRecord)
+                    
+                    // Update lastMessageTimestamp after successful insertion
+                    lastMessageTimestamp = timestamp
+                    Logger.debug("Updated lastMessageTimestamp to: \(timestamp)")
+                } catch {
+                    Logger.error("Failed to translate message: \(error)")
+                    finalTranslation = "[Translation failed]"
+                }
+            }
+            
+            // Create processed message with all translation fields
+            let processedMessage = ChatMessage(
+                sender: message.sender,
+                content: message.content,
+                timestamp: message.timestamp,
+                isFromMe: message.isFromMe,
+                contentTranslation: finalTranslation,
+                contentLanguage: finalLanguage,
+                contentTranslationLanguage: finalTranslationLanguage,
+                contentHash: contentHash
+            ) 
+            
+            Logger.info("=== Message Processing Debug ===")
+            Logger.info("Original content: '\(message.content)'")
+            Logger.info("Final translation: '\(finalTranslation ?? "nil")'")
+            Logger.info("Processed message translation: '\(processedMessage.contentTranslation ?? "nil")'")
+            Logger.info("=== End Debug ===")
+            
+            // Add to messages array maintaining chronological order
+            messages.append(processedMessage) 
+            
+            // Keep messages within limit
+            if messages.count > maxMessagesLimit {
+                messages.removeFirst() 
+            }
+        }
+        
+        // Update UI on main thread
+        await MainActor.run {
+            self.updateChatTranslationView()
+        }
+    }
+    
+    /// Get user's preferred language for translation
+    private func getUserPreferredLanguage() -> String {
+        // Check system locale to determine user's preferred language
+        let locale = Locale.current
+        let languageCode = locale.language.languageCode?.identifier ?? "en"
+        
+        // Map common language codes to our supported languages
+        switch languageCode {
+        case "zh", "zh-Hans", "zh-Hant":
+            return "zh"
+        case "en":
+            return "en"
+        case "ja":
+            return "ja"
+        case "ko":
+            return "ko"
+        case "es":
+            return "es"
+        case "fr":
+            return "fr"
+        case "de":
+            return "de"
+        case "it":
+            return "it"
+        case "pt":
+            return "pt"
+        case "ru":
+            return "ru"
+        default:
+            // Default to English if language not supported
+            return "en"
+        }
+    }
+    
+    /// Detect language of text (simple heuristic)
+//    private func detectLanguage(_ text: String) -> String {
+//        // Simple detection: check for Chinese characters
+//        let chineseRange = text.range(of: "\\p{Han}", options: .regularExpression)
+//        return chineseRange != nil ? "zh" : "en"
+//    }
+    
+    /// Translate message using TranslatorClient
+    private func translateMessage(_ text: String, to language: String) async throws -> TranslationResult {
+        return try await withCheckedThrowingContinuation { continuation in
+            TranslatorClient.shared.translate(text: text, to: language) { result in
+                switch result {
+                case .success(let translationResult):
+                    continuation.resume(returning: translationResult)
+                case .failure(let error):
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
     }
     
     /// Compare two chat messages for chronological ordering using timestamp field
@@ -431,12 +610,14 @@ class ChatTranslationWindow: NSWindow {
                 let calendar = Calendar.current
                 let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: date)
                 
-                if components.year == 1 || components.year == nil {
-                    // Date without year, add current year
+                // Check if year is reasonable (not 1, 2000, or nil)
+                let year = components.year ?? 1
+                if year < 2020 {
+                    // Date without year or with invalid year, add current year
                     var newComponents = components
                     newComponents.year = currentYear
                     if let dateWithYear = calendar.date(from: newComponents) {
-                        Logger.debug("Parsed timestamp '\(timestamp)' as \(dateWithYear)")
+                        Logger.debug("Parsed timestamp '\(timestamp)' as \(dateWithYear) (added current year)")
                         return dateWithYear
                     }
                 }
@@ -450,8 +631,45 @@ class ChatTranslationWindow: NSWindow {
         return nil
     }
     
+    /// Get current chat session ID from WhatsApp
+    private func getCurrentChatSessionId() -> String? {
+        guard let activeApp = NSWorkspace.shared.frontmostApplication,
+              activeApp.bundleIdentifier == "net.whatsapp.WhatsApp" else {
+            return nil
+        }
+        
+        let pid = activeApp.processIdentifier
+        let appElement = AXUIElementCreateApplication(pid)
+        
+        // Get the main window
+        var mainWindow: CFTypeRef?
+        let windowResult = AXUIElementCopyAttributeValue(appElement, kAXMainWindowAttribute as CFString, &mainWindow)
+        
+        guard windowResult == .success, let window = mainWindow else {
+            return nil
+        }
+        
+        let windowElement = window as! AXUIElement
+        
+        // Get the chat area element
+        guard let chatAreaElement = getChatAreaElement(from: windowElement) else {
+            return nil
+        }
+        
+        // Get children of chat area (should be 2 elements)
+        var children: CFTypeRef?
+        let childrenResult = AXUIElementCopyAttributeValue(chatAreaElement, kAXChildrenAttribute as CFString, &children)
+        
+        guard childrenResult == .success, let childrenArray = children as? [AXUIElement], childrenArray.count >= 2 else {
+            return nil
+        }
+        
+        // Parse contact name from first child
+        return parseContactName(from: childrenArray[0])
+    }
+    
     /// Extract messages from WhatsApp using Accessibility API
-    private func extractWhatsAppMessages(from app: NSRunningApplication) -> [ChatMessage] {
+    private func extractWhatsAppMessages(from app: NSRunningApplication, filterAfterTimestamp: Date? = nil) -> [ChatMessage] {
         var extractedMessages: [ChatMessage] = []
         
         let pid = app.processIdentifier
@@ -469,9 +687,9 @@ class ChatTranslationWindow: NSWindow {
         let windowElement = window as! AXUIElement
         
         // Print the chat area element tree
-        Logger.info("=== WhatsApp Chat Area Element Tree ===")
-        printChatAreaElementTree(windowElement)
-        Logger.info("=== End Chat Area Element Tree ===")
+        // Logger.info("=== WhatsApp Chat Area Element Tree ===")
+        // printChatAreaElementTree(windowElement)
+        // Logger.info("=== End Chat Area Element Tree ===")
         
         // Get the chat area element (5th child of first child of first child)
         guard let chatAreaElement = getChatAreaElement(from: windowElement) else {
@@ -480,63 +698,193 @@ class ChatTranslationWindow: NSWindow {
         }
         
         // Parse chat messages from the chat area
-        parseChatMessagesFromElement(chatAreaElement, messages: &extractedMessages)
+        parseChatMessagesFromElement(chatAreaElement, messages: &extractedMessages, filterAfterTimestamp: filterAfterTimestamp)
         
         Logger.info("Extracted \(extractedMessages.count) messages from WhatsApp")
         return extractedMessages
     }
+     
     
-    /// Recursively extract messages from UI elements
-    // private func extractMessagesFromElement(_ element: AXUIElement, messages: inout [ChatMessage]) {
-    //     // Get children elements
-    //     var children: CFTypeRef?
-    //     let childrenResult = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children)
+    /// Get the chat area element from the window
+    private func getChatAreaElement(from windowElement: AXUIElement) -> AXUIElement? {
+        // Get the first child of the window
+        var firstChild: CFTypeRef?
+        let firstChildResult = AXUIElementCopyAttributeValue(windowElement, kAXChildrenAttribute as CFString, &firstChild)
         
-    //     guard childrenResult == .success, let childrenArray = children as? [AXUIElement] else {
-    //         return
-    //     }
+        guard firstChildResult == .success, let children = firstChild as? [AXUIElement], children.count > 0 else {
+            return nil
+        }
         
-    //     let messageElementParent = childrenArray[0]
-    //     var firstChild: CFTypeRef?
-    //     let firstChildResult = AXUIElementCopyAttributeValue(messageElementParent, kAXChildrenAttribute as CFString, &firstChild)
-    //     guard firstChildResult == .success, let firstChildArray = firstChild as? [AXUIElement], firstChildArray.count > 0 else {
-    //         return
-    //     }
-
-    //     let messageElements = firstChildArray[0]
-    //     // Check if this element contains message content
-    //     if let message = extractMessageFromElement(messageElements) {
-    //         messages.append(message)
-    //     }
+        let firstChildElement = children[0]
+        
+        // Get the first child of the first child
+        var firstChildOfFirstChild: CFTypeRef?
+        let firstChildOfFirstChildResult = AXUIElementCopyAttributeValue(firstChildElement, kAXChildrenAttribute as CFString, &firstChildOfFirstChild)
+        
+        guard firstChildOfFirstChildResult == .success, let firstChildChildren = firstChildOfFirstChild as? [AXUIElement], firstChildChildren.count > 0 else {
+            return nil
+        }
+        
+        let firstChildOfFirstChildElement = firstChildChildren[0]
+        
+        // Get the fifth child of the first child of the first child
+        var fifthChild: CFTypeRef?
+        let fifthChildResult = AXUIElementCopyAttributeValue(firstChildOfFirstChildElement, kAXChildrenAttribute as CFString, &fifthChild)
+        
+        guard fifthChildResult == .success, let fifthChildren = fifthChild as? [AXUIElement], fifthChildren.count >= 5 else {
+            return nil
+        }
+        
+        return fifthChildren[4] // Index 4 is the 5th element
+    }
+    
+    /// Parse chat messages from the chat area element
+    private func parseChatMessagesFromElement(_ chatAreaElement: AXUIElement, messages: inout [ChatMessage], filterAfterTimestamp: Date? = nil) {
+        // Get children of chat area (should be 2 elements)
+        var children: CFTypeRef?
+        let childrenResult = AXUIElementCopyAttributeValue(chatAreaElement, kAXChildrenAttribute as CFString, &children)
+        
+        guard childrenResult == .success, let childrenArray = children as? [AXUIElement], childrenArray.count >= 2 else {
+            Logger.debug("Chat area doesn't have expected 2 children")
+            return
+        }
+        
+        // Parse contact name from first child
+        let contactName = parseContactName(from: childrenArray[0])
+        Logger.info("=== WhatsApp Chat Parsing ===")
+        Logger.info("Contact name: \(contactName)")
+//        Logger.info("---")
+        
+        // Update current session ID based on contact name
+        currentSessionId = contactName
+        Logger.debug("Updated session ID to: \(currentSessionId)")
+        
+        // Parse messages from second child
+        parseMessagesFromContentArea(childrenArray[1], contactName: contactName, messages: &messages, filterAfterTimestamp: filterAfterTimestamp)
+        
+        Logger.info("=== End WhatsApp Chat Parsing ===")
+    }
+    
+    /// Parse contact name from the first child element
+    private func parseContactName(from element: AXUIElement) -> String {
+        // Get the first child of this element
+        var firstChild: CFTypeRef?
+        let firstChildResult = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &firstChild)
+        
+        guard firstChildResult == .success, let children = firstChild as? [AXUIElement], children.count > 0 else {
+            return "Unknown"
+        }
+        
+        let firstChildElement = children[0]
+        
+        // Get element role
+        var role: CFTypeRef?
+        let roleResult = AXUIElementCopyAttributeValue(firstChildElement, kAXRoleAttribute as CFString, &role)
+        
+        guard roleResult == .success, let roleString = role as? String, roleString == "AXHeading" else {
+            return "Unknown"
+        }
+        
+        // Get element description (contains contact name)
+        var description: CFTypeRef?
+        let descResult = AXUIElementCopyAttributeValue(firstChildElement, kAXDescriptionAttribute as CFString, &description)
+        
+        if descResult == .success, let descString = description as? String, !descString.isEmpty {
+            return descString.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        
+        return "Unknown"
+    }
+    
+    /// Parse messages from the content area (second child)
+    private func parseMessagesFromContentArea(_ element: AXUIElement, contactName: String, messages: inout [ChatMessage], filterAfterTimestamp: Date? = nil) {
+        // Get the first child of this element
+        var firstChild: CFTypeRef?
+        let firstChildResult = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &firstChild)
+        guard firstChildResult == .success, let children = firstChild as? [AXUIElement] else {
+            Logger.info("No children found in content area")
+            return
+        }
+        
+        var firstChild2: CFTypeRef?
+        let firstChildResult2 = AXUIElementCopyAttributeValue(children[0], kAXChildrenAttribute as CFString, &firstChild2)
+        guard firstChildResult2 == .success, let children2 = firstChild2 as? [AXUIElement] else {
+            Logger.info("No children found in content area2")
+            return
+        }
+        
+        Logger.info("Found \(children2.count) elements in content area")
+        
+        // Get the second child (index 1)
+        guard children2.count >= 1 else {
+            Logger.info("Not enough children, need at least 1")
+            return
+        }
          
-        
-    // }
-    
-    /// Extract a single message from an element
-    // private func extractMessageFromElement(_ element: AXUIElement) -> ChatMessage? {
-    //     // Get element role
-    //     var role: CFTypeRef?
-    //     let roleResult = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
-        
-    //     guard roleResult == .success, let roleString = role as? String else {
-    //         return nil
-    //     }
-        
-    //     // Look for text elements that might contain messages
-    //     if roleString == "AXStaticText" || roleString == "AXText" {
-    //         // Get the text content
-    //         var value: CFTypeRef?
-    //         let valueResult = AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &value)
+        // Loop through all children, parse each if it's AXGenericElement
+        for (index, child) in children2.enumerated() {
+            var firstChild3: CFTypeRef?
+            let firstChildResult3 = AXUIElementCopyAttributeValue(child, kAXChildrenAttribute as CFString, &firstChild3)
+            guard firstChildResult3 == .success, let children3 = firstChild3 as? [AXUIElement] else {
+                Logger.info("No children found in content area3")
+                continue
+            }
             
-    //         if valueResult == .success, let text = value as? String, !text.isEmpty {
-    //             // Parse the message using ContentProcessor
-    //             return ContentProcessor.shared.parseWhatsAppMessage(text)
-    //         }
-    //     }
-        
-    //     return nil
-    // }
-    
+            if children3.count<1 {
+                continue
+            }
+            
+            // Get the role of the child element
+            var role: CFTypeRef?
+            let roleResult = AXUIElementCopyAttributeValue(children3[0], kAXRoleAttribute as CFString, &role)
+            guard roleResult == .success, let roleString = role as? String else {
+                Logger.info("Failed to get role for child at index \(index)")
+                continue
+            }
+            Logger.debug("Child \(index + 1) role: \(roleString)")
+            
+            // Only parse if the role is AXGenericElement
+            if roleString == "AXGenericElement" {
+                // Get the description attribute (contains message content)
+                var description: CFTypeRef?
+                let descResult = AXUIElementCopyAttributeValue(children3[0], kAXDescriptionAttribute as CFString, &description)
+                if descResult == .success, let descString = description as? String, !descString.isEmpty {
+                    Logger.debug("Raw description for child \(index + 1): \(descString)")
+                    
+                    if let chatMessage = ContentProcessor.shared.parseWhatsAppMessage(descString) {
+                        // Filter by timestamp if provided
+                        if let filterTimestamp = filterAfterTimestamp {
+                            if let messageTimestamp = parseTimestamp(chatMessage.timestamp) {
+                                let isNewer = messageTimestamp > filterTimestamp
+                                Logger.debug("Message timestamp: \(chatMessage.timestamp) -> \(messageTimestamp), is newer: \(isNewer)")
+                                if isNewer {
+                                    messages.append(chatMessage)
+                                    Logger.info("Append parsed message (newer than \(filterTimestamp)): \(chatMessage)")
+                                } else {
+                                    Logger.debug("Skipping message (older than \(filterTimestamp)): \(chatMessage.content.prefix(30))...")
+                                }
+                            } else {
+                                Logger.warn("Failed to parse timestamp for message: '\(chatMessage.timestamp)', including message")
+                                messages.append(chatMessage)
+                                Logger.info("Append parsed message (timestamp parsing failed): \(chatMessage)")
+                            }
+                        } else {
+                            // No timestamp filter, include all messages
+                            messages.append(chatMessage)
+                            Logger.info("Append parsed message: \(chatMessage)")
+                        }
+                    }
+                } else {
+                    Logger.debug("No description found for AXGenericElement at child \(index + 1)")
+                }
+            } else {
+                Logger.debug("Child \(index + 1) is not AXGenericElement, role: \(roleString)")
+            }
+        }
+           
+    } 
+
+     
     /// Print the chat area element tree for debugging
     private func printChatAreaElementTree(_ windowElement: AXUIElement) {
         // Get the first child of the window
@@ -689,165 +1037,6 @@ class ChatTranslationWindow: NSWindow {
         Logger.info("\(indent)---")
     }
     
-
-    
-    // MARK: - WhatsApp Chat Parsing
-    
-    /// Get the chat area element from the window
-    private func getChatAreaElement(from windowElement: AXUIElement) -> AXUIElement? {
-        // Get the first child of the window
-        var firstChild: CFTypeRef?
-        let firstChildResult = AXUIElementCopyAttributeValue(windowElement, kAXChildrenAttribute as CFString, &firstChild)
-        
-        guard firstChildResult == .success, let children = firstChild as? [AXUIElement], children.count > 0 else {
-            return nil
-        }
-        
-        let firstChildElement = children[0]
-        
-        // Get the first child of the first child
-        var firstChildOfFirstChild: CFTypeRef?
-        let firstChildOfFirstChildResult = AXUIElementCopyAttributeValue(firstChildElement, kAXChildrenAttribute as CFString, &firstChildOfFirstChild)
-        
-        guard firstChildOfFirstChildResult == .success, let firstChildChildren = firstChildOfFirstChild as? [AXUIElement], firstChildChildren.count > 0 else {
-            return nil
-        }
-        
-        let firstChildOfFirstChildElement = firstChildChildren[0]
-        
-        // Get the fifth child of the first child of the first child
-        var fifthChild: CFTypeRef?
-        let fifthChildResult = AXUIElementCopyAttributeValue(firstChildOfFirstChildElement, kAXChildrenAttribute as CFString, &fifthChild)
-        
-        guard fifthChildResult == .success, let fifthChildren = fifthChild as? [AXUIElement], fifthChildren.count >= 5 else {
-            return nil
-        }
-        
-        return fifthChildren[4] // Index 4 is the 5th element
-    }
-    
-    /// Parse chat messages from the chat area element
-    private func parseChatMessagesFromElement(_ chatAreaElement: AXUIElement, messages: inout [ChatMessage]) {
-        // Get children of chat area (should be 2 elements)
-        var children: CFTypeRef?
-        let childrenResult = AXUIElementCopyAttributeValue(chatAreaElement, kAXChildrenAttribute as CFString, &children)
-        
-        guard childrenResult == .success, let childrenArray = children as? [AXUIElement], childrenArray.count >= 2 else {
-            Logger.debug("Chat area doesn't have expected 2 children")
-            return
-        }
-        
-        // Parse contact name from first child
-        let contactName = parseContactName(from: childrenArray[0])
-        Logger.info("=== WhatsApp Chat Parsing ===")
-        Logger.info("Contact name: \(contactName)")
-        Logger.info("---")
-        
-        // Parse messages from second child
-        parseMessagesFromContentArea(childrenArray[1], contactName: contactName, messages: &messages)
-        
-        Logger.info("=== End WhatsApp Chat Parsing ===")
-    }
-    
-    /// Parse contact name from the first child element
-    private func parseContactName(from element: AXUIElement) -> String {
-        // Get the first child of this element
-        var firstChild: CFTypeRef?
-        let firstChildResult = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &firstChild)
-        
-        guard firstChildResult == .success, let children = firstChild as? [AXUIElement], children.count > 0 else {
-            return "Unknown"
-        }
-        
-        let firstChildElement = children[0]
-        
-        // Get element role
-        var role: CFTypeRef?
-        let roleResult = AXUIElementCopyAttributeValue(firstChildElement, kAXRoleAttribute as CFString, &role)
-        
-        guard roleResult == .success, let roleString = role as? String, roleString == "AXHeading" else {
-            return "Unknown"
-        }
-        
-        // Get element description (contains contact name)
-        var description: CFTypeRef?
-        let descResult = AXUIElementCopyAttributeValue(firstChildElement, kAXDescriptionAttribute as CFString, &description)
-        
-        if descResult == .success, let descString = description as? String, !descString.isEmpty {
-            return descString.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        
-        return "Unknown"
-    }
-    
-    /// Parse messages from the content area (second child)
-    private func parseMessagesFromContentArea(_ element: AXUIElement, contactName: String, messages: inout [ChatMessage]) {
-        // Get the first child of this element
-        var firstChild: CFTypeRef?
-        let firstChildResult = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &firstChild)
-        guard firstChildResult == .success, let children = firstChild as? [AXUIElement] else {
-            Logger.info("No children found in content area")
-            return
-        }
-        
-        var firstChild2: CFTypeRef?
-        let firstChildResult2 = AXUIElementCopyAttributeValue(children[0], kAXChildrenAttribute as CFString, &firstChild2)
-        guard firstChildResult2 == .success, let children2 = firstChild2 as? [AXUIElement] else {
-            Logger.info("No children found in content area2")
-            return
-        }
-        
-        Logger.info("Found \(children2.count) elements in content area")
-        
-        // Get the second child (index 1)
-        guard children2.count >= 1 else {
-            Logger.info("Not enough children, need at least 1")
-            return
-        }
-         
-        // Loop through all children, parse each if it's AXGenericElement
-        for (index, child) in children2.enumerated() {
-            var firstChild3: CFTypeRef?
-            let firstChildResult3 = AXUIElementCopyAttributeValue(child, kAXChildrenAttribute as CFString, &firstChild3)
-            guard firstChildResult3 == .success, let children3 = firstChild3 as? [AXUIElement] else {
-                Logger.info("No children found in content area3")
-                continue
-            }
-            
-            if children3.count<1 {
-                continue
-            }
-            
-            // Get the role of the child element
-            var role: CFTypeRef?
-            let roleResult = AXUIElementCopyAttributeValue(children3[0], kAXRoleAttribute as CFString, &role)
-            guard roleResult == .success, let roleString = role as? String else {
-                Logger.info("Failed to get role for child at index \(index)")
-                continue
-            }
-            Logger.info("Child \(index + 1) role: \(roleString)")
-            
-            // Only parse if the role is AXGenericElement
-            if roleString == "AXGenericElement" {
-                // Get the description attribute (contains message content)
-                var description: CFTypeRef?
-                let descResult = AXUIElementCopyAttributeValue(children3[0], kAXDescriptionAttribute as CFString, &description)
-                if descResult == .success, let descString = description as? String, !descString.isEmpty {
-                    Logger.info("Raw description for child \(index + 1): \(descString)")
-                    
-                    if let chatMessage = ContentProcessor.shared.parseWhatsAppMessage(descString) {
-                        messages.append(chatMessage)
-                        Logger.info("Append parsed message: \(chatMessage)")
-                    }
-                } else {
-                    Logger.info("No description found for AXGenericElement at child \(index + 1)")
-                }
-            } else {
-                Logger.info("Child \(index + 1) is not AXGenericElement, role: \(roleString)")
-            }
-        }
-           
-    } 
 
 }
 
@@ -1002,22 +1191,38 @@ struct MessageView: View {
                         .opacity(0.7)
                 }
                 
-                // Message content
-                Text(message.content)
-                    .font(.body)
-                    .foregroundColor(message.isFromMe ? .white : .primary)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(message.isFromMe ? 
-                                  sentMessageColor : // Sent messages - blue
-                                  receivedMessageColor // Received messages - adaptive gray
-                            )
-                            .shadow(color: .black.opacity(0.1), radius: 1, x: 0, y: 1) // Subtle shadow
-                    )
-                    .frame(maxWidth: 280, alignment: message.isFromMe ? .trailing : .leading)
+                // Message content bubble
+                VStack(alignment: .leading, spacing: 6) {
+                    // Original content
+                    Text(message.content)
+                        .font(.body)
+                        .foregroundColor(message.isFromMe ? .white : .primary)
+                        .textSelection(.enabled)
+                    
+                    // Translation (if available)
+                    if let translation = message.contentTranslation,
+                       !translation.isEmpty && translation != "[Translation failed]" {
+                        Divider()
+                            .background(message.isFromMe ? Color.white.opacity(0.3) : Color.secondary.opacity(0.3))
+                        
+                        Text(translation)
+                            .font(.body)
+                            .italic()
+                            .foregroundColor(message.isFromMe ? Color.white.opacity(0.9) : Color.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(message.isFromMe ? 
+                              sentMessageColor : // Sent messages - blue
+                              receivedMessageColor // Received messages - adaptive gray
+                        )
+                        .shadow(color: .black.opacity(0.1), radius: 1, x: 0, y: 1) // Subtle shadow
+                )
+                .frame(maxWidth: 280, alignment: message.isFromMe ? .trailing : .leading)
             }
             .frame(maxWidth: .infinity, alignment: message.isFromMe ? .trailing : .leading)
             

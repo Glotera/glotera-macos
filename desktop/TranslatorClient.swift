@@ -286,11 +286,11 @@ class TranslatorClient: NSObject {
         translationQueue.name = "TranslationQueue"
         
         // 启动时输出当前环境配置信息
-        Logger.info("TranslatorClient initialized with rate limiting")
-        Logger.info("Environment: \(environment.isProduction ? "PRODUCTION" : "DEVELOPMENT")")
-        Logger.info("API Endpoint: \(environment.apiEndpoint)")
-        Logger.info("Timeout: \(environment.timeoutInterval)s, Max Retries: \(environment.maxRetries)")
-        Logger.info("Rate Limiting: 3 concurrent, 5 req/sec")
+        Logger.debug("TranslatorClient initialized with rate limiting")
+        Logger.debug("Environment: \(environment.isProduction ? "PRODUCTION" : "DEVELOPMENT")")
+        Logger.debug("API Endpoint: \(environment.apiEndpoint)")
+        Logger.debug("Timeout: \(environment.timeoutInterval)s, Max Retries: \(environment.maxRetries)")
+        Logger.debug("Rate Limiting: 3 concurrent, 5 req/sec")
         
         #if DEBUG
         Logger.info("🔧 Debug mode: Using local server for fast development")
@@ -1021,7 +1021,7 @@ extension TranslatorClient: URLSessionDataDelegate {
             // Create quota endpoint URL by extracting base URL from apiEndpoint
             let baseURL = EnvironmentManager.shared.baseURL
             let quotaURL = "\(baseURL)/api/quota"
-            Logger.info("Quota URL: \(quotaURL)")
+            Logger.debug("Quota URL: \(quotaURL)")
             guard let url = URL(string: quotaURL) else {
                 Logger.error("Invalid quota URL: \(quotaURL)")
                 completion(.failure(.networkError("Invalid quota URL")))
