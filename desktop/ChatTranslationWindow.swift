@@ -1,25 +1,20 @@
 import Cocoa
 import SwiftUI
 
-/// Chat message data model
-struct ChatMessage: Identifiable {
-    let id = UUID()
-    let sender: String
-    let content: String
-    let timestamp: String
-    let isFromMe: Bool
-}
+
 
 /// Chat translation floating window that appears next to IM applications
 class ChatTranslationWindow: NSWindow {
     private var hostingView: NSHostingView<ChatTranslationView>?
-    private var chatTranslationView: ChatTranslationView?
+    private var chatTranslationData: ChatTranslationData?
     private var currentAppInfo: AppInfo?
     private var windowPosition: NSPoint = .zero
     private var isUserMoved: Bool = false
     private var appName: String = ""
     private var messages: [ChatMessage] = []
     private var messageUpdateTimer: Timer?
+    private var messageHashes: Set<String> = [] // Track existing message hashes for deduplication
+    private let maxMessagesLimit = 100 // Limit total messages to prevent memory issues
     
     init() {
         // Initial window size for chat translation
@@ -47,23 +42,15 @@ class ChatTranslationWindow: NSWindow {
     }
     
     private func setupContent() {
-        chatTranslationView = ChatTranslationView(
-            appName: appName,
-            messages: messages,
-            onClose: { [weak self] in
-                self?.hideWindow()
-            }
-        )
-        
-        hostingView = NSHostingView(rootView: chatTranslationView!)
-        self.contentView = hostingView
+        // Initialize the content using updateChatTranslationView
+        updateChatTranslationView()
     }
     
     private func setupWindowBehavior() {
         // Make window stay on top of other windows
         self.level = .floating
         
-        // Enable window dragging
+        // Enable window dragging, but we'll control it more precisely
         self.isMovableByWindowBackground = true
         
         // Track window movement to detect user interaction
@@ -73,6 +60,9 @@ class ChatTranslationWindow: NSWindow {
             name: NSWindow.didMoveNotification,
             object: self
         )
+        
+        // Override mouse tracking behavior
+        self.acceptsMouseMovedEvents = false
     }
     
     @objc private func windowDidMove() {
@@ -88,8 +78,9 @@ class ChatTranslationWindow: NSWindow {
         // Reset user movement state when switching to a new app
         isUserMoved = false
         
-        // Clear previous messages
+        // Clear previous messages and tracking
         messages = []
+        messageHashes.removeAll()
         
         // Update the view with app information by recreating it
         updateChatTranslationView()
@@ -113,23 +104,38 @@ class ChatTranslationWindow: NSWindow {
         // Stop message monitoring
         stopMessageMonitoring()
         
+        // Clear message tracking when hiding
+        messages = []
+        messageHashes.removeAll()
+        
+        // Clear the data model
+        chatTranslationData?.clear()
+        
         self.orderOut(nil)
         Logger.info("Chat translation window hidden")
     }
     
     /// Update the chat translation view with current app name and messages
     private func updateChatTranslationView() {
-        chatTranslationView = ChatTranslationView(
-            appName: appName,
-            messages: messages,
-            onClose: { [weak self] in
-                self?.hideWindow()
-            }
-        )
+        // Initialize data and view only once
+        if chatTranslationData == nil {
+            chatTranslationData = ChatTranslationData()
+            
+            let chatView = ChatTranslationView(
+                data: chatTranslationData!,
+                onClose: { [weak self] in
+                    self?.hideWindow()
+                }
+            )
+            
+            hostingView = NSHostingView(rootView: chatView)
+            self.contentView = hostingView
+        }
         
-        hostingView = NSHostingView(rootView: chatTranslationView!)
-        self.contentView = hostingView
+        // Update data instead of recreating the view
+        chatTranslationData?.updateData(appName: appName, messages: messages)
     }
+    
     
     /// Position the window next to the IM application
     private func positionWindowNextToApp() {
@@ -256,7 +262,23 @@ class ChatTranslationWindow: NSWindow {
         
         // Only auto-position if user hasn't manually moved the window
         if !isUserMoved {
+            // Check if position actually needs updating to avoid unnecessary moves
+            let currentPosition = self.frame.origin
+            
+            // Store current position before calculating new one
+            let oldWindowPosition = windowPosition
+            
+            // Calculate what the new position should be
             positionWindowNextToApp()
+            
+            // Only apply position if it actually changed significantly (more than 10 pixels)
+            let deltaX = abs(currentPosition.x - windowPosition.x)
+            let deltaY = abs(currentPosition.y - windowPosition.y)
+            
+            if deltaX < 10 && deltaY < 10 {
+                // Position hasn't changed significantly, restore old position to avoid flicker
+                windowPosition = oldWindowPosition
+            }
         }
     }
     
@@ -298,14 +320,134 @@ class ChatTranslationWindow: NSWindow {
             return
         }
         
-        let newMessages = extractWhatsAppMessages(from: activeApp)
+        let extractedMessages = extractWhatsAppMessages(from: activeApp)
         
-        // Update messages if there are new ones
-        if newMessages.count != messages.count {
-            messages = newMessages
-            updateChatTranslationView()
-            Logger.info("Updated WhatsApp messages: \(messages.count) messages")
+        // Filter out messages we already have
+        let newMessages = extractedMessages.filter { message in
+            !messageHashes.contains(message.messageHash)
         }
+        
+        // Only process if there are actually new messages
+        if !newMessages.isEmpty {
+            Logger.info("Found \(newMessages.count) new messages")
+            
+            // Add new messages to tracking
+            for newMessage in newMessages {
+                messageHashes.insert(newMessage.messageHash)
+            }
+            
+            // Append new messages directly to the observable data (like a real IM app)
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                
+                // Initialize data model if needed
+                if self.chatTranslationData == nil {
+                    self.updateChatTranslationView()
+                    return
+                }
+                
+                // Simply append new messages one by one (like a real IM app)
+                for newMessage in newMessages {
+                    self.messages.append(newMessage)
+                    self.chatTranslationData?.appendMessage(newMessage)
+                }
+                
+                // Limit messages if needed (but only occasionally to avoid frequent trimming)
+                if self.messages.count > self.maxMessagesLimit + 20 { // Add buffer to avoid frequent trimming
+                    let excess = self.messages.count - self.maxMessagesLimit
+                    let removedMessages = Array(self.messages.prefix(excess))
+                    
+                    // Remove hashes for old messages
+                    for removedMessage in removedMessages {
+                        self.messageHashes.remove(removedMessage.messageHash)
+                    }
+                    
+                    self.messages = Array(self.messages.suffix(self.maxMessagesLimit))
+                    
+                    // Update the observable data to match (this might cause a refresh)
+                    self.chatTranslationData?.messages = self.messages
+                    
+                    Logger.info("Trimmed message history to \(self.maxMessagesLimit) messages")
+                }
+                
+                Logger.info("Appended \(newMessages.count) new messages (total: \(self.messages.count))")
+            }
+        }
+        // Do absolutely nothing if no new messages - no logging, no updates, nothing
+    }
+    
+    /// Compare two chat messages for chronological ordering using timestamp field
+    private func compareMessages(_ message1: ChatMessage, _ message2: ChatMessage) -> Bool {
+        // If both have timestamps, parse and compare them properly
+        if !message1.timestamp.isEmpty && !message2.timestamp.isEmpty {
+            let date1 = parseTimestamp(message1.timestamp)
+            let date2 = parseTimestamp(message2.timestamp)
+            
+            if let d1 = date1, let d2 = date2 {
+                Logger.debug("Comparing timestamps: '\(message1.timestamp)' vs '\(message2.timestamp)' -> \(d1 < d2)")
+                return d1 < d2
+            }
+            
+            // Fallback to string comparison if parsing fails
+            Logger.debug("Timestamp parsing failed, using string comparison: '\(message1.timestamp)' vs '\(message2.timestamp)'")
+            return message1.timestamp < message2.timestamp
+        }
+        
+        // If only one has timestamp, prioritize the one with timestamp
+        if !message1.timestamp.isEmpty && message2.timestamp.isEmpty {
+            return true  // message1 comes first
+        }
+        if message1.timestamp.isEmpty && !message2.timestamp.isEmpty {
+            return false // message2 comes first
+        }
+        
+        // If neither has timestamp, maintain insertion order (new messages at the end)
+        return false
+    }
+    
+    /// Parse timestamp string into Date object for proper comparison
+    /// Expected format: "July 30, 14:30" or "July 30, 02:30"
+    private func parseTimestamp(_ timestamp: String) -> Date? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US")
+        
+        // Try different timestamp formats
+        let formats = [
+            "MMMM d, HH:mm",    // "July 30, 14:30"
+            "MMMM d, H:mm",     // "July 30, 2:30"
+            "MMM d, HH:mm",     // "Jul 30, 14:30"
+            "MMM d, H:mm",      // "Jul 30, 2:30"
+            "yyyy-MM-dd HH:mm", // "2024-07-30 14:30"
+            "dd/MM/yyyy HH:mm", // "30/07/2024 14:30"
+            "MM/dd/yyyy HH:mm"  // "07/30/2024 14:30"
+        ]
+        
+        let currentYear = Calendar.current.component(.year, from: Date())
+        
+        for format in formats {
+            formatter.dateFormat = format
+            if let date = formatter.date(from: timestamp) {
+                // If the parsed date doesn't have a year (month/day only), add current year
+                let calendar = Calendar.current
+                let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: date)
+                
+                if components.year == 1 || components.year == nil {
+                    // Date without year, add current year
+                    var newComponents = components
+                    newComponents.year = currentYear
+                    if let dateWithYear = calendar.date(from: newComponents) {
+                        Logger.debug("Parsed timestamp '\(timestamp)' as \(dateWithYear)")
+                        return dateWithYear
+                    }
+                }
+                
+                Logger.debug("Parsed timestamp '\(timestamp)' as \(date)")
+                return date
+            }
+        }
+        
+        Logger.warn("Failed to parse timestamp: '\(timestamp)'")
+        return nil
     }
     
     /// Extract messages from WhatsApp using Accessibility API
@@ -345,55 +487,55 @@ class ChatTranslationWindow: NSWindow {
     }
     
     /// Recursively extract messages from UI elements
-    private func extractMessagesFromElement(_ element: AXUIElement, messages: inout [ChatMessage]) {
-        // Get children elements
-        var children: CFTypeRef?
-        let childrenResult = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children)
+    // private func extractMessagesFromElement(_ element: AXUIElement, messages: inout [ChatMessage]) {
+    //     // Get children elements
+    //     var children: CFTypeRef?
+    //     let childrenResult = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children)
         
-        guard childrenResult == .success, let childrenArray = children as? [AXUIElement] else {
-            return
-        }
+    //     guard childrenResult == .success, let childrenArray = children as? [AXUIElement] else {
+    //         return
+    //     }
         
-        let messageElementParent = childrenArray[0]
-        var firstChild: CFTypeRef?
-        let firstChildResult = AXUIElementCopyAttributeValue(messageElementParent, kAXChildrenAttribute as CFString, &firstChild)
-        guard firstChildResult == .success, let firstChildArray = firstChild as? [AXUIElement], firstChildArray.count > 0 else {
-            return
-        }
+    //     let messageElementParent = childrenArray[0]
+    //     var firstChild: CFTypeRef?
+    //     let firstChildResult = AXUIElementCopyAttributeValue(messageElementParent, kAXChildrenAttribute as CFString, &firstChild)
+    //     guard firstChildResult == .success, let firstChildArray = firstChild as? [AXUIElement], firstChildArray.count > 0 else {
+    //         return
+    //     }
 
-        let messageElements = firstChildArray[0]
-        // Check if this element contains message content
-        if let message = extractMessageFromElement(messageElements) {
-            messages.append(message)
-        }
+    //     let messageElements = firstChildArray[0]
+    //     // Check if this element contains message content
+    //     if let message = extractMessageFromElement(messageElements) {
+    //         messages.append(message)
+    //     }
          
         
-    }
+    // }
     
     /// Extract a single message from an element
-    private func extractMessageFromElement(_ element: AXUIElement) -> ChatMessage? {
-        // Get element role
-        var role: CFTypeRef?
-        let roleResult = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
+    // private func extractMessageFromElement(_ element: AXUIElement) -> ChatMessage? {
+    //     // Get element role
+    //     var role: CFTypeRef?
+    //     let roleResult = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
         
-        guard roleResult == .success, let roleString = role as? String else {
-            return nil
-        }
+    //     guard roleResult == .success, let roleString = role as? String else {
+    //         return nil
+    //     }
         
-        // Look for text elements that might contain messages
-        if roleString == "AXStaticText" || roleString == "AXText" {
-            // Get the text content
-            var value: CFTypeRef?
-            let valueResult = AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &value)
+    //     // Look for text elements that might contain messages
+    //     if roleString == "AXStaticText" || roleString == "AXText" {
+    //         // Get the text content
+    //         var value: CFTypeRef?
+    //         let valueResult = AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &value)
             
-            if valueResult == .success, let text = value as? String, !text.isEmpty {
-                // Try to parse the message
-                return parseWhatsAppMessage(text)
-            }
-        }
+    //         if valueResult == .success, let text = value as? String, !text.isEmpty {
+    //             // Parse the message using ContentProcessor
+    //             return ContentProcessor.shared.parseWhatsAppMessage(text)
+    //         }
+    //     }
         
-        return nil
-    }
+    //     return nil
+    // }
     
     /// Print the chat area element tree for debugging
     private func printChatAreaElementTree(_ windowElement: AXUIElement) {
@@ -547,46 +689,7 @@ class ChatTranslationWindow: NSWindow {
         Logger.info("\(indent)---")
     }
     
-    /// Parse WhatsApp message text to extract sender, content, and timestamp
-    private func parseWhatsAppMessage(_ text: String) -> ChatMessage? {
-        // WhatsApp message patterns
-        // Pattern 1: "Sender Name\nMessage content"
-        // Pattern 2: "Sender Name\nTime\nMessage content"
-        // Pattern 3: "You\nMessage content" (for own messages)
-        
-        let lines = text.components(separatedBy: .newlines).filter { !$0.isEmpty }
-        
-        guard lines.count >= 2 else {
-            return nil
-        }
-        
-        let sender = lines[0].trimmingCharacters(in: .whitespaces)
-        let content = lines.dropFirst().joined(separator: "\n").trimmingCharacters(in: .whitespaces)
-        
-        // Determine if it's from the user
-        let isFromMe = sender.lowercased() == "you" || sender.lowercased() == "你"
-        
-        // Extract timestamp if available (look for time pattern in the second line)
-        var timestamp = ""
-        if lines.count >= 2 {
-            let secondLine = lines[1]
-            if secondLine.matches(of: #/\d{1,2}:\d{2}/#).count > 0 {
-                timestamp = secondLine
-            }
-        }
-        
-        // Only create message if we have valid content
-        guard !content.isEmpty else {
-            return nil
-        }
-        
-        return ChatMessage(
-            sender: sender,
-            content: content,
-            timestamp: timestamp,
-            isFromMe: isFromMe
-        )
-    }
+
     
     // MARK: - WhatsApp Chat Parsing
     
@@ -732,20 +835,9 @@ class ChatTranslationWindow: NSWindow {
                 if descResult == .success, let descString = description as? String, !descString.isEmpty {
                     Logger.info("Raw description for child \(index + 1): \(descString)")
                     
-                    // Parse the message content (separated by U+200E)
-                    let messageParts = descString.components(separatedBy: "\u{200E}")
-                    Logger.info("Message parts count for child \(index + 1): \(messageParts.count)")
-                    
-                    for (partIndex, part) in messageParts.enumerated() {
-                        if !part.isEmpty {
-                            Logger.info("Part \(partIndex + 1) of child \(index + 1): \(part)")
-                            if let message = parseMessageContent(part, contactName: contactName) {
-                                messages.append(message)
-                                Logger.info("✅ Parsed message: [\(message.sender)] \(message.content) (\(message.timestamp))")
-                            } else {
-                                Logger.info("❌ Failed to parse message from part: \(part)")
-                            }
-                        }
+                    if let chatMessage = ContentProcessor.shared.parseWhatsAppMessage(descString) {
+                        messages.append(chatMessage)
+                        Logger.info("Append parsed message: \(chatMessage)")
                     }
                 } else {
                     Logger.info("No description found for AXGenericElement at child \(index + 1)")
@@ -755,60 +847,44 @@ class ChatTranslationWindow: NSWindow {
             }
         }
            
+    } 
+
+}
+
+/// Observable data model for chat translation view
+class ChatTranslationData: ObservableObject {
+    @Published var appName: String = ""
+    @Published var messages: [ChatMessage] = []
+    
+    func updateData(appName: String, messages: [ChatMessage]) {
+        self.appName = appName
+        self.messages = messages
     }
     
-    /// Parse message content from the description string
-    private func parseMessageContent(_ content: String, contactName: String) -> ChatMessage? {
-        let cleanContent = content.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        guard !cleanContent.isEmpty else {
-            Logger.info("Empty content, skipping")
-            return nil
+    func appendMessage(_ message: ChatMessage) {
+        // Check if message already exists to prevent duplicates
+        if !messages.contains(where: { $0.id == message.id }) {
+            messages.append(message)
         }
-        
-        Logger.info("Parsing content: \(cleanContent)")
-        
-        // Try to extract timestamp and message content
-        // WhatsApp format: "Message content\nTime" or just "Message content"
-        let lines = cleanContent.components(separatedBy: .newlines).filter { !$0.isEmpty }
-        Logger.info("Lines count: \(lines.count)")
-        
-        var messageContent = cleanContent
-        var timestamp = ""
-        
-        // If there are multiple lines, the last line might be timestamp
-        if lines.count > 1 {
-            messageContent = lines.dropLast().joined(separator: "\n")
-            timestamp = lines.last ?? ""
-            Logger.info("Extracted timestamp: \(timestamp)")
-        }
-        
-        // Determine if it's from the user (You) or contact
-        let isFromMe = messageContent.contains("You") || messageContent.contains("你")
-        Logger.info("Is from me: \(isFromMe)")
-        
-        let sender = isFromMe ? "You" : contactName
-        Logger.info("Sender: \(sender)")
-        Logger.info("Message content: \(messageContent)")
-        
-        return ChatMessage(
-            sender: sender,
-            content: messageContent,
-            timestamp: timestamp,
-            isFromMe: isFromMe
-        )
+    }
+    
+    func clear() {
+        appName = ""
+        messages.removeAll()
     }
 }
 
 /// SwiftUI view for chat translation window content
 struct ChatTranslationView: View {
-    let appName: String
-    let messages: [ChatMessage]
+    @ObservedObject var data: ChatTranslationData
     let onClose: () -> Void
+    
+    var appName: String { data.appName }
+    var messages: [ChatMessage] { data.messages }
     
     var body: some View {
         VStack(spacing: 0) {
-            // Header
+            // Header (draggable area)
             HStack {
                 Text("Glotera AI")
                     .font(.headline)
@@ -834,33 +910,52 @@ struct ChatTranslationView: View {
             Divider()
             
             // Messages area
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 8) {
-                    if messages.isEmpty {
-                        VStack {
-                            Spacer()
+            ScrollViewReader { proxy in
+                ScrollView(.vertical, showsIndicators: true) {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        if messages.isEmpty {
+                            VStack {
+                                Spacer()
+                                
+                                Text("Chat translation feature is active")
+                                    .font(.body)
+                                    .foregroundColor(.secondary)
+                                
+                                Text("Messages will appear here when detected")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                
+                                Spacer()
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else {
+                            ForEach(messages, id: \.id) { message in
+                                MessageView(message: message)
+                                    .id(message.id) // Important for scroll targeting
+                            }
                             
-                            Text("Chat translation feature is active")
-                                .font(.body)
-                                .foregroundColor(.secondary)
-                            
-                            Text("Messages will appear here when detected")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            
-                            Spacer()
+                            // Invisible anchor at the bottom
+                            Color.clear
+                                .frame(height: 1)
+                                .id("bottom")
                         }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else {
-                        ForEach(messages, id: \.id) { message in
-                            MessageView(message: message)
+                    }
+                    .padding()
+                }
+                .scrollDisabled(false) // Ensure scrolling is enabled but controlled
+                .onChange(of: messages.count) { _ in
+                    // Auto-scroll to bottom when new messages are added (like IM apps)
+                    if !messages.isEmpty {
+                        withAnimation(.easeOut(duration: 0.3)) {
+                            proxy.scrollTo("bottom", anchor: .bottom)
                         }
                     }
                 }
-                .padding()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(NSColor.windowBackgroundColor))
+            .contentShape(Rectangle()) // Make the messages area non-draggable
+            .allowsHitTesting(true) // Allow scroll and selection, but block window dragging
         }
         .frame(width: 400, height: 600)
         .background(Color(NSColor.windowBackgroundColor))
@@ -868,32 +963,69 @@ struct ChatTranslationView: View {
     }
 }
 
-/// Individual message view
+/// Individual message view with IM-style colors and alignment
 struct MessageView: View {
     let message: ChatMessage
     
+    // Message bubble colors
+    private var sentMessageColor: Color {
+        // Blue gradient for sent messages (like iMessage)
+        Color(red: 0.0, green: 0.48, blue: 1.0) // iOS-style blue
+    }
+    
+    private var receivedMessageColor: Color {
+        // Adaptive gray for received messages that works in light/dark mode
+        Color(NSColor.controlBackgroundColor)
+    }
+    
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(message.sender)
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .foregroundColor(.secondary)
-                
-                Spacer()
-                
-                Text(message.timestamp)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+        HStack {
+            if message.isFromMe {
+                Spacer() // Push sent messages to the right
             }
             
-            Text(message.content)
-                .font(.body)
-                .foregroundColor(.primary)
-                .textSelection(.enabled)
+            VStack(alignment: message.isFromMe ? .trailing : .leading, spacing: 4) {
+                // Sender and timestamp row
+                HStack(spacing: 8) {
+                    if !message.isFromMe {
+                        Text(message.sender)
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(.secondary)
+                        
+                        Spacer()
+                    }
+                    
+                    Text(message.timestamp)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .opacity(0.7)
+                }
+                
+                // Message content
+                Text(message.content)
+                    .font(.body)
+                    .foregroundColor(message.isFromMe ? .white : .primary)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(message.isFromMe ? 
+                                  sentMessageColor : // Sent messages - blue
+                                  receivedMessageColor // Received messages - adaptive gray
+                            )
+                            .shadow(color: .black.opacity(0.1), radius: 1, x: 0, y: 1) // Subtle shadow
+                    )
+                    .frame(maxWidth: 280, alignment: message.isFromMe ? .trailing : .leading)
+            }
+            .frame(maxWidth: .infinity, alignment: message.isFromMe ? .trailing : .leading)
+            
+            if !message.isFromMe {
+                Spacer() // Push received messages to the left
+            }
         }
-        .padding(8)
-        .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(6)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 2)
     }
 } 
