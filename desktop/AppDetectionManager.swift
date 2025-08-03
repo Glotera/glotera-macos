@@ -651,7 +651,7 @@ class AppDetectionManager {
             return
         }
         
-        Logger.info("Chrome found, PID: \(chromeApp.processIdentifier)")
+        Logger.debug("Chrome found, PID: \(chromeApp.processIdentifier)")
         
         // 创建 Chrome 的 AXUIElement
         let chromeElement = AXUIElementCreateApplication(chromeApp.processIdentifier)
@@ -662,7 +662,7 @@ class AppDetectionManager {
         
         if windowResult == .success, let window = mainWindow {
             let windowElement = window as! AXUIElement
-            Logger.info("Chrome main window found, attempting accessibility warm-up")
+            Logger.debug("Chrome main window found, attempting accessibility warm-up")
             
             // 执行一系列 Accessibility API 调用来"唤醒"Chrome 的权限
             warmUpChromeAccessibility(windowElement)
@@ -680,7 +680,7 @@ class AppDetectionManager {
         let childrenResult = AXUIElementCopyAttributeValue(windowElement, kAXChildrenAttribute as CFString, &children)
         
         if childrenResult == .success, let childrenArray = children as? NSArray {
-            Logger.info("Found \(childrenArray.count) child elements in Chrome window")
+            Logger.debug("Found \(childrenArray.count) child elements in Chrome window")
             
             // 2. 遍历子元素，尝试获取各种属性来触发权限
             for i in 0..<min(childrenArray.count, 10) { // 限制遍历数量，避免性能问题
@@ -705,13 +705,13 @@ class AppDetectionManager {
         var title: CFTypeRef?
         let titleResult = AXUIElementCopyAttributeValue(windowElement, kAXTitleAttribute as CFString, &title)
         if titleResult == .success, let titleString = title as? String {
-            Logger.info("Chrome window title: \(titleString)")
+            Logger.debug("Chrome window title: \(titleString)")
         }
         
         var position: CFTypeRef?
         let positionResult = AXUIElementCopyAttributeValue(windowElement, kAXPositionAttribute as CFString, &position)
         if positionResult == .success {
-            Logger.info("Chrome window position retrieved successfully")
+            Logger.debug("Chrome window position retrieved successfully")
         }
         
         Logger.info("Chrome accessibility warm-up completed")

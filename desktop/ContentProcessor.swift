@@ -20,6 +20,12 @@ struct ChatMessage: Identifiable, Equatable {
     let date: String?           // Date part
     let time: String?           // Time part
     
+    // Translation fields
+    var contentTranslation: String?
+    var contentLanguage: String?
+    var contentTranslationLanguage: String?
+    var contentHash: String?
+    
     // Custom equality check - prioritize timestamp when available
     static func == (lhs: ChatMessage, rhs: ChatMessage) -> Bool {
         // If both messages have valid timestamps, compare primarily by timestamp
@@ -66,6 +72,10 @@ struct ChatMessage: Identifiable, Equatable {
         self.messageType = nil
         self.date = nil
         self.time = nil
+        self.contentTranslation = nil
+        self.contentLanguage = nil
+        self.contentTranslationLanguage = nil
+        self.contentHash = nil
     }
     
     // Convenience initializer for WhatsApp messages
@@ -77,6 +87,27 @@ struct ChatMessage: Identifiable, Equatable {
         self.messageType = messageType
         self.date = date
         self.time = time
+        self.contentTranslation = nil
+        self.contentLanguage = nil
+        self.contentTranslationLanguage = nil
+        self.contentHash = nil
+    }
+    
+    // Initializer with translation fields
+    init(sender: String, content: String, timestamp: String, isFromMe: Bool, 
+         contentTranslation: String?, contentLanguage: String?, 
+         contentTranslationLanguage: String?, contentHash: String?) {
+        self.sender = sender
+        self.content = content
+        self.timestamp = timestamp
+        self.isFromMe = isFromMe
+        self.messageType = nil
+        self.date = nil
+        self.time = nil
+        self.contentTranslation = contentTranslation
+        self.contentLanguage = contentLanguage
+        self.contentTranslationLanguage = contentTranslationLanguage
+        self.contentHash = contentHash
     }
     
     // Convenience method to get a formatted description
@@ -264,6 +295,12 @@ class ContentProcessor {
         
         Logger.debug("Cleaned text: '\(cleanedText)'")
         
+        // 过滤贴纸消息 - 如果消息以 "Sticker with:" 开头，则跳过
+        if cleanedText.hasPrefix("Sticker with:") {
+            Logger.debug("Skipping sticker message: '\(cleanedText)'")
+            return nil
+        }
+        
         // WhatsApp 消息格式分析：
         // 发送消息: "Your message, [内容], [日期],at[时间], Sent to [联系人], Red"
         // 接收消息: "message, [内容], [日期],at[时间], Received from [联系人]"
@@ -286,11 +323,15 @@ class ContentProcessor {
         // 使用正则表达式提取各个部分
         let pattern: String
         if isSent {
-            // 发送消息模式: "Your message, [内容], [日期],at[时间], Sent to [联系人], Red"
-            pattern = #"Your message,\s*(.*?),\s*([A-Za-z]+\d+),\s*at(\d{1,2}:\d{2}),\s*Sent to\s+(.*?)(?:,\s*Red)?$"#
+            // 发送消息模式: 
+            // 1. "Your message, [内容], [日期],at[时间], Sent to [联系人], Red"
+            // 2. "Your message, [内容], [时间], Sent to [联系人]" (当天消息)
+            pattern = #"Your message,\s*(.*?),\s*(?:([A-Za-z]+\d+),\s*at)?(\d{1,2}:\d{2}),\s*Sent to\s+(.*?)(?:,\s*Red)?$"#
         } else {
-            // 接收消息模式: "message, [内容], [日期],at[时间], Received from [联系人]"
-            pattern = #"message,\s*(.*?),\s*([A-Za-z]+\d+),\s*at(\d{1,2}:\d{2}),\s*Received from\s+(.*?)$"#
+            // 接收消息模式:
+            // 1. "message, [内容], [日期],at[时间], Received from [联系人]"
+            // 2. "message, [内容], [时间], Received from [联系人]" (当天消息)
+            pattern = #"message,\s*(.*?),\s*(?:([A-Za-z]+\d+),\s*at)?(\d{1,2}:\d{2}),\s*Received from\s+(.*?)$"#
         }
         
         do {
@@ -300,14 +341,19 @@ class ContentProcessor {
             if let match = regex.firstMatch(in: cleanedText, options: [], range: range) {
                 // 提取各个部分
                 let contentRange = Range(match.range(at: 1), in: cleanedText)!
-                let dateRange = Range(match.range(at: 2), in: cleanedText)!
                 let timeRange = Range(match.range(at: 3), in: cleanedText)!
                 let senderRange = Range(match.range(at: 4), in: cleanedText)!
                 
                 let content = String(cleanedText[contentRange]).trimmingCharacters(in: .whitespacesAndNewlines)
-                let rawDate = String(cleanedText[dateRange]).trimmingCharacters(in: .whitespacesAndNewlines)
                 let rawTime = String(cleanedText[timeRange]).trimmingCharacters(in: .whitespacesAndNewlines)
                 let sender = String(cleanedText[senderRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+                
+                // 检查是否有日期部分（可选）
+                var rawDate = ""
+                if match.range(at: 2).location != NSNotFound {
+                    let dateRange = Range(match.range(at: 2), in: cleanedText)!
+                    rawDate = String(cleanedText[dateRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+                }
                 
                 // 解析标准化的日期和时间
                 let (standardDate, standardTime) = parseStandardDateTime(rawDate: rawDate, rawTime: rawTime)
@@ -448,6 +494,11 @@ class ContentProcessor {
                     standardDate = "\(month) \(day)"
                 }
             }
+        } else {
+            // 如果没有日期，使用今天的日期
+            let formatter = DateFormatter()
+            formatter.dateFormat = "MMMM d"
+            standardDate = formatter.string(from: Date())
         }
         
         // 解析时间：将 "at16:23" 转换为 "16:23"
@@ -488,7 +539,11 @@ extension ContentProcessor {
             "Your message, Hello world, July22, at08:38, Sent to John Warhol, Red",
             "Received message, How are you?, July22, at08:38, Received from Jane Doe, Blue",
             "Your message, Hello, world, how are you?, July22, at08:38, Sent to John Warhol, Red",
-            "Your message, Simple content"
+            "Your message, Test message, please ignore it, 22:52, Sent to Princeton",
+            "message, How are you today?, 14:30, Received from Alice",
+            "Your message, Simple content",
+            "Sticker with: 😂, July22, at08:38, Sent to John Warhol, Red",
+            "Sticker with: 🎉, July22, at08:38, Received from Jane Doe, Blue"
         ]
         
         for (index, example) in examples.enumerated() {
