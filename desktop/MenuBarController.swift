@@ -56,6 +56,14 @@ class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(checkUpdatesItem) 
 
         menu.addItem(NSMenuItem.separator())
+        
+        // Chat Translation menu
+        let isChatTranslationEnabled = ChatTranslationManager.shared.isChatTranslationEnabled()
+        let chatTranslationItem = NSMenuItem(title: "Chat Translation: \(isChatTranslationEnabled ? "ON" : "OFF")", action: #selector(toggleChatTranslation), keyEquivalent: "")
+        chatTranslationItem.target = self
+        menu.addItem(chatTranslationItem)
+
+        menu.addItem(NSMenuItem.separator())
 
         let userGuideItem = NSMenuItem(title: "User Guide", action: #selector(openUserGuide), keyEquivalent: "")
         userGuideItem.target = self
@@ -83,6 +91,11 @@ class MenuBarController: NSObject, NSMenuDelegate {
         let accessibilityDebugItem = NSMenuItem(title: "Accessibility Debug Info", action: #selector(showAccessibilityDebugInfo), keyEquivalent: "")
         accessibilityDebugItem.target = self
         debugMenu.addItem(accessibilityDebugItem)
+        
+        // Print Chat Element Tree
+        let printChatElementTreeItem = NSMenuItem(title: "Print Chat Element Tree", action: #selector(printChatElementTree), keyEquivalent: "")
+        printChatElementTreeItem.target = self
+        debugMenu.addItem(printChatElementTreeItem)
         
         menu.addItem(debugMenuItem)
         #endif
@@ -211,6 +224,19 @@ class MenuBarController: NSObject, NSMenuDelegate {
             Logger.info("Reset all accessibility status requested")
             AppDetectionManager.shared.resetAllAccessibilityStatus()
         }
+    }
+    
+    @objc func printChatElementTree() {
+        Logger.info("Print Chat Element Tree menu clicked")
+        
+        // Call the ChatTranslationManager to print the element tree
+        ChatTranslationManager.shared.printChatElementTree()
+        
+        // Show a notification to the user
+        showNonBlockingNotification(
+            title: "Element Tree Printed",
+            message: "Complete element tree has been printed to the console. Check the console output for details."
+        )
     }
     #endif
     
@@ -1065,6 +1091,23 @@ class MenuBarController: NSObject, NSMenuDelegate {
         // If no quota item found, reconstruct the menu
         Logger.info("No quota item found in current menu, reconstructing")
         constructMenu()
+    }
+    
+    // MARK: - Chat Translation
+    
+    @objc private func toggleChatTranslation() {
+        let isCurrentlyEnabled = ChatTranslationManager.shared.isChatTranslationEnabled()
+        
+        if isCurrentlyEnabled {
+            ChatTranslationManager.shared.disable()
+        } else {
+            ChatTranslationManager.shared.enable()
+        }
+        
+        // Reconstruct menu to update the toggle state
+        constructMenu()
+        
+        Logger.info("Chat translation toggled: \(isCurrentlyEnabled ? "OFF" : "ON")")
     }
     
     // MARK: - NSMenuDelegate

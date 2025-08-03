@@ -37,6 +37,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Initialize performance telemetry
         _ = PerformanceTelemetry.shared
         
+        // Initialize chat translation manager
+        _ = ChatTranslationManager.shared
+        
         // Initialize update manager and check for updates
         _ = UpdateManager.shared
         UpdateManager.shared.performFirstLaunchCheck()

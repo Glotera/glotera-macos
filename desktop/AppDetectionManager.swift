@@ -309,6 +309,11 @@ class AppDetectionManager {
         return chatAppBundleIds.contains(bundleId)
     }
     
+    /// Check if a specific bundle ID is a chat application
+    func isChatApp(bundleId: String) -> Bool {
+        return chatAppBundleIds.contains(bundleId)
+    }
+    
     /// Check if current application is Discord
     func isDiscordApp() -> Bool {
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
