@@ -13,12 +13,23 @@ class ChatTranslationManager: NSObject {
     private var windowPositionTimer: Timer?
     private var lastWindowFrame: NSRect?
     
+    // Grammarly-style UX: hidden by default
+    private var isTranslationWindowVisible: Bool = false
+    private var isUserRequestedWindow: Bool = false // User control: whether user clicked logo bar
+    private let logoBarManager = GloteraLogoBarManager.shared
+    
+    // Auto-reactivation and tolerance period for better UX
+    private var previousActiveApp: NSRunningApplication?
+    private var toleranceTimer: Timer?
+    private var isInTolerancePeriod = false
+    
 
     
     private override init() {
         super.init()
-        Logger.info("ChatTranslationManager initialized with chat translation enabled by default")
+        Logger.info("ChatTranslationManager initialized with Grammarly-style UX (hidden by default)")
         setupNotifications()
+        setupLogoBarManager()
         
         // Start monitoring since feature is enabled by default
         startMonitoring()
@@ -27,6 +38,8 @@ class ChatTranslationManager: NSObject {
     deinit {
         Logger.info("ChatTranslationManager deallocating")
         stopMonitoring()
+        logoBarManager.disable()
+        clearTolerancePeriod() // Clean up tolerance period
         NotificationCenter.default.removeObserver(self)
     }
     
@@ -37,7 +50,10 @@ class ChatTranslationManager: NSObject {
         guard !isEnabled else { return }
         
         isEnabled = true
-        Logger.info("Chat translation feature enabled")
+        Logger.info("Chat translation feature enabled with Grammarly-style UX")
+        
+        // Enable logo bar manager
+        logoBarManager.enable()
         
         // Start monitoring for chat applications
         startMonitoring()
@@ -53,11 +69,14 @@ class ChatTranslationManager: NSObject {
         isEnabled = false
         Logger.info("Chat translation feature disabled")
         
+        // Disable logo bar manager
+        logoBarManager.disable()
+        
         // Stop monitoring
         stopMonitoring()
         
         // Hide the floating window
-        hideFloatingWindow()
+        hideTranslationWindow()
     }
     
     /// Check if chat translation is enabled
@@ -147,6 +166,175 @@ class ChatTranslationManager: NSObject {
     
     // MARK: - Private Methods
     
+    /// Setup logo bar manager callbacks
+    private func setupLogoBarManager() {
+        logoBarManager.onLogoBarClick = { [weak self] in
+            self?.handleLogoBarClick()
+        }
+    }
+    
+    /// Handle logo bar click - show/hide translation window
+    private func handleLogoBarClick() {
+        Logger.info("Logo bar clicked - toggling translation window visibility")
+        
+        if isTranslationWindowVisible {
+            hideTranslationWindow()
+        } else {
+            isUserRequestedWindow = true // User has requested to show window
+            
+            // Record the previous active app (before Glotera gets activated by the click)
+            // We need to get the app that was active before the click event
+            if let lastActiveApp = currentActiveApp {
+                // Use the last known active chat app
+                previousActiveApp = NSRunningApplication.runningApplications(withBundleIdentifier: lastActiveApp.bundleId).first
+                Logger.info("Recorded previous active app from currentActiveApp: \(lastActiveApp.appName)")
+            } else {
+                // Fallback: try to get the frontmost app (might be Glotera already)
+                let currentApp = NSWorkspace.shared.frontmostApplication
+                previousActiveApp = currentApp
+                Logger.info("Recorded current app as previous: \(currentApp?.localizedName ?? "Unknown")")
+            }
+            
+            showTranslationWindow()
+            
+            // Start tolerance period immediately to prevent window hiding during app switching
+            startTolerancePeriod()
+            
+            // Always try to auto-reactivate if we have a previous app
+            if let app = previousActiveApp {
+                Logger.info("Attempting to auto-reactivate app: \(app.localizedName ?? "Unknown")")
+                
+                // Delay reactivation to ensure window is fully shown
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    self.attemptReactivation()
+                }
+            }
+        }
+    }
+    
+    /// Show translation window for current active app
+    private func showTranslationWindow() {
+        guard let currentActiveApp = currentActiveApp else {
+            Logger.warn("No active chat app to show translation window for")
+            return
+        }
+        
+        Logger.info("showTranslationWindow called with currentActiveApp: bundleId=\(currentActiveApp.bundleId), appName=\(currentActiveApp.appName)")
+        
+        // Create window if it doesn't exist
+        if chatTranslationWindow == nil {
+            chatTranslationWindow = ChatTranslationWindow()
+            Logger.debug("Created new ChatTranslationWindow instance")
+        }
+        
+        // Show the window next to the chat application
+        chatTranslationWindow?.showWindowAtScreenSide(currentActiveApp)
+        isTranslationWindowVisible = true
+        
+        Logger.info("Translation window shown and marked as visible for app: \(currentActiveApp.appName)")
+        Logger.debug("Translation window visible state: \(isTranslationWindowVisible)")
+    }
+    
+    /// Show translation window for unsupported app
+    private func showTranslationWindowForUnsupportedApp(_ appInfo: AppInfo) {
+        // Create window if it doesn't exist
+        if chatTranslationWindow == nil {
+            chatTranslationWindow = ChatTranslationWindow()
+            Logger.debug("Created new ChatTranslationWindow instance for unsupported app")
+        }
+        
+        // Show the window with unsupported app message
+        chatTranslationWindow?.showWindowAtScreenSide(appInfo)
+        isTranslationWindowVisible = true
+        
+        Logger.info("Translation window shown for unsupported app: \(appInfo.appName)")
+        Logger.debug("Translation window visible state: \(isTranslationWindowVisible)")
+    }
+    
+    /// Hide translation window
+    private func hideTranslationWindow() {
+        chatTranslationWindow?.hideWindow()
+        isTranslationWindowVisible = false
+        isUserRequestedWindow = false // Reset user control when manually hidden
+        clearTolerancePeriod() // Clear tolerance period when hiding window
+        Logger.info("Translation window hidden and marked as not visible")
+        Logger.debug("Translation window visible state: \(isTranslationWindowVisible)")
+    }
+    
+    /// Check if translation window is currently visible
+    func isTranslationWindowCurrentlyVisible() -> Bool {
+        return isTranslationWindowVisible
+    }
+    
+    /// Notify that translation window was closed by user (via close button)
+    func notifyWindowClosedByUser() {
+        isTranslationWindowVisible = false
+        isUserRequestedWindow = false // Reset user control when user closes window
+        clearTolerancePeriod() // Clear tolerance period when user closes window
+        Logger.info("Translation window closed by user - logo bar remains active")
+        Logger.debug("Translation window visible state after user close: \(isTranslationWindowVisible)")
+    }
+    
+    // MARK: - Auto-reactivation and Tolerance Period Methods
+    
+    /// Attempt to reactivate the previous chat application
+    private func attemptReactivation() {
+        guard let app = previousActiveApp else { 
+            Logger.info("No previous app to reactivate")
+            return 
+        }
+        
+        // Check if app is still available
+        if app.isTerminated {
+            Logger.info("Previous app is terminated, using tolerance period")
+            startTolerancePeriod()
+            return
+        }
+        
+        // Try to activate the app
+        let activated = app.activate()
+        
+        if activated {
+            Logger.info("Successfully reactivated previous app: \(app.localizedName ?? "Unknown")")
+            // Reactivation successful, clear tolerance period
+            clearTolerancePeriod()
+        } else {
+            Logger.info("Failed to reactivate app, using tolerance period")
+            startTolerancePeriod()
+        }
+    }
+    
+    /// Start tolerance period to prevent window hiding during app switching
+    private func startTolerancePeriod() {
+        isInTolerancePeriod = true
+        
+        // Set 3-second tolerance period
+        toleranceTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { [weak self] _ in
+            self?.endTolerancePeriod()
+        }
+        
+        Logger.info("Started tolerance period for translation window")
+    }
+    
+    /// End tolerance period and resume normal app detection
+    private func endTolerancePeriod() {
+        isInTolerancePeriod = false
+        toleranceTimer?.invalidate()
+        toleranceTimer = nil
+        
+        Logger.info("Tolerance period ended, resuming normal app detection")
+    }
+    
+    /// Clear tolerance period and reset related state
+    private func clearTolerancePeriod() {
+        isInTolerancePeriod = false
+        toleranceTimer?.invalidate()
+        toleranceTimer = nil
+        previousActiveApp = nil
+        
+        Logger.info("Tolerance period cleared")
+    }
+    
     private func setupNotifications() {
         // Monitor application activation
         NotificationCenter.default.addObserver(
@@ -201,7 +389,8 @@ class ChatTranslationManager: NSObject {
         
         if let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication {
             if app.bundleIdentifier == lastActiveAppBundleId {
-                hideFloatingWindow()
+                hideTranslationWindow()
+                logoBarManager.disable()
                 lastActiveAppBundleId = nil
                 currentActiveApp = nil
                 Logger.info("Chat application terminated: \(app.localizedName ?? "Unknown")")
@@ -214,8 +403,12 @@ class ChatTranslationManager: NSObject {
         
         if let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication {
             if app.bundleIdentifier == lastActiveAppBundleId {
-                hideFloatingWindow()
-                Logger.info("Chat application hidden: \(app.localizedName ?? "Unknown")")
+                // Don't hide translation window when app is hidden - keep it visible
+                // Only disable logo bar, but keep translation window if user manually opened it
+                if !isTranslationWindowVisible {
+                    logoBarManager.disable()
+                }
+                Logger.info("Chat application hidden: \(app.localizedName ?? "Unknown") - keeping translation window if manually opened")
             }
         }
     }
@@ -223,14 +416,15 @@ class ChatTranslationManager: NSObject {
     @objc private func windowDidMove(_ notification: Notification) {
         guard isEnabled, let _ = notification.object as? NSWindow else { return }
         
-        // Check if the moved window belongs to our active chat application
-        if let activeApp = NSWorkspace.shared.frontmostApplication,
+        // Check if the moved window belongs to our active chat application and translation window is visible
+        if isTranslationWindowVisible,
+           let activeApp = NSWorkspace.shared.frontmostApplication,
            let bundleId = activeApp.bundleIdentifier,
            bundleId == lastActiveAppBundleId {
             
             // Update floating window position after a short delay to avoid excessive updates
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-                self?.updateFloatingWindowPosition()
+                self?.updateTranslationWindowPosition()
             }
         }
     }
@@ -238,14 +432,15 @@ class ChatTranslationManager: NSObject {
     @objc private func windowDidResize(_ notification: Notification) {
         guard isEnabled, let _ = notification.object as? NSWindow else { return }
         
-        // Check if the resized window belongs to our active chat application
-        if let activeApp = NSWorkspace.shared.frontmostApplication,
+        // Check if the resized window belongs to our active chat application and translation window is visible
+        if isTranslationWindowVisible,
+           let activeApp = NSWorkspace.shared.frontmostApplication,
            let bundleId = activeApp.bundleIdentifier,
            bundleId == lastActiveAppBundleId {
             
             // Update floating window position after resize
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-                self?.updateFloatingWindowPosition()
+                self?.updateTranslationWindowPosition()
             }
         }
     }
@@ -253,11 +448,23 @@ class ChatTranslationManager: NSObject {
     private func checkAndHandleAppActivation(_ app: NSRunningApplication) {
         guard let bundleId = app.bundleIdentifier else { return }
         
+        Logger.debug("checkAndHandleAppActivation: bundleId=\(bundleId), appName=\(app.localizedName ?? "Unknown")")
+        
+        // If in tolerance period, skip hiding logic to prevent window from being hidden during app switching
+        if isInTolerancePeriod {
+            Logger.debug("In tolerance period, skipping app activation check to prevent window hiding")
+            return
+        }
+        
         // Check if this is a supported chat application using AppDetectionManager
-        if AppDetectionManager.shared.isChatApp(bundleId: bundleId) {
+        let isChatApp = AppDetectionManager.shared.isChatApp(bundleId: bundleId)
+        Logger.debug("AppDetectionManager.isChatApp(\(bundleId)) = \(isChatApp)")
+        
+        if isChatApp {
             // Check if this is the same app we're already monitoring
             if bundleId == lastActiveAppBundleId {
-                // Same app, no need to reinitialize
+                // Same app, no need to reinitialize - preserve current state
+                Logger.debug("Same chat app already active, preserving current state")
                 return
             }
             
@@ -279,16 +486,34 @@ class ChatTranslationManager: NSObject {
                 javaScriptPermissionsEnabled: false
             )
             
-            showFloatingWindow(for: appInfo)
+            // Enable logo bar for chat application (Grammarly-style UX)
+            enableLogoBarForApp(appInfo)
             lastActiveAppBundleId = bundleId
             currentActiveApp = appInfo
             
-            Logger.info("Chat application activated: \(cleanAppName)")
+            Logger.info("Chat application activated: \(cleanAppName) - Logo bar enabled")
         } else if lastActiveAppBundleId != nil {
-            // If a non-chat app was activated, hide the floating window
-            hideFloatingWindow()
+            // If a non-chat app was activated, hide translation window but keep user control state
+            logoBarManager.disable()
             lastActiveAppBundleId = nil
             currentActiveApp = nil
+            
+            // Hide window if it was visible, but don't reset user control
+            if isTranslationWindowVisible {
+                chatTranslationWindow?.orderOut(nil)
+                isTranslationWindowVisible = false
+                Logger.info("Non-chat app activated - hiding translation window but keeping user control")
+            } else {
+                Logger.info("Non-chat app activated - logo bar disabled")
+            }
+        } else {
+            // If a new app was activated but it's not a chat app
+            // Hide translation window and don't show anything for non-chat apps
+            if isTranslationWindowVisible {
+                chatTranslationWindow?.orderOut(nil)
+                isTranslationWindowVisible = false
+                Logger.info("Non-chat app activated: \(app.localizedName ?? "Unknown") - hiding translation window")
+            }
         }
     }
     
@@ -298,10 +523,12 @@ class ChatTranslationManager: NSObject {
             self?.checkCurrentActiveApp()
         }
         
-        // Start a timer to periodically update floating window position
+        // Start a timer to periodically update translation window position
         windowPositionTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
-            self?.updateFloatingWindowPositionIfNeeded()
+            self?.updateTranslationWindowPositionIfNeeded()
         }
+        
+        Logger.info("Started monitoring with timers and NSWorkspace notifications")
     }
     
     private func stopMonitoring() {
@@ -310,6 +537,8 @@ class ChatTranslationManager: NSObject {
         
         windowPositionTimer?.invalidate()
         windowPositionTimer = nil
+        
+        Logger.info("Stopped monitoring")
     }
     
     private func checkCurrentActiveApp() {
@@ -320,32 +549,48 @@ class ChatTranslationManager: NSObject {
         }
     }
     
-    private func showFloatingWindow(for appInfo: AppInfo) {
-        // Create window if it doesn't exist
-        if chatTranslationWindow == nil {
-            chatTranslationWindow = ChatTranslationWindow()
+    /// Enable logo bar for the specified chat application
+    private func enableLogoBarForApp(_ appInfo: AppInfo) {
+        // Store current app info for later use when logo bar is clicked
+        currentActiveApp = appInfo
+        
+        // Enable logo bar manager to show logo bar on screen edge hover (only if not already enabled)
+        if !logoBarManager.isLogoBarEnabled() {
+            logoBarManager.enable()
+            Logger.info("Logo bar enabled for chat app: \(appInfo.appName)")
+        } else {
+            Logger.debug("Logo bar already enabled for chat app: \(appInfo.appName)")
         }
         
-        // Show the window next to the chat application
-        chatTranslationWindow?.showNextToApp(appInfo)
+        // If user has requested window, re-show it when chat app is activated
+        if isUserRequestedWindow {
+            Logger.info("User has requested window - re-showing translation window for chat app: \(appInfo.appName)")
+            showTranslationWindow()
+        }
     }
     
-    private func hideFloatingWindow() {
-        chatTranslationWindow?.hideWindow()
-    }
-    
-    private func updateFloatingWindowPosition() {
+    private func updateTranslationWindowPosition() {
+        guard isTranslationWindowVisible else { return }
         chatTranslationWindow?.updatePosition()
     }
     
-    private func updateFloatingWindowPositionIfNeeded() {
+    private func updateTranslationWindowPositionIfNeeded() {
         guard isEnabled, 
-              let activeApp = NSWorkspace.shared.frontmostApplication,
-              let bundleId = activeApp.bundleIdentifier,
-              bundleId == lastActiveAppBundleId,
-              chatTranslationWindow?.isVisible == true else { return }
+              isTranslationWindowVisible else { return }
         
-        // Update the floating window position to follow the chat application
-        updateFloatingWindowPosition()
+        // Check if translation window should be visible but isn't - re-show it
+        if let window = chatTranslationWindow {
+            if !window.isVisible {
+                Logger.warn("Translation window should be visible but isn't - re-showing it")
+                window.makeKeyAndOrderFront(nil)
+                
+                // Only reposition when re-showing the window
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    self.updateTranslationWindowPosition()
+                }
+            }
+        }
     }
+    
+    // positionWindowAtScreenRightEdge method removed - window positioning is now handled by ChatTranslationWindow
 } 

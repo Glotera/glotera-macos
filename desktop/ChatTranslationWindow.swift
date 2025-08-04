@@ -23,8 +23,13 @@ class ChatTranslationWindow: NSWindow {
         // Initial window size for chat translation
         let initialSize = NSSize(width: 400, height: 600)
         
+        // Calculate initial position at screen right edge
+        let screenFrame = NSScreen.main?.visibleFrame ?? NSRect.zero
+        let initialX = screenFrame.maxX - initialSize.width - 10
+        let initialY = screenFrame.midY - (initialSize.height / 2)
+        
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: initialSize.width, height: initialSize.height),
+            contentRect: NSRect(x: initialX, y: initialY, width: initialSize.width, height: initialSize.height),
             styleMask: [.borderless],
             backing: .buffered,
             defer: false
@@ -34,7 +39,7 @@ class ChatTranslationWindow: NSWindow {
         self.isOpaque = false
         self.backgroundColor = NSColor.clear
         self.hasShadow = true
-        self.isMovableByWindowBackground = true
+        self.isMovableByWindowBackground = false
         self.isReleasedWhenClosed = false
         
         setupContent()
@@ -45,6 +50,8 @@ class ChatTranslationWindow: NSWindow {
         
         // Register with SimpleMemoryManager
         SimpleMemoryManager.shared.registerWindow(self)
+        
+        Logger.info("ChatTranslationWindow initialized at screen right edge: x=\(initialX), y=\(initialY)")
     }
     
     private func setupContent() {
@@ -56,44 +63,50 @@ class ChatTranslationWindow: NSWindow {
         // Make window stay on top of other windows
         self.level = .floating
         
-        // Enable window dragging, but we'll control it more precisely
-        self.isMovableByWindowBackground = true
-        
-        // Track window movement to detect user interaction
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(windowDidMove),
-            name: NSWindow.didMoveNotification,
-            object: self
-        )
+        // Disable window dragging - window will be fixed at screen right edge
+        self.isMovableByWindowBackground = false
         
         // Override mouse tracking behavior
         self.acceptsMouseMovedEvents = false
     }
     
-    @objc private func windowDidMove() {
-        isUserMoved = true
-        windowPosition = self.frame.origin
-    }
+    // Window movement tracking removed - window is now fixed at screen right edge
     
-    /// Show the window next to the specified application
-    func showNextToApp(_ appInfo: AppInfo) {
+    /// Show the window at screen right edge
+    func showWindowAtScreenSide(_ appInfo: AppInfo) {
         currentAppInfo = appInfo
-        appName = appInfo.appName
+        appName = appInfo.appName 
         
-        // Reset user movement state when switching to a new app
-        isUserMoved = false
+        if appInfo.bundleId == "net.whatsapp.WhatsApp" {
+            // Supported app - show normal translation interface
+            Logger.info("WhatsApp detected - showing normal translation interface")
+            updateChatTranslationView()
+        } else if AppDetectionManager.shared.isChatApp(bundleId: appInfo.bundleId) {
+            // Unsupported app - show coming soon message
+            Logger.info("\(appInfo.appName) - Unsupported chat app detected")
+            showUnsupportedAppMessage(appInfo.appName)
+        } else {
+            Logger.info("\(appInfo.appName) - Not chat app, hiding window")
+            self.orderOut(nil)
+            return
+        }
         
-        // Update the view with app information
-        updateChatTranslationView()
-        
-        // Position window next to the IM application
-        positionWindowNextToApp()
-        
-        // Show the window
+        // Only show window for supported or unsupported chat apps
+        // Show the window first
         self.makeKeyAndOrderFront(nil)
         
-        Logger.info("Chat translation window shown for app: \(appInfo.appName)")
+        // Then position window at screen right edge immediately
+        DispatchQueue.main.async {
+            self.positionWindowAtScreenRightEdge()
+        }
+        
+        // Verify window is actually visible
+        Logger.info("Chat translation window shown for app: \(appInfo.appName), isVisible: \(self.isVisible)")
+        
+        // Add a small delay to check if window stays visible
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            Logger.info("Window visibility check after 0.5s: \(self.isVisible)")
+        }
     }
     
     /// Load recent messages from database
@@ -148,11 +161,19 @@ class ChatTranslationWindow: NSWindow {
     
     /// Hide the window
     func hideWindow() {
+        Logger.info("hideWindow() called - printing stack trace")
+        
+        // Print a simplified stack trace to understand who's calling this
+//        let stackTrace = Thread.callStackSymbols
+//        for (index, frame) in stackTrace.prefix(10).enumerated() {
+//            Logger.info("Stack frame \(index): \(frame)")
+//        }
+        
         // Clear the data model
         chatTranslationData?.clear()
         
         self.orderOut(nil)
-        Logger.info("Chat translation window hidden")
+        Logger.info("Chat translation window hidden, isVisible: \(self.isVisible)")
     }
     
     /// Update the chat translation view with current app name and messages
@@ -164,6 +185,8 @@ class ChatTranslationWindow: NSWindow {
             let chatView = ChatTranslationView(
                 data: chatTranslationData!,
                 onClose: { [weak self] in
+                    // Notify ChatTranslationManager that window was closed by user
+                    ChatTranslationManager.shared.notifyWindowClosedByUser()
                     self?.hideWindow()
                 }
             )
@@ -174,152 +197,80 @@ class ChatTranslationWindow: NSWindow {
         
         // Update data instead of recreating the view
         chatTranslationData?.updateData(appName: appName, sessionId: currentSessionId, messages: messages)
+        chatTranslationData?.setUnsupportedApp(false) // Reset unsupported app state for supported apps
     }
     
-    
-    /// Position the window next to the IM application
-    private func positionWindowNextToApp() {
-        guard currentAppInfo != nil else { return }
+    /// Show unsupported app message
+    private func showUnsupportedAppMessage(_ appName: String) {
+        // Clear current messages and session
+        messages.removeAll()
+        messageHashes.removeAll()
+        currentSessionId = "default"
+        lastMessageTimestamp = nil
         
-        // Get the active application window
-        if let activeApp = NSWorkspace.shared.frontmostApplication {
+        // Initialize data and view only once
+        if chatTranslationData == nil {
+            chatTranslationData = ChatTranslationData()
             
-            // Try to get the main window of the active application using Accessibility API
-            if let appWindowFrame = getMainWindowFrameForApplication(activeApp) {
-                
-                let screenFrame = NSScreen.main?.visibleFrame ?? NSRect.zero
-                let windowFrame = self.frame
-                
-                // If user hasn't manually moved the window, position it automatically
-                if !isUserMoved {
-                    // Calculate position to the right of the chat application window
-                    var newX = appWindowFrame.maxX + 10 // 10px gap from the chat window
-                    var newY = appWindowFrame.origin.y + (appWindowFrame.height - windowFrame.height) / 2 // Align vertically
-                    
-                    // Ensure the floating window doesn't go off screen
-                    if newX + windowFrame.width > screenFrame.maxX {
-                        // If it would go off the right edge, position it to the left of the chat window
-                        newX = appWindowFrame.origin.x - windowFrame.width - 10
-                    }
-                    
-                    if newY + windowFrame.height > screenFrame.maxY {
-                        // If it would go off the top, adjust to fit
-                        newY = screenFrame.maxY - windowFrame.height - 20
-                    }
-                    
-                    if newY < screenFrame.origin.y {
-                        // If it would go off the bottom, adjust to fit
-                        newY = screenFrame.origin.y + 20
-                    }
-                    
-                    // Animate the position change for smooth movement
-                    NSAnimationContext.runAnimationGroup({ context in
-                        context.duration = 0.2
-                        context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                        self.animator().setFrameOrigin(NSPoint(x: newX, y: newY))
-                    }) {
-                        self.windowPosition = self.frame.origin
-                    }
+            let chatView = ChatTranslationView(
+                data: chatTranslationData!,
+                onClose: { [weak self] in
+                    // Notify ChatTranslationManager that window was closed by user
+                    ChatTranslationManager.shared.notifyWindowClosedByUser()
+                    self?.hideWindow()
                 }
-            } else {
-                // Fallback positioning if we can't get the app window
-                Logger.debug("Using fallback positioning for app: \(activeApp.localizedName ?? "Unknown")")
-                positionWindowWithFallback()
-            }
+            )
+            
+            hostingView = NSHostingView(rootView: chatView)
+            self.contentView = hostingView
         }
+        
+        // Update data with unsupported app message
+        chatTranslationData?.updateData(appName: appName, sessionId: "", messages: [])
+        chatTranslationData?.setUnsupportedApp(true)
+        
+        Logger.info("Showing unsupported app message for: \(appName)")
     }
     
-    /// Fallback positioning method when Accessibility API fails
-    private func positionWindowWithFallback() {
+    
+    /// Position the window at screen right edge
+    private func positionWindowAtScreenRightEdge() {
+        Logger.info("Positioning window at screen right edge")
+        
         let screenFrame = NSScreen.main?.visibleFrame ?? NSRect.zero
         let windowFrame = self.frame
         
-        // Position window to the right side of the screen
-        let newX = screenFrame.maxX - windowFrame.width - 20
-        let newY = screenFrame.maxY - windowFrame.height - 100
+        Logger.debug("Screen frame: \(screenFrame)")
+        Logger.debug("Current window frame: \(windowFrame)")
         
-        // Animate the position change for smooth movement
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.2
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            self.animator().setFrameOrigin(NSPoint(x: newX, y: newY))
-        }) {
-            self.windowPosition = self.frame.origin
-        }
+        // Calculate position at screen right edge, vertically centered
+        let newX = screenFrame.maxX - windowFrame.width - 20 // 20px gap from right edge
+        let newY = screenFrame.midY - (windowFrame.height / 2) // Vertically centered
+        
+        Logger.debug("Calculated position: x=\(newX), y=\(newY)")
+        
+        // Ensure the window doesn't go off screen
+        let finalY = max(screenFrame.origin.y + 20, min(newY, screenFrame.maxY - windowFrame.height - 20))
+        
+        Logger.debug("Final position: x=\(newX), y=\(finalY)")
+        
+        // Set position immediately without animation for initial positioning
+        self.setFrameOrigin(NSPoint(x: newX, y: finalY))
+        self.windowPosition = self.frame.origin
+        
+        Logger.debug("Window positioned at screen right edge, final frame: \(self.frame)")
     }
     
-    /// Get the main window frame for an application using Accessibility API
-    private func getMainWindowFrameForApplication(_ app: NSRunningApplication) -> NSRect? {
-        let pid = app.processIdentifier
-        
-        // Create accessibility element for the application
-        let appElement = AXUIElementCreateApplication(pid)
-        
-        // Get the main window
-        var mainWindow: CFTypeRef?
-        let result = AXUIElementCopyAttributeValue(appElement, kAXMainWindowAttribute as CFString, &mainWindow)
-        
-        guard result == .success, let mainWindow = mainWindow else {
-            Logger.debug("Failed to get main window for app: \(app.localizedName ?? "Unknown")")
-            return nil
-        }
-        
-        let windowElement = mainWindow as! AXUIElement
-        
-        // Get window position and size
-        var position: CFTypeRef?
-        var size: CFTypeRef?
-        
-        let posResult = AXUIElementCopyAttributeValue(windowElement, kAXPositionAttribute as CFString, &position)
-        let sizeResult = AXUIElementCopyAttributeValue(windowElement, kAXSizeAttribute as CFString, &size)
-        
-        guard posResult == .success, sizeResult == .success else {
-            Logger.debug("Failed to get window position or size for app: \(app.localizedName ?? "Unknown")")
-            return nil
-        }
-        
-        // Safely convert position and size values
-        guard let posValue = position as? CGPoint,
-              let sizeValue = size as? CGSize else {
-            Logger.debug("Failed to convert position or size values for app: \(app.localizedName ?? "Unknown")")
-            return nil
-        }
-        
-        // Convert to screen coordinates
-        let windowFrame = NSRect(origin: posValue, size: sizeValue)
-        
-        // Convert from accessibility coordinates to screen coordinates
-        // Accessibility coordinates have origin at bottom-left, screen coordinates have origin at top-left
-        let screenHeight = NSScreen.main?.frame.height ?? 0
-        let convertedOrigin = NSPoint(x: windowFrame.origin.x, y: screenHeight - windowFrame.origin.y - windowFrame.height)
-        
-        return NSRect(origin: convertedOrigin, size: windowFrame.size)
-    }
+    // Fallback positioning method removed - window is now fixed at screen right edge
     
-    /// Update window position when IM application window changes
+    // getMainWindowFrameForApplication method removed - window is now fixed at screen right edge
+    
+    /// Update window position to screen right edge
     func updatePosition() {
-        guard currentAppInfo != nil else { return }
+        Logger.debug("updatePosition called - positioning to screen right edge")
         
-        // Only auto-position if user hasn't manually moved the window
-        if !isUserMoved {
-            // Check if position actually needs updating to avoid unnecessary moves
-            let currentPosition = self.frame.origin
-            
-            // Store current position before calculating new one
-            let oldWindowPosition = windowPosition
-            
-            // Calculate what the new position should be
-            positionWindowNextToApp()
-            
-            // Only apply position if it actually changed significantly (more than 10 pixels)
-            let deltaX = abs(currentPosition.x - windowPosition.x)
-            let deltaY = abs(currentPosition.y - windowPosition.y)
-            
-            if deltaX < 10 && deltaY < 10 {
-                // Position hasn't changed significantly, restore old position to avoid flicker
-                windowPosition = oldWindowPosition
-            }
-        }
+        // Always position at screen right edge since window is fixed
+        positionWindowAtScreenRightEdge()
     }
     
     deinit {
@@ -1056,6 +1007,7 @@ class ChatTranslationData: ObservableObject {
     @Published var sessionId: String = ""
     @Published var messages: [ChatMessage] = []
     @Published var isTranslating: Bool = false
+    @Published var isUnsupportedApp: Bool = false
     
     func updateData(appName: String, sessionId: String, messages: [ChatMessage]) {
         self.appName = appName
@@ -1074,11 +1026,16 @@ class ChatTranslationData: ObservableObject {
         isTranslating = translating
     }
     
+    func setUnsupportedApp(_ unsupported: Bool) {
+        isUnsupportedApp = unsupported
+    }
+    
     func clear() {
         appName = ""
         sessionId = ""
         messages.removeAll()
         isTranslating = false
+        isUnsupportedApp = false
     }
 }
 
@@ -1090,6 +1047,7 @@ struct ChatTranslationView: View {
     var appName: String { data.appName }
     var sessionId: String { data.sessionId }
     var messages: [ChatMessage] { data.messages }
+    var isUnsupportedApp: Bool { data.isUnsupportedApp }
     
     var body: some View {
         VStack(spacing: 0) {
@@ -1128,7 +1086,31 @@ struct ChatTranslationView: View {
             ScrollViewReader { proxy in
                 ScrollView(.vertical, showsIndicators: true) {
                     LazyVStack(alignment: .leading, spacing: 8) {
-                        if messages.isEmpty {
+                        if isUnsupportedApp {
+                            // Show unsupported app message
+                            VStack(spacing: 16) {
+                                Spacer()
+                                
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .font(.system(size: 48))
+                                    .foregroundColor(.orange)
+                                
+                                Text("\(appName) isn't supported now")
+                                    .font(.title2)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.primary)
+                                    .multilineTextAlignment(.center)
+                                
+                                Text("Will coming soon")
+                                    .font(.body)
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.center)
+                                
+                                Spacer()
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .padding()
+                        } else if messages.isEmpty {
                             VStack {
                                 Spacer()
                                 
