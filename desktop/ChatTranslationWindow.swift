@@ -173,7 +173,7 @@ class ChatTranslationWindow: NSWindow {
         }
         
         // Update data instead of recreating the view
-        chatTranslationData?.updateData(appName: appName, messages: messages)
+        chatTranslationData?.updateData(appName: appName, sessionId: currentSessionId, messages: messages)
     }
     
     
@@ -327,9 +327,7 @@ class ChatTranslationWindow: NSWindow {
         stopMessageMonitoring()
         Logger.info("ChatTranslationWindow deallocating")
     }
-    
-    // MARK: - Message Monitoring
-    
+ 
     /// Start monitoring WhatsApp messages
     private func startMessageMonitoring() {
         // Start a timer to periodically check for new messages
@@ -365,11 +363,10 @@ class ChatTranslationWindow: NSWindow {
         // Set fetching flag to prevent overlapping executions
         isFetchingMessages = true
         
-        // Extract messages from WhatsApp with timestamp filtering
-        let extractedMessages = extractWhatsAppMessages(from: activeApp, filterAfterTimestamp: lastMessageTimestamp)
-        
+
         // Check if chat session has changed
         if let newSessionId = getCurrentChatSessionId() {
+            Logger.info("Current session ID: \(currentSessionId), new session ID: \(newSessionId)")
             if newSessionId != currentSessionId {
                 Logger.info("Chat session changed from '\(currentSessionId)' to '\(newSessionId)'")
                 currentSessionId = newSessionId
@@ -377,11 +374,20 @@ class ChatTranslationWindow: NSWindow {
             }
         }
         
-        if let lastTimestamp = lastMessageTimestamp {
-            Logger.info("Extracted messages filtered after timestamp: \(lastTimestamp)")
-        } else {
-            Logger.info("No timestamp filter applied - will only process truly new messages")
+        // If lastMessageTimestamp is nil, try to get it from database to avoid re-processing history
+        if lastMessageTimestamp == nil {
+            let dbManager = MessageDatabaseManager.shared
+            lastMessageTimestamp = dbManager.getLastMessageTimestamp(forApp: "WhatsApp", sessionId: currentSessionId)
+            if let lastTimestamp = lastMessageTimestamp {
+                Logger.info("Set lastMessageTimestamp from database: \(lastTimestamp)")
+            } else {
+                Logger.info("No previous messages found in database for session: \(currentSessionId)")
+            }
         }
+
+        // Extract messages from WhatsApp with timestamp filtering
+        let extractedMessages = extractWhatsAppMessages(from: activeApp, filterAfterTimestamp: lastMessageTimestamp)
+         
         
         // Only process if there are actually new messages
         if !extractedMessages.isEmpty {
@@ -405,6 +411,11 @@ class ChatTranslationWindow: NSWindow {
     /// Process new messages with translation
     private func processNewMessages(_ newMessages: [ChatMessage]) async {
         let dbManager = MessageDatabaseManager.shared
+        
+        // Show translation indicator
+        await MainActor.run {
+            chatTranslationData?.setTranslating(true)
+        }
         
         for message in newMessages {
             // Calculate content hash
@@ -477,13 +488,7 @@ class ChatTranslationWindow: NSWindow {
                 contentLanguage: finalLanguage,
                 contentTranslationLanguage: finalTranslationLanguage,
                 contentHash: contentHash
-            ) 
-            
-            Logger.info("=== Message Processing Debug ===")
-            Logger.info("Original content: '\(message.content)'")
-            Logger.info("Final translation: '\(finalTranslation ?? "nil")'")
-            Logger.info("Processed message translation: '\(processedMessage.contentTranslation ?? "nil")'")
-            Logger.info("=== End Debug ===")
+            )
             
             // Add to messages array maintaining chronological order
             messages.append(processedMessage) 
@@ -492,11 +497,16 @@ class ChatTranslationWindow: NSWindow {
             if messages.count > maxMessagesLimit {
                 messages.removeFirst() 
             }
+            
+            // Update UI immediately after each message is processed
+            await MainActor.run {
+                self.updateChatTranslationView()
+            }
         }
         
-        // Update UI on main thread
+        // Hide translation indicator after all messages are processed
         await MainActor.run {
-            self.updateChatTranslationView()
+            chatTranslationData?.setTranslating(false)
         }
     }
     
@@ -753,11 +763,11 @@ class ChatTranslationWindow: NSWindow {
         let contactName = parseContactName(from: childrenArray[0])
         Logger.info("=== WhatsApp Chat Parsing ===")
         Logger.info("Contact name: \(contactName)")
-//        Logger.info("---")
-        
+ 
+        // 不在这里更新，因为第一次启动时，需要比对SessionID的变化，这时更新后会导致加载不到
         // Update current session ID based on contact name
-        currentSessionId = contactName
-        Logger.debug("Updated session ID to: \(currentSessionId)")
+        // currentSessionId = contactName
+        // Logger.debug("Updated session ID to: \(currentSessionId)")
         
         // Parse messages from second child
         parseMessagesFromContentArea(childrenArray[1], contactName: contactName, messages: &messages, filterAfterTimestamp: filterAfterTimestamp)
@@ -1043,10 +1053,13 @@ class ChatTranslationWindow: NSWindow {
 /// Observable data model for chat translation view
 class ChatTranslationData: ObservableObject {
     @Published var appName: String = ""
+    @Published var sessionId: String = ""
     @Published var messages: [ChatMessage] = []
+    @Published var isTranslating: Bool = false
     
-    func updateData(appName: String, messages: [ChatMessage]) {
+    func updateData(appName: String, sessionId: String, messages: [ChatMessage]) {
         self.appName = appName
+        self.sessionId = sessionId
         self.messages = messages
     }
     
@@ -1057,9 +1070,15 @@ class ChatTranslationData: ObservableObject {
         }
     }
     
+    func setTranslating(_ translating: Bool) {
+        isTranslating = translating
+    }
+    
     func clear() {
         appName = ""
+        sessionId = ""
         messages.removeAll()
+        isTranslating = false
     }
 }
 
@@ -1069,6 +1088,7 @@ struct ChatTranslationView: View {
     let onClose: () -> Void
     
     var appName: String { data.appName }
+    var sessionId: String { data.sessionId }
     var messages: [ChatMessage] { data.messages }
     
     var body: some View {
@@ -1081,6 +1101,12 @@ struct ChatTranslationView: View {
                 
                 if !appName.isEmpty {
                     Text("- \(appName)")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                }
+                
+                if !sessionId.isEmpty && sessionId != "default" {
+                    Text("- \(sessionId)")
                         .font(.headline)
                         .foregroundColor(.primary)
                 }
@@ -1123,6 +1149,25 @@ struct ChatTranslationView: View {
                                     .id(message.id) // Important for scroll targeting
                             }
                             
+                            // Show translation indicator if translating
+                            if data.isTranslating {
+                                HStack {
+                                    TranslationIndicator()
+                                    Text("Translating...")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Color(NSColor.controlBackgroundColor))
+                                )
+                                .frame(maxWidth: 200)
+                                .id("translating")
+                            }
+                            
                             // Invisible anchor at the bottom
                             Color.clear
                                 .frame(height: 1)
@@ -1140,6 +1185,14 @@ struct ChatTranslationView: View {
                         }
                     }
                 }
+                .onChange(of: data.isTranslating) { isTranslating in
+                    // Auto-scroll when translation indicator appears
+                    if isTranslating {
+                        withAnimation(.easeOut(duration: 0.3)) {
+                            proxy.scrollTo("translating", anchor: .bottom)
+                        }
+                    }
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(NSColor.windowBackgroundColor))
@@ -1149,6 +1202,31 @@ struct ChatTranslationView: View {
         .frame(width: 400, height: 600)
         .background(Color(NSColor.windowBackgroundColor))
         .cornerRadius(8)
+    }
+}
+
+/// Translation status indicator with animated dots
+struct TranslationIndicator: View {
+    @State private var dotOffset: CGFloat = 0
+    
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(0..<3, id: \.self) { index in
+                Circle()
+                    .fill(Color.secondary)
+                    .frame(width: 6, height: 6)
+                    .offset(y: dotOffset)
+                    .animation(
+                        Animation.easeInOut(duration: 0.6)
+                            .repeatForever()
+                            .delay(Double(index) * 0.2),
+                        value: dotOffset
+                    )
+            }
+        }
+        .onAppear {
+            dotOffset = -8
+        }
     }
 }
 
@@ -1178,7 +1256,7 @@ struct MessageView: View {
                 HStack(spacing: 8) {
                     if !message.isFromMe {
                         Text(message.sender)
-                            .font(.caption)
+                            .font(.caption) 
                             .fontWeight(.medium)
                             .foregroundColor(.secondary)
                         
@@ -1193,13 +1271,14 @@ struct MessageView: View {
                 
                 // Message content bubble
                 VStack(alignment: .leading, spacing: 6) {
-                    // Original content
+                    // Original content - Show with lighter color and italic
                     Text(message.content)
-                        .font(.body)
-                        .foregroundColor(message.isFromMe ? .white : .primary)
+                        .font(.caption)
+                        .italic()
+                        .foregroundColor(message.isFromMe ? Color.white.opacity(0.6) : Color.secondary)
                         .textSelection(.enabled)
                     
-                    // Translation (if available)
+                    // Translation (if available) - Show with normal color and prominent
                     if let translation = message.contentTranslation,
                        !translation.isEmpty && translation != "[Translation failed]" {
                         Divider()
@@ -1207,8 +1286,7 @@ struct MessageView: View {
                         
                         Text(translation)
                             .font(.body)
-                            .italic()
-                            .foregroundColor(message.isFromMe ? Color.white.opacity(0.9) : Color.secondary)
+                            .foregroundColor(message.isFromMe ? .white : .primary)
                             .textSelection(.enabled)
                     }
                 }
