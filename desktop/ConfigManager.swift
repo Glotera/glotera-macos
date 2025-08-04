@@ -11,8 +11,12 @@ struct LanguageConfig: Codable, Equatable {
 // MARK: - App Settings Models
 struct AppSettings: Codable {
     var isReturnKeyInterceptionEnabled: Bool
+    var preferredLanguage: String
     
-    static let `default` = AppSettings(isReturnKeyInterceptionEnabled: true)
+    static let `default` = AppSettings(
+        isReturnKeyInterceptionEnabled: true,
+        preferredLanguage: Locale.current.language.languageCode?.identifier ?? "en"
+    )
 }
 
 // MARK: - Configuration Manager

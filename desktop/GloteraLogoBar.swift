@@ -151,10 +151,19 @@ struct GloteraLogoBarView: View {
     
     var body: some View {
         HStack(spacing: 8) {
-            // Glotera logo/icon
-            Image(systemName: "globe.americas.fill")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundColor(.white)
+            // Glotera logo/icon - use same icon as status bar
+            if let nsImage = NSImage(named: "StatusIcon") {
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 16, height: 16)
+                    .colorInvert() // Invert colors to make it white
+            } else {
+                // Fallback to system icon if custom icon not found
+                Image(systemName: "globe.americas.fill")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.white)
+            }
             
             // App name
             Text("Glotera")

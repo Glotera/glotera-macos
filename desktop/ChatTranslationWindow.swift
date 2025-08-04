@@ -5,6 +5,9 @@ import SwiftUI
 
 /// Chat translation floating window that appears next to IM applications
 class ChatTranslationWindow: NSWindow {
+    // Window positioning configuration
+    private static let screenRightEdgeGap: CGFloat = 5 // Gap from screen right edge in pixels
+    
     private var hostingView: NSHostingView<ChatTranslationView>?
     private var chatTranslationData: ChatTranslationData?
     private var currentAppInfo: AppInfo?
@@ -25,7 +28,7 @@ class ChatTranslationWindow: NSWindow {
         
         // Calculate initial position at screen right edge
         let screenFrame = NSScreen.main?.visibleFrame ?? NSRect.zero
-        let initialX = screenFrame.maxX - initialSize.width - 10
+        let initialX = screenFrame.maxX - initialSize.width - ChatTranslationWindow.screenRightEdgeGap
         let initialY = screenFrame.midY - (initialSize.height / 2)
         
         super.init(
@@ -244,7 +247,7 @@ class ChatTranslationWindow: NSWindow {
         Logger.debug("Current window frame: \(windowFrame)")
         
         // Calculate position at screen right edge, vertically centered
-        let newX = screenFrame.maxX - windowFrame.width - 20 // 20px gap from right edge
+        let newX = screenFrame.maxX - windowFrame.width - ChatTranslationWindow.screenRightEdgeGap
         let newY = screenFrame.midY - (windowFrame.height / 2) // Vertically centered
         
         Logger.debug("Calculated position: x=\(newX), y=\(newY)")
@@ -463,9 +466,22 @@ class ChatTranslationWindow: NSWindow {
     
     /// Get user's preferred language for translation
     private func getUserPreferredLanguage() -> String {
-        // Check system locale to determine user's preferred language
+        // Get user's preferred language from settings
+        let appSettings = ConfigManager.shared.loadAppSettings()
+        let preferredLanguage = appSettings.preferredLanguage
+        
+        Logger.debug("User preferred language from settings: \(preferredLanguage)")
+        
+        // Return the user's preferred language, or fallback to system language if not set
+        if !preferredLanguage.isEmpty && preferredLanguage != "en" {
+            return preferredLanguage
+        }
+        
+        // Fallback to system locale if no preference is set
         let locale = Locale.current
         let languageCode = locale.language.languageCode?.identifier ?? "en"
+        
+        Logger.debug("Fallback to system language: \(languageCode)")
         
         // Map common language codes to our supported languages
         switch languageCode {

@@ -456,6 +456,12 @@ class ChatTranslationManager: NSObject {
             return
         }
         
+        // Check if this is Glotera app itself - if so, don't hide translation window
+        if bundleId == "ai.glotera.desktop" {
+            Logger.debug("Glotera app activated - keeping translation window visible")
+            return
+        }
+        
         // Check if this is a supported chat application using AppDetectionManager
         let isChatApp = AppDetectionManager.shared.isChatApp(bundleId: bundleId)
         Logger.debug("AppDetectionManager.isChatApp(\(bundleId)) = \(isChatApp)")

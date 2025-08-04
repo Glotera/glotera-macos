@@ -56,14 +56,6 @@ class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(checkUpdatesItem) 
 
         menu.addItem(NSMenuItem.separator())
-        
-        // Chat Translation menu
-        let isChatTranslationEnabled = ChatTranslationManager.shared.isChatTranslationEnabled()
-        let chatTranslationItem = NSMenuItem(title: "Chat Translation: \(isChatTranslationEnabled ? "ON" : "OFF")", action: #selector(toggleChatTranslation), keyEquivalent: "")
-        chatTranslationItem.target = self
-        menu.addItem(chatTranslationItem)
-
-        menu.addItem(NSMenuItem.separator())
 
         let userGuideItem = NSMenuItem(title: "User Guide", action: #selector(openUserGuide), keyEquivalent: "")
         userGuideItem.target = self
@@ -1093,22 +1085,7 @@ class MenuBarController: NSObject, NSMenuDelegate {
         constructMenu()
     }
     
-    // MARK: - Chat Translation
-    
-    @objc private func toggleChatTranslation() {
-        let isCurrentlyEnabled = ChatTranslationManager.shared.isChatTranslationEnabled()
-        
-        if isCurrentlyEnabled {
-            ChatTranslationManager.shared.disable()
-        } else {
-            ChatTranslationManager.shared.enable()
-        }
-        
-        // Reconstruct menu to update the toggle state
-        constructMenu()
-        
-        Logger.info("Chat translation toggled: \(isCurrentlyEnabled ? "OFF" : "ON")")
-    }
+
     
     // MARK: - NSMenuDelegate
     
