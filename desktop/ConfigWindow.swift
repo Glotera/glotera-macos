@@ -1,16 +1,23 @@
 import SwiftUI
 import Cocoa
 
+// Simple language structure for picker
+struct SimpleLanguage: Identifiable {
+    let id = UUID()
+    let code: String
+    let name: String
+}
+
 // Configuration categories
 enum ConfigCategory: String, CaseIterable {
     case languageTriggers = "Language Triggers"
-    case keyboardSettings = "Keyboard Settings"
+    case favoriteSettings = "Favorite Settings"
     case about = "About Glotera"
     
     var systemImage: String {
         switch self {
         case .languageTriggers: return "globe"
-        case .keyboardSettings: return "keyboard"
+        case .favoriteSettings: return "heart"
         case .about: return "info.circle"
         }
     }
@@ -157,8 +164,8 @@ struct LanguageConfigView: View {
                     switch selectedCategory {
                     case .languageTriggers:
                         LanguageTriggersView(viewModel: viewModel)
-                    case .keyboardSettings:
-                        KeyboardSettingsView(viewModel: viewModel)
+                    case .favoriteSettings:
+                        FavoriteSettingsView(viewModel: viewModel)
                     case .about:
                         AboutView()
                     }
@@ -252,13 +259,48 @@ struct LanguageTriggersView: View {
     }
 }
 
-// Keyboard Settings Configuration View
-struct KeyboardSettingsView: View {
+// Favorite Settings Configuration View
+struct FavoriteSettingsView: View {
     @ObservedObject var viewModel: LanguageConfigViewModel
     
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Preferred Language")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                    
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Auto Translation Language:")
+                                .font(.system(size: 13, weight: .medium))
+                            
+                            Spacer()
+                        }
+                        
+                        Picker("Select Language", selection: $viewModel.preferredLanguage) {
+                            ForEach(viewModel.availableLanguages, id: \.code) { language in
+                                Text(language.name)
+                                    .tag(language.code)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .frame(width: 200)
+                        .onChange(of: viewModel.preferredLanguage) { newValue in
+                            viewModel.updatePreferredLanguage(language: newValue)
+                        }
+                        
+                        Text("This language will be used for automatic translation when no specific language is specified.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding()
+                    .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
+                    .cornerRadius(8)
+                }
+                
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Return Key Behavior")
                         .font(.headline)
@@ -283,20 +325,6 @@ struct KeyboardSettingsView: View {
                     .padding()
                     .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
                     .cornerRadius(8)
-                }
-                
-                // Add more keyboard settings here in the future
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Additional Settings")
-                        .font(.headline)
-                        .fontWeight(.semibold)
-                    
-                    Text("More keyboard and input settings will be available in future updates.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .padding()
-                        .background(Color(NSColor.controlBackgroundColor).opacity(0.3))
-                        .cornerRadius(8)
                 }
             }
             .padding()
@@ -497,9 +525,17 @@ class LanguageConfigViewModel: ObservableObject {
     @Published var searchText: String = ""
     @Published var hasUnsavedChanges: Bool = false
     @Published var isReturnKeyInterceptionEnabled: Bool = true
+    @Published var preferredLanguage: String = "en"
     
     private var originalConfigs: [LanguageConfig] = []
     private var originalReturnKeyInterception: Bool = true
+    private var originalPreferredLanguage: String = "en"
+    
+    // Available languages for picker
+    var availableLanguages: [SimpleLanguage] {
+        return configs.map { SimpleLanguage(code: $0.code, name: $0.name) }
+            .sorted { $0.name < $1.name }
+    }
     
     var filteredConfigs: [LanguageConfig] {
         if searchText.isEmpty {
@@ -514,12 +550,15 @@ class LanguageConfigViewModel: ObservableObject {
     }
     
     func loadConfigs() {
-                    configs = ConfigManager.shared.loadLanguageConfigs()
+        configs = ConfigManager.shared.loadLanguageConfigs()
         originalConfigs = configs
         
         let appSettings = ConfigManager.shared.loadAppSettings()
         isReturnKeyInterceptionEnabled = appSettings.isReturnKeyInterceptionEnabled
         originalReturnKeyInterception = isReturnKeyInterceptionEnabled
+        
+        preferredLanguage = appSettings.preferredLanguage
+        originalPreferredLanguage = appSettings.preferredLanguage
         
         hasUnsavedChanges = false
         Logger.info("Loaded \(configs.count) language configurations and app settings for configuration window")
@@ -542,6 +581,11 @@ class LanguageConfigViewModel: ObservableObject {
         checkForChanges()
     }
     
+    func updatePreferredLanguage(language: String) {
+        preferredLanguage = language
+        checkForChanges()
+    }
+    
     func saveConfigs() {
         var success = true
         
@@ -554,11 +598,16 @@ class LanguageConfigViewModel: ObservableObject {
         }
         
         // Save app settings
-        if isReturnKeyInterceptionEnabled != originalReturnKeyInterception {
-            let settings = AppSettings(isReturnKeyInterceptionEnabled: isReturnKeyInterceptionEnabled)
+        if isReturnKeyInterceptionEnabled != originalReturnKeyInterception || 
+           preferredLanguage != originalPreferredLanguage {
+            let settings = AppSettings(
+                isReturnKeyInterceptionEnabled: isReturnKeyInterceptionEnabled,
+                preferredLanguage: preferredLanguage
+            )
             success = ConfigManager.shared.saveAppSettings(settings) && success
             if success {
                 originalReturnKeyInterception = isReturnKeyInterceptionEnabled
+                originalPreferredLanguage = preferredLanguage
             }
         }
         
@@ -612,7 +661,8 @@ class LanguageConfigViewModel: ObservableObject {
     
     private func checkForChanges() {
         hasUnsavedChanges = !areConfigsEqual(configs, originalConfigs) ||
-                           isReturnKeyInterceptionEnabled != originalReturnKeyInterception
+                           isReturnKeyInterceptionEnabled != originalReturnKeyInterception ||
+                           preferredLanguage != originalPreferredLanguage
     }
     
     private func areConfigsEqual(_ configs1: [LanguageConfig], _ configs2: [LanguageConfig]) -> Bool {
