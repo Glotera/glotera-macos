@@ -349,6 +349,10 @@ class AppDetectionManager {
         return bundleId.contains("wechat") || bundleId.contains("WeChat")
     }
     
+    func isWhatsAppApp(bundleId: String) -> Bool {
+        return bundleId == "net.whatsapp.WhatsApp"
+    }
+    
     /// Check if current application is WhatsApp
     func isWhatsAppApp() -> Bool {
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
@@ -737,6 +741,21 @@ class AppDetectionManager {
                 Logger.debug("Successfully accessed Chrome element attribute: \(attribute)")
                 // 不需要处理返回值，目的只是触发权限检查
             }
+        }
+    }
+
+    func getChatAppName(bundleId: String) -> String { 
+        switch bundleId {
+        case "net.whatsapp.WhatsApp":
+            return "WhatsApp"
+        case "com.tencent.xinWeChat":
+            return "WeChat"
+        case "com.alibaba.DingTalkMac":
+            return "DingTalk"
+        case "net.whatsapp.WhatsApp":
+            return "WhatsApp"
+        default:
+            return ""
         }
     }
 } 

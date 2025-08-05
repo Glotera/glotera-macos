@@ -3,8 +3,8 @@ import SQLite3
 import CryptoKit
 
 /// Manager for SQLite database operations for chat messages
-class MessageDatabaseManager {
-    static let shared = MessageDatabaseManager()
+class DatabaseManager {
+    static let shared = DatabaseManager()
     
     private var db: OpaquePointer?
     private let dbPath: String
@@ -23,11 +23,16 @@ class MessageDatabaseManager {
         Logger.info("Database path: \(dbPath)")
         
         openDatabase()
-        createTable()
+        initializeDatabase()
     }
     
     deinit {
         closeDatabase()
+    }
+    
+    /// Get the database connection for use by other managers
+    func getDatabase() -> OpaquePointer? {
+        return db
     }
     
     /// Open database connection
@@ -48,11 +53,158 @@ class MessageDatabaseManager {
         }
     }
     
-    /// Create messages table if it doesn't exist
-    private func createTable() {
-        let createTableSQL = """
+    /// Initialize database from desktop.sql file
+    private func initializeDatabase() {
+        guard let sqlFileURL = Bundle.main.url(forResource: "desktop", withExtension: "sql") else {
+            Logger.error("desktop.sql file not found in bundle")
+            fallbackCreateTables()
+            return
+        }
+        
+        do {
+            let sqlContent = try String(contentsOf: sqlFileURL, encoding: .utf8)
+            Logger.info("Loaded desktop.sql from bundle")
+            
+            // Split SQL content into statements
+            let statements = parseSQLStatements(from: sqlContent)
+            
+            // Execute table creation and index statements
+            let tableStatements = statements.filter { statement in
+                let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                return trimmed.hasPrefix("CREATE TABLE") || trimmed.hasPrefix("CREATE INDEX")
+            }
+            
+            for statement in tableStatements {
+                let result = sqlite3_exec(db, statement, nil, nil, nil)
+                if result == SQLITE_OK {
+                    let tableName = extractTableName(from: statement)
+                    Logger.info("Successfully created table/index: \(tableName)")
+                } else {
+                    let errorMsg = String(cString: sqlite3_errmsg(db))
+                    Logger.error("Failed to execute statement: \(errorMsg) (code: \(result))")
+                    Logger.error("Statement: \(statement.prefix(100))...")
+                }
+            }
+            
+            // Initialize language_configs table only if it's empty
+            initializeLanguageConfigsIfNeeded(from: statements)
+            
+        } catch {
+            Logger.error("Failed to read desktop.sql: \(error.localizedDescription)")
+            fallbackCreateTables()
+        }
+    }
+    
+    /// Parse SQL content into individual statements
+    private func parseSQLStatements(from content: String) -> [String] {
+        var statements: [String] = []
+        var currentStatement = ""
+        
+        let lines = content.components(separatedBy: .newlines)
+        
+        for line in lines {
+            let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            
+            // Skip comments
+            if trimmedLine.hasPrefix("--") {
+                continue
+            }
+            
+            // Skip empty lines
+            if trimmedLine.isEmpty {
+                continue
+            }
+            
+            currentStatement += line + "\n"
+            
+            // Check if statement is complete (ends with semicolon)
+            if trimmedLine.hasSuffix(";") {
+                statements.append(currentStatement.trimmingCharacters(in: .whitespacesAndNewlines))
+                currentStatement = ""
+            }
+        }
+        
+        // Add remaining statement if any
+        if !currentStatement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            statements.append(currentStatement.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        
+        return statements
+    }
+    
+    /// Extract table name from CREATE TABLE statement
+    private func extractTableName(from statement: String) -> String {
+        let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.uppercased().hasPrefix("CREATE TABLE") {
+            let components = trimmed.components(separatedBy: .whitespacesAndNewlines)
+            for (index, component) in components.enumerated() {
+                if component.uppercased() == "TABLE" && index + 1 < components.count {
+                    let tableName = components[index + 1].replacingOccurrences(of: "IF", with: "").replacingOccurrences(of: "NOT", with: "").replacingOccurrences(of: "EXISTS", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    return tableName
+                }
+            }
+        } else if trimmed.uppercased().hasPrefix("CREATE INDEX") {
+            let components = trimmed.components(separatedBy: .whitespacesAndNewlines)
+            for (index, component) in components.enumerated() {
+                if component.uppercased() == "INDEX" && index + 1 < components.count {
+                    let indexName = components[index + 1].replacingOccurrences(of: "IF", with: "").replacingOccurrences(of: "NOT", with: "").replacingOccurrences(of: "EXISTS", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    return indexName
+                }
+            }
+        }
+        return "unknown"
+    }
+    
+    /// Initialize language_configs table with data if it's empty
+    private func initializeLanguageConfigsIfNeeded(from statements: [String]) {
+        // Check if language_configs table has any data
+        let countSQL = "SELECT COUNT(*) FROM language_configs;"
+        var statement: OpaquePointer?
+        
+        guard sqlite3_prepare_v2(db, countSQL, -1, &statement, nil) == SQLITE_OK else {
+            Logger.error("Failed to prepare count query for language_configs")
+            return
+        }
+        
+        defer { sqlite3_finalize(statement) }
+        
+        var count = 0
+        if sqlite3_step(statement) == SQLITE_ROW {
+            count = Int(sqlite3_column_int(statement, 0))
+        }
+        
+        if count == 0 {
+            Logger.info("language_configs table is empty, initializing with data from desktop.sql")
+            
+            // Find and execute INSERT statements for language_configs
+            let insertStatements = statements.filter { statement in
+                let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                return trimmed.hasPrefix("INSERT INTO LANGUAGE_CONFIGS")
+            }
+            
+            for insertStatement in insertStatements {
+                let result = sqlite3_exec(db, insertStatement, nil, nil, nil)
+                if result == SQLITE_OK {
+                    Logger.info("Successfully inserted language config data")
+                } else {
+                    let errorMsg = String(cString: sqlite3_errmsg(db))
+                    Logger.error("Failed to insert language config data: \(errorMsg)")
+                    Logger.error("Statement: \(insertStatement.prefix(200))...")
+                }
+            }
+        } else {
+            Logger.info("language_configs table already contains \(count) records, skipping initialization")
+        }
+    }
+    
+    /// Fallback table creation if desktop.sql is not available
+    private func fallbackCreateTables() {
+        Logger.info("Using fallback table creation")
+        
+        let createTablesSQL = """
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
                 sender TEXT NOT NULL,
                 content TEXT NOT NULL,
                 content_hash TEXT NOT NULL,
@@ -61,65 +213,45 @@ class MessageDatabaseManager {
                 content_translation_language TEXT NOT NULL,
                 content_timestamp TIMESTAMP NOT NULL,
                 chat_app TEXT NOT NULL,
-                session_id TEXT NOT NULL,
-                created_time TIMESTAMP NOT NULL,
-                updated_time TIMESTAMP NOT NULL
+                created_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
             
-            CREATE INDEX IF NOT EXISTS idx_content_hash ON messages(content_hash);
-            CREATE INDEX IF NOT EXISTS idx_chat_app ON messages(chat_app);
-            CREATE INDEX IF NOT EXISTS idx_session_id ON messages(session_id);
-            CREATE INDEX IF NOT EXISTS idx_content_timestamp ON messages(content_timestamp);
+            CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages (session_id);
+            CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages (sender);
+            CREATE INDEX IF NOT EXISTS idx_messages_content_hash ON messages (content_hash);
+            CREATE INDEX IF NOT EXISTS idx_messages_content_timestamp ON messages (content_timestamp);
+            CREATE INDEX IF NOT EXISTS idx_messages_chat_app ON messages (chat_app);
+            
+            CREATE TABLE IF NOT EXISTS language_configs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                lang_name TEXT NOT NULL,
+                lang_native_name TEXT NOT NULL,
+                lang_iso639 TEXT NOT NULL,
+                lang_bcp47 TEXT NOT NULL,
+                popular INTEGER NOT NULL,
+                triggers TEXT NOT NULL,
+                created_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            
+            CREATE TABLE IF NOT EXISTS configs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                config_key TEXT NOT NULL,
+                config_value TEXT NOT NULL,
+                created_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
         """
         
-        let result = sqlite3_exec(db, createTableSQL, nil, nil, nil)
+        let result = sqlite3_exec(db, createTablesSQL, nil, nil, nil)
         if result == SQLITE_OK {
-            Logger.info("Messages table created successfully")
+            Logger.info("Fallback tables created successfully")
         } else {
             let errorMsg = String(cString: sqlite3_errmsg(db))
-            Logger.error("Failed to create messages table: \(errorMsg) (code: \(result))")
+            Logger.error("Failed to create fallback tables: \(errorMsg) (code: \(result))")
         }
-        
-        // Check if session_id column exists, if not add it
-//        addSessionIdColumnIfNeeded()
     }
-    
-    /// Add session_id column if it doesn't exist (for database migration)
-//    private func addSessionIdColumnIfNeeded() {
-//        // Check if session_id column exists
-//        let checkColumnSQL = "PRAGMA table_info(messages);"
-//        var statement: OpaquePointer?
-//        var hasSessionIdColumn = false
-//        
-//        guard sqlite3_prepare_v2(db, checkColumnSQL, -1, &statement, nil) == SQLITE_OK else {
-//            Logger.error("Failed to check table schema")
-//            return
-//        }
-//        
-//        defer { sqlite3_finalize(statement) }
-//        
-//        while sqlite3_step(statement) == SQLITE_ROW {
-//            let columnName = String(cString: sqlite3_column_text(statement, 1))
-//            if columnName == "session_id" {
-//                hasSessionIdColumn = true
-//                break
-//            }
-//        }
-//        
-//        if !hasSessionIdColumn {
-//            Logger.info("Adding session_id column to messages table...")
-//            let alterTableSQL = "ALTER TABLE messages ADD COLUMN session_id TEXT NOT NULL DEFAULT 'default';"
-//            let result = sqlite3_exec(db, alterTableSQL, nil, nil, nil)
-//            if result == SQLITE_OK {
-//                Logger.info("Successfully added session_id column")
-//            } else {
-//                let errorMsg = String(cString: sqlite3_errmsg(db))
-//                Logger.error("Failed to add session_id column: \(errorMsg)")
-//            }
-//        } else {
-//            Logger.info("session_id column already exists")
-//        }
-//    }
     
     /// Calculate SHA256 hash of content for deduplication
     func calculateContentHash(_ content: String) -> String {

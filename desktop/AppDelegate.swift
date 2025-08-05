@@ -31,6 +31,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 初始化配额管理器 - 这将设置配额委托
         _ = QuotaManager.shared
         
+        // Initialize database manager (creates tables and loads schema from desktop.sql)
+        _ = DatabaseManager.shared
+        
         // Initialize simple memory manager for translation windows
         _ = SimpleMemoryManager.shared
         

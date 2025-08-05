@@ -141,14 +141,6 @@ struct LanguageConfigView: View {
                         .buttonStyle(.bordered)
                     }
                     
-                    // Only show Save button for configurable categories
-                    if selectedCategory != .about {
-                        Button("Save") {
-                            viewModel.saveConfigs()
-                        }
-                        .buttonStyle(.borderedProminent)
-                    }
-                    
                     Button("Close") {
                         onClose()
                     }
@@ -173,24 +165,13 @@ struct LanguageConfigView: View {
                 
                 // Bottom status bar
                 HStack {
-                    if viewModel.hasUnsavedChanges {
-                        HStack {
-                            Image(systemName: "circle.fill")
-                                .foregroundColor(.orange)
-                                .font(.caption)
-                            Text("Unsaved changes")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    } else {
-                        HStack {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(.green)
-                                .font(.caption)
-                            Text("All changes saved")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                            .font(.caption)
+                        Text("Changes saved automatically")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
                     
                     Spacer()
@@ -262,23 +243,20 @@ struct LanguageTriggersView: View {
 // Favorite Settings Configuration View
 struct FavoriteSettingsView: View {
     @ObservedObject var viewModel: LanguageConfigViewModel
+    @State private var newLanguageSearch: String = ""
+    @State private var showingLanguagePicker: Bool = false
     
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                // Preferred Language Section
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Preferred Language")
                         .font(.headline)
                         .fontWeight(.semibold)
                     
                     VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("Auto Translation Language:")
-                                .font(.system(size: 13, weight: .medium))
-                            
-                            Spacer()
-                        }
-                        
+                         
                         Picker("Select Language", selection: $viewModel.preferredLanguage) {
                             ForEach(viewModel.availableLanguages, id: \.code) { language in
                                 Text(language.name)
@@ -291,7 +269,7 @@ struct FavoriteSettingsView: View {
                             viewModel.updatePreferredLanguage(language: newValue)
                         }
                         
-                        Text("This language will be used for automatic translation when no specific language is specified.")
+                        Text("The received message will be translated to your preferred language if it is not the same as yours")
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -301,23 +279,171 @@ struct FavoriteSettingsView: View {
                     .cornerRadius(8)
                 }
                 
+                                // Translation Rules Section
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Return Key Behavior")
+                    Text("Auto Translation Rules")
                         .font(.headline)
                         .fontWeight(.semibold)
                     
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        // Rule Type Selection
                         HStack {
-                            Toggle("Enable Return Key Interception for Auto Translation", 
-                                   isOn: $viewModel.isReturnKeyInterceptionEnabled)
-                                .onChange(of: viewModel.isReturnKeyInterceptionEnabled) { newValue in
-                                    viewModel.updateReturnKeyInterception(enabled: newValue)
+                            Picker("", selection: $viewModel.translationRuleType) {
+                                Text("Includes").tag("includes")
+                                Text("Excludes").tag("excludes")
+                            }
+                            .pickerStyle(.segmented)
+                            .frame(width: 200)
+                            .onChange(of: viewModel.translationRuleType) { newValue in
+                                viewModel.updateTranslationRuleType(newValue)
+                            }
+                            
+                            Spacer()
+                        }
+                        
+                        // Rule Description
+                        Text(viewModel.translationRuleType == "includes" ? 
+                             "Only translate content in the selected languages below." :
+                             "Translate content in all languages except the selected ones below and your preferred language.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        
+                        // Language Search and Add
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                TextField("Search and add languages...", text: $newLanguageSearch)
+                                    .textFieldStyle(.roundedBorder)
+                                    .onSubmit {
+                                        addLanguageFromSearch()
+                                    }
+                                    .onChange(of: newLanguageSearch) { _ in
+                                        viewModel.updateLanguageSuggestions(searchText: newLanguageSearch)
+                                    }
+                                
+                                Button("Add") {
+                                    addLanguageFromSearch()
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(newLanguageSearch.isEmpty)
+                            }
+                            
+                            // Language Suggestions Dropdown
+                            if !viewModel.languageSuggestions.isEmpty && !newLanguageSearch.isEmpty {
+                                VStack(alignment: .leading, spacing: 0) {
+                                    ForEach(viewModel.languageSuggestions, id: \.code) { language in
+                                        Button(action: {
+                                            selectLanguageSuggestion(language)
+                                        }) {
+                                            HStack {
+                                                Text(language.name)
+                                                    .font(.system(size: 12))
+                                                Spacer()
+                                                Text(language.code)
+                                                    .font(.system(size: 10))
+                                                    .foregroundColor(.secondary)
+                                            }
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 6)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .background(Color(NSColor.controlBackgroundColor))
+                                        
+                                        if language.code != viewModel.languageSuggestions.last?.code {
+                                            Divider()
+                                                .padding(.leading, 8)
+                                        }
+                                    }
+                                }
+                                .background(Color(NSColor.controlBackgroundColor))
+                                .cornerRadius(6)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                                )
+                                .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
+                            }
+                        }
+                        
+                        // Selected Languages List
+                        let currentLanguages = viewModel.translationRuleType == "includes" ? viewModel.translationRuleLanguagesIncludes : viewModel.translationRuleLanguagesExcludes
+                        let displayLanguages = viewModel.translationRuleType == "excludes" ? 
+                            currentLanguages + [viewModel.preferredLanguage] : currentLanguages
+                        
+                        if !displayLanguages.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Selected Languages for \(viewModel.translationRuleType.capitalized):")
+                                    .font(.system(size: 13, weight: .medium))
+                                
+                                LazyVGrid(columns: [
+                                    GridItem(.adaptive(minimum: 150))
+                                ], spacing: 8) {
+                                    ForEach(displayLanguages, id: \.self) { languageCode in
+                                        HStack {
+                                            Text(getLanguageName(for: languageCode))
+                                                .font(.system(size: 12))
+                                                .foregroundColor(languageCode == viewModel.preferredLanguage && viewModel.translationRuleType == "excludes" ? .secondary : .primary)
+                                            
+                                            Spacer()
+                                            
+                                            if languageCode != viewModel.preferredLanguage || viewModel.translationRuleType == "includes" {
+                                                Button(action: {
+                                                    removeLanguage(languageCode)
+                                                }) {
+                                                    Image(systemName: "xmark.circle.fill")
+                                                        .foregroundColor(.red)
+                                                        .font(.system(size: 12))
+                                                }
+                                                .buttonStyle(.plain)
+                                            }
+                                        }
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(languageCode == viewModel.preferredLanguage && viewModel.translationRuleType == "excludes" ? 
+                                                   Color.green.opacity(0.1) : Color(NSColor.controlBackgroundColor))
+                                        .cornerRadius(6)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .padding()
+                    .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
+                    .cornerRadius(8)
+                }
+                
+                // Return Key Translation Section
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Return Key Interception")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                    
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Toggle("With Trigger", isOn: $viewModel.returnKeyWithTrigger)
+                                .onChange(of: viewModel.returnKeyWithTrigger) { newValue in
+                                    viewModel.updateReturnKeyWithTrigger(enabled: newValue)
                                 }
                             
                             Spacer()
                         }
                         
-                        Text("When enabled, pressing Return key in input fields will trigger automatic translation and send the translated text.")
+                        Text("When enabled, pressing Return key will automatically translate content when a trigger (like @zh) is detected in the input.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        
+                        HStack {
+                            Toggle("Without Trigger", isOn: $viewModel.returnKeyWithoutTrigger)
+                                .onChange(of: viewModel.returnKeyWithoutTrigger) { newValue in
+                                    viewModel.updateReturnKeyWithoutTrigger(enabled: newValue)
+                                }
+                            
+                            Spacer()
+                        }
+                        
+                        Text("When enabled and the translation sidebar is open, pressing Return key will automatically translate content to sender's language without needing to type a trigger.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -331,6 +457,91 @@ struct FavoriteSettingsView: View {
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
     }
+    
+    private func getLanguageName(for code: String) -> String {
+        return viewModel.availableLanguages.first { $0.code == code }?.name ?? code
+    }
+    
+    private func addLanguageFromSearch() {
+        guard !newLanguageSearch.isEmpty else { return }
+        
+        // Search for matching language
+        let searchTerm = newLanguageSearch.lowercased()
+        if let language = viewModel.availableLanguages.first(where: { language in
+            language.name.lowercased().contains(searchTerm) ||
+            language.code.lowercased().contains(searchTerm)
+        }) {
+            // Don't add if it's the preferred language (it's automatically included in excludes mode)
+            if language.code != viewModel.preferredLanguage {
+                if viewModel.translationRuleType == "includes" {
+                    // Don't add if already in the includes list
+                    if !viewModel.translationRuleLanguagesIncludes.contains(language.code) {
+                        var updatedLanguages = viewModel.translationRuleLanguagesIncludes
+                        updatedLanguages.append(language.code)
+                        viewModel.updateTranslationRuleLanguagesIncludes(updatedLanguages)
+                    }
+                } else {
+                    // Don't add if already in the excludes list
+                    if !viewModel.translationRuleLanguagesExcludes.contains(language.code) {
+                        var updatedLanguages = viewModel.translationRuleLanguagesExcludes
+                        updatedLanguages.append(language.code)
+                        viewModel.updateTranslationRuleLanguagesExcludes(updatedLanguages)
+                    }
+                }
+            } else if viewModel.translationRuleType == "excludes" {
+                // Show a message that preferred language is automatically included
+                Logger.info("Preferred language is automatically included in excludes mode")
+            }
+        }
+        
+        newLanguageSearch = ""
+        viewModel.languageSuggestions = []
+    }
+    
+    private func selectLanguageSuggestion(_ language: SimpleLanguage) {
+        // Don't add if it's the preferred language (it's automatically included in excludes mode)
+        if language.code != viewModel.preferredLanguage {
+            if viewModel.translationRuleType == "includes" {
+                // Don't add if already in the includes list
+                if !viewModel.translationRuleLanguagesIncludes.contains(language.code) {
+                    var updatedLanguages = viewModel.translationRuleLanguagesIncludes
+                    updatedLanguages.append(language.code)
+                    viewModel.updateTranslationRuleLanguagesIncludes(updatedLanguages)
+                }
+            } else {
+                // Don't add if already in the excludes list
+                if !viewModel.translationRuleLanguagesExcludes.contains(language.code) {
+                    var updatedLanguages = viewModel.translationRuleLanguagesExcludes
+                    updatedLanguages.append(language.code)
+                    viewModel.updateTranslationRuleLanguagesExcludes(updatedLanguages)
+                }
+            }
+        } else if viewModel.translationRuleType == "excludes" {
+            // Show a message that preferred language is automatically included
+            Logger.info("Preferred language is automatically included in excludes mode")
+        }
+        
+        newLanguageSearch = ""
+        viewModel.languageSuggestions = []
+    }
+    
+    private func removeLanguage(_ languageCode: String) {
+        // Don't allow removing preferred language in excludes mode
+        if languageCode == viewModel.preferredLanguage && viewModel.translationRuleType == "excludes" {
+            Logger.info("Cannot remove preferred language from excludes mode - it's automatically included")
+            return
+        }
+        
+        if viewModel.translationRuleType == "includes" {
+            var updatedLanguages = viewModel.translationRuleLanguagesIncludes
+            updatedLanguages.removeAll { $0 == languageCode }
+            viewModel.updateTranslationRuleLanguagesIncludes(updatedLanguages)
+        } else {
+            var updatedLanguages = viewModel.translationRuleLanguagesExcludes
+            updatedLanguages.removeAll { $0 == languageCode }
+            viewModel.updateTranslationRuleLanguagesExcludes(updatedLanguages)
+        }
+    }
 }
 
 // Single language configuration row
@@ -338,14 +549,14 @@ struct LanguageConfigRow: View {
     let config: LanguageConfig
     let onTriggersChanged: ([String]) -> Void
     
-    @State private var triggers: [String]
+    @State private var triggers: [String] = []
     @State private var newTrigger: String = ""
     @State private var isExpanded: Bool = false
+    @State private var isLoading: Bool = true
     
     init(config: LanguageConfig, onTriggersChanged: @escaping ([String]) -> Void) {
         self.config = config
         self.onTriggersChanged = onTriggersChanged
-        self._triggers = State(initialValue: config.triggers)
     }
     
     private var popularityColor: Color {
@@ -392,20 +603,34 @@ struct LanguageConfigRow: View {
                     
                     // Trigger preview
                     HStack {
-                        ForEach(Array(triggers.prefix(3)), id: \.self) { trigger in
-                            Text(trigger)
-                                .font(.caption)
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 1)
-                                .background(Color.blue.opacity(0.1))
-                                .foregroundColor(.blue)
-                                .cornerRadius(3)
-                        }
-                        
-                        if triggers.count > 3 {
-                            Text("...")
+                        if isLoading {
+                            ProgressView()
+                                .scaleEffect(0.5)
+                            Text("Loading triggers...")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
+                        } else {
+                            ForEach(Array(triggers.prefix(3)), id: \.self) { trigger in
+                                Text(trigger)
+                                    .font(.caption)
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 1)
+                                    .background(Color.blue.opacity(0.1))
+                                    .foregroundColor(.blue)
+                                    .cornerRadius(3)
+                            }
+                            
+                            if triggers.count > 3 {
+                                Text("...")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            if triggers.isEmpty {
+                                Text("No triggers")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
                         }
                         
                         Spacer()
@@ -501,6 +726,9 @@ struct LanguageConfigRow: View {
                 .foregroundColor(Color(NSColor.separatorColor)),
             alignment: .bottom
         )
+        .onAppear {
+            loadTriggersFromDatabase()
+        }
     }
     
     private func addNewTrigger() {
@@ -517,19 +745,34 @@ struct LanguageConfigRow: View {
         triggers.remove(at: index)
         onTriggersChanged(triggers)
     }
+    
+    private func loadTriggersFromDatabase() {
+        isLoading = true
+        
+        // Load triggers from database on a background queue
+        DispatchQueue.global(qos: .userInitiated).async {
+            let loadedTriggers = ConfigManager.shared.loadLanguageTriggers(languageCode: config.code)
+            
+            // Update UI on main queue
+            DispatchQueue.main.async {
+                self.triggers = loadedTriggers
+                self.isLoading = false
+            }
+        }
+    }
 }
 
 // ViewModel
 class LanguageConfigViewModel: ObservableObject {
     @Published var configs: [LanguageConfig] = []
     @Published var searchText: String = ""
-    @Published var hasUnsavedChanges: Bool = false
-    @Published var isReturnKeyInterceptionEnabled: Bool = true
-    @Published var preferredLanguage: String = "en"
-    
-    private var originalConfigs: [LanguageConfig] = []
-    private var originalReturnKeyInterception: Bool = true
-    private var originalPreferredLanguage: String = "en"
+    @Published var preferredLanguage: String = Locale.current.language.languageCode?.identifier ?? "en"
+    @Published var translationRuleType: String = "excludes"
+    @Published var translationRuleLanguagesIncludes: [String] = []
+    @Published var translationRuleLanguagesExcludes: [String] = []
+    @Published var returnKeyWithTrigger: Bool = true
+    @Published var returnKeyWithoutTrigger: Bool = true
+    @Published var languageSuggestions: [SimpleLanguage] = []
     
     // Available languages for picker
     var availableLanguages: [SimpleLanguage] {
@@ -551,95 +794,113 @@ class LanguageConfigViewModel: ObservableObject {
     
     func loadConfigs() {
         configs = ConfigManager.shared.loadLanguageConfigs()
-        originalConfigs = configs
         
         let appSettings = ConfigManager.shared.loadAppSettings()
-        isReturnKeyInterceptionEnabled = appSettings.isReturnKeyInterceptionEnabled
-        originalReturnKeyInterception = isReturnKeyInterceptionEnabled
-        
         preferredLanguage = appSettings.preferredLanguage
-        originalPreferredLanguage = appSettings.preferredLanguage
+        translationRuleType = appSettings.translationRuleType
+        translationRuleLanguagesIncludes = appSettings.translationRuleLanguagesIncludes
+        translationRuleLanguagesExcludes = appSettings.translationRuleLanguagesExcludes
+        returnKeyWithTrigger = appSettings.returnKeyWithTrigger
+        returnKeyWithoutTrigger = appSettings.returnKeyWithoutTrigger
         
-        hasUnsavedChanges = false
         Logger.info("Loaded \(configs.count) language configurations and app settings for configuration window")
     }
     
     func updateTriggers(for languageCode: String, triggers: [String]) {
-        if let index = configs.firstIndex(where: { $0.code == languageCode }) {
-            configs[index] = LanguageConfig(
-                code: configs[index].code,
-                name: configs[index].name,
-                popular: configs[index].popular,
-                triggers: triggers
-            )
-            checkForChanges()
+        // Update immediately in database
+        if ConfigManager.shared.updateLanguageTriggers(languageCode: languageCode, triggers: triggers) {
+            // Update local cache on success
+            if let index = configs.firstIndex(where: { $0.code == languageCode }) {
+                configs[index] = LanguageConfig(
+                    code: configs[index].code,
+                    name: configs[index].name,
+                    popular: configs[index].popular,
+                    triggers: triggers
+                )
+            }
+            Logger.info("Language triggers updated immediately for \(languageCode)")
+        } else {
+            Logger.error("Failed to update language triggers for \(languageCode)")
         }
     }
     
-    func updateReturnKeyInterception(enabled: Bool) {
-        isReturnKeyInterceptionEnabled = enabled
-        checkForChanges()
+    func updateReturnKeyWithTrigger(enabled: Bool) {
+        // Update immediately in database
+        if ConfigManager.shared.setReturnKeyWithTriggerEnabled(enabled) {
+            returnKeyWithTrigger = enabled
+            Logger.info("Return key with trigger updated immediately to: \(enabled)")
+        } else {
+            Logger.error("Failed to update return key with trigger setting")
+        }
+    }
+    
+    func updateReturnKeyWithoutTrigger(enabled: Bool) {
+        // Update immediately in database
+        if ConfigManager.shared.setReturnKeyWithoutTriggerEnabled(enabled) {
+            returnKeyWithoutTrigger = enabled
+            Logger.info("Return key without trigger updated immediately to: \(enabled)")
+        } else {
+            Logger.error("Failed to update return key without trigger setting")
+        }
     }
     
     func updatePreferredLanguage(language: String) {
-        preferredLanguage = language
-        checkForChanges()
+        // Update immediately in database
+        if ConfigManager.shared.setPreferredLanguage(language) {
+            preferredLanguage = language
+            Logger.info("Preferred language updated immediately to: \(language)")
+        } else {
+            Logger.error("Failed to update preferred language setting")
+        }
     }
     
-    func saveConfigs() {
-        var success = true
-        
-        // Save language configurations
-        if !areConfigsEqual(configs, originalConfigs) {
-            success = ConfigManager.shared.saveLanguageConfigs(configs) && success
-            if success {
-                originalConfigs = configs
-            }
-        }
-        
-        // Save app settings
-        if isReturnKeyInterceptionEnabled != originalReturnKeyInterception || 
-           preferredLanguage != originalPreferredLanguage {
-            let settings = AppSettings(
-                isReturnKeyInterceptionEnabled: isReturnKeyInterceptionEnabled,
-                preferredLanguage: preferredLanguage
-            )
-            success = ConfigManager.shared.saveAppSettings(settings) && success
-            if success {
-                originalReturnKeyInterception = isReturnKeyInterceptionEnabled
-                originalPreferredLanguage = preferredLanguage
-            }
-        }
-        
-        if success {
-            hasUnsavedChanges = false
-            Logger.info("All configurations saved successfully")
-            
-            // Show save success notification
-            DispatchQueue.main.async {
-                let alert = NSAlert()
-                alert.messageText = "Save Successful"
-                alert.informativeText = "Configuration has been saved successfully"
-                alert.alertStyle = .informational
-                alert.icon = NSImage(named: NSImage.infoName) 
-                alert.addButton(withTitle: "OK")
-                alert.runModal()
-            }
+    func updateTranslationRuleType(_ ruleType: String) {
+        // Update immediately in database
+        if ConfigManager.shared.setTranslationRuleType(ruleType) {
+            translationRuleType = ruleType
+            Logger.info("Translation rule type updated immediately to: \(ruleType)")
         } else {
-            Logger.info("Failed to save some configurations")
-            
-            // Show save failure notification
-            DispatchQueue.main.async {
-                let alert = NSAlert()
-                alert.messageText = "Save Failed"
-                alert.informativeText = "Unable to save configuration. Please check file permissions."
-                alert.alertStyle = .warning
-                alert.icon = NSImage(named: NSImage.cautionName) 
-                alert.addButton(withTitle: "OK")
-                alert.runModal()
-            }
+            Logger.error("Failed to update translation rule type setting")
         }
     }
+    
+    func updateLanguageSuggestions(searchText: String) {
+        guard !searchText.isEmpty else {
+            languageSuggestions = []
+            return
+        }
+        
+        let filtered = availableLanguages.filter { language in
+            language.name.localizedCaseInsensitiveContains(searchText) ||
+            language.code.localizedCaseInsensitiveContains(searchText)
+        }
+        
+        // Limit to 10 suggestions for better performance
+        languageSuggestions = Array(filtered.prefix(10))
+    }
+    
+    func updateTranslationRuleLanguagesIncludes(_ languages: [String]) {
+        // Update immediately in database
+        if ConfigManager.shared.setTranslationRuleLanguagesIncludes(languages) {
+            translationRuleLanguagesIncludes = languages
+            Logger.info("Translation rule languages (includes) updated immediately to: \(languages)")
+        } else {
+            Logger.error("Failed to update translation rule languages (includes) setting")
+        }
+    }
+    
+    func updateTranslationRuleLanguagesExcludes(_ languages: [String]) {
+        // Update immediately in database
+        if ConfigManager.shared.setTranslationRuleLanguagesExcludes(languages) {
+            translationRuleLanguagesExcludes = languages
+            Logger.info("Translation rule languages (excludes) updated immediately to: \(languages)")
+        } else {
+            Logger.error("Failed to update translation rule languages (excludes) setting")
+        }
+    }
+    
+
+    
     
     func resetToDefaults() {
         let alert = NSAlert()
@@ -653,28 +914,10 @@ class LanguageConfigViewModel: ObservableObject {
         let response = alert.runModal()
         if response == .alertFirstButtonReturn {
             configs = ConfigManager.shared.resetToDefaults()
-            originalConfigs = configs
-            checkForChanges()
             Logger.info("Language configurations reset to defaults")
         }
     }
     
-    private func checkForChanges() {
-        hasUnsavedChanges = !areConfigsEqual(configs, originalConfigs) ||
-                           isReturnKeyInterceptionEnabled != originalReturnKeyInterception ||
-                           preferredLanguage != originalPreferredLanguage
-    }
-    
-    private func areConfigsEqual(_ configs1: [LanguageConfig], _ configs2: [LanguageConfig]) -> Bool {
-        guard configs1.count == configs2.count else { return false }
-        
-        for config1 in configs1 {
-            guard let config2 = configs2.first(where: { $0.code == config1.code }) else { return false }
-            if config1.triggers != config2.triggers { return false }
-        }
-        
-        return true
-    }
 }
 
 // About View
