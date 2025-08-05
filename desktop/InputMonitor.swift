@@ -362,9 +362,9 @@ class InputMonitor {
 
     // 检查是否应该拦截回车键进行翻译 - 优化版本
     func shouldInterceptEnter() -> Bool {
-        // 首先检查用户是否启用了Return键拦截功能
-        guard ConfigManager.shared.isReturnKeyInterceptionEnabled() else {
-            Logger.info("Return key interception is disabled in settings")
+        // 首先检查用户是否启用了Return键拦截功能（With Trigger）
+        guard ConfigManager.shared.isReturnKeyWithTriggerEnabled() else {
+            Logger.info("Return key with trigger is disabled in settings")
             return false
         }
         

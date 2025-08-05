@@ -1,0 +1,587 @@
+{
+"role": "AXWindow",
+"title": "‎WhatsApp",
+"subrole": "AXStandardWindow",
+"depth": 0,
+"childrenCount": 4,
+"children": [
+{
+  "role": "AXGroup",
+  "subrole": "iOSContentGroup",
+  "depth": 1,
+  "childrenCount": 1,
+  "children": [
+{
+    "role": "AXGroup",
+    "depth": 2,
+    "childrenCount": 6,
+    "children": [
+{
+      "role": "AXGroup",
+      "depth": 3,
+      "childrenCount": 1,
+      "children": [
+{
+        "role": "AXGroup",
+        "depth": 4,
+        "childrenCount": 2,
+        "children": [
+{
+          "role": "AXGroup",
+          "depth": 5,
+          "childrenCount": 5,
+          "children": [
+{
+            "role": "AXButton",
+            "description": "‎Chats",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          },
+{
+            "role": "AXButton",
+            "description": "‎Calls",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          },
+{
+            "role": "AXButton",
+            "description": "‎Updates",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          },
+{
+            "role": "AXButton",
+            "description": "‎Archived",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          },
+{
+            "role": "AXButton",
+            "description": "‎Starred",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          }
+          ]
+        },
+{
+          "role": "AXGroup",
+          "depth": 5,
+          "childrenCount": 1,
+          "children": [
+{
+            "role": "AXButton",
+            "description": "‎Settings",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          }
+          ]
+        }
+        ]
+      }
+      ]
+    },
+{
+      "role": "AXSplitter",
+      "depth": 3,
+      "childrenCount": 0,
+      "children": []
+    },
+{
+      "role": "AXGroup",
+      "depth": 3,
+      "childrenCount": 2,
+      "children": [
+{
+        "role": "AXGroup",
+        "depth": 4,
+        "childrenCount": 5,
+        "children": [
+{
+          "role": "AXHeading",
+          "description": "‎Chats",
+          "depth": 5,
+          "childrenCount": 0,
+          "children": []
+        },
+{
+          "role": "AXButton",
+          "description": "‎New chat",
+          "depth": 5,
+          "childrenCount": 0,
+          "children": []
+        },
+{
+          "role": "AXButton",
+          "description": "‎Unread filter",
+          "depth": 5,
+          "childrenCount": 0,
+          "children": []
+        },
+{
+          "role": "AXStaticText",
+          "description": "‎Search",
+          "subrole": "AXSearchField",
+          "depth": 5,
+          "childrenCount": 0,
+          "children": []
+        },
+{
+          "role": "AXButton",
+          "description": "‎Unread filter",
+          "depth": 5,
+          "childrenCount": 0,
+          "children": []
+        }
+        ]
+      },
+{
+        "role": "AXGroup",
+        "depth": 4,
+        "childrenCount": 1,
+        "children": [
+{
+          "role": "AXGroup",
+          "depth": 5,
+          "childrenCount": 7,
+          "children": [
+{
+            "role": "AXButton",
+            "value": "‎Your message, 好，过几天发一个WhatsApp聊天自动翻译的功能, 09:35, ‎Sent to John Warhol, ‎Delivered",
+            "description": "John Warhol",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          },
+{
+            "role": "AXButton",
+            "value": "‎Your message, The little boat gently sways, August4,at12:52, ‎Sent to ‎You, ‎Red",
+            "description": "+86 136 3416 3631",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          },
+{
+            "role": "AXButton",
+            "value": "‎+ 2 5 4 1 1 6 4 9 3 7 5 2 joined using this group's invite link, August4,at00:30",
+            "description": "Software Developers",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          },
+{
+            "role": "AXStaticText",
+            "value": "‎Your message, Test again, August3,at23:00, ‎Sent to Princeton, ‎Sent",
+            "description": "Princeton",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          },
+{
+            "role": "AXButton",
+            "value": "‎Video from + 0, ‎Duration: 15 seconds, *Make decisions fun with polls*
+Create a poll for anything, whether it’s picking what’s for dinner or your favorite character from a movie.
+
+Just tap + and then Poll. Enter your question and possible answers and send., July17,at12:54, ‎Received from + 0",
+            "description": "‎WhatsApp",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          },
+{
+            "role": "AXButton",
+            "value": "‎message, I work in a beauty salon and with cross-border e-commerce. I just saved the wrong number., July5,at10:17, ‎Received from + 2 4 4,9 5 3,5 2 9,3 7 7",
+            "description": "+ 2 4 4,9 5 3,5 2 9,3 7 7",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          },
+{
+            "role": "AXGroup",
+            "depth": 6,
+            "childrenCount": 2,
+            "children": [
+{
+              "role": "AXStaticText",
+              "description": "‎Your personal messages are end-to-end encrypted",
+              "depth": 7,
+              "childrenCount": 0,
+              "children": []
+            },
+{
+              "role": "AXLink",
+              "description": "end-to-end encrypted",
+              "depth": 7,
+              "childrenCount": 0,
+              "children": []
+            }
+            ]
+          }
+          ]
+        }
+        ]
+      }
+      ]
+    },
+{
+      "role": "AXSplitter",
+      "depth": 3,
+      "childrenCount": 0,
+      "children": []
+    },
+{
+      "role": "AXGroup",
+      "depth": 3,
+      "childrenCount": 4,
+      "children": [
+{
+        "role": "AXHeading",
+        "description": "Princeton",
+        "depth": 4,
+        "childrenCount": 0,
+        "children": []
+      },
+{
+        "role": "AXButton",
+        "description": "‎Start video call with Princeton",
+        "depth": 4,
+        "childrenCount": 0,
+        "children": []
+      },
+{
+        "role": "AXButton",
+        "description": "‎Start voice call with Princeton",
+        "depth": 4,
+        "childrenCount": 0,
+        "children": []
+      },
+{
+        "role": "AXButton",
+        "description": "Search",
+        "depth": 4,
+        "childrenCount": 0,
+        "children": []
+      }
+      ]
+    },
+{
+      "role": "AXGroup",
+      "depth": 3,
+      "childrenCount": 5,
+      "children": [
+{
+        "role": "AXGroup",
+        "depth": 4,
+        "childrenCount": 16,
+        "children": [
+{
+          "role": "AXGroup",
+          "depth": 5,
+          "childrenCount": 1,
+          "children": [
+{
+            "role": "AXStaticText",
+            "description": "‎Use WhatsApp on your phone to see older messages.",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          }
+          ]
+        },
+{
+          "role": "AXGroup",
+          "depth": 5,
+          "childrenCount": 1,
+          "children": [
+{
+            "role": "AXGenericElement",
+            "description": "‎message, Tentu, ini nomornya: JNE123456789, June28,at09:56, ‎Received from Princeton",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          }
+          ]
+        },
+{
+          "role": "AXGroup",
+          "depth": 5,
+          "childrenCount": 1,
+          "children": [
+{
+            "role": "AXGenericElement",
+            "description": "‎message, 你好阿姨 #en, July28,at23:13, ‎Received from Princeton",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          }
+          ]
+        },
+{
+          "role": "AXHeading",
+          "description": "Mon, Jul 28",
+          "depth": 5,
+          "childrenCount": 0,
+          "children": []
+        },
+{
+          "role": "AXHeading",
+          "description": "Wednesday",
+          "depth": 5,
+          "childrenCount": 1,
+          "children": [
+{
+            "role": "AXStaticText",
+            "description": "Wednesday",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          }
+          ]
+        },
+{
+          "role": "AXGroup",
+          "depth": 5,
+          "childrenCount": 2,
+          "children": [
+{
+            "role": "AXGenericElement",
+            "description": "‎message, Apple M1、MacBook Air、M1, 2020、macos 15.0 (24A335) ， WhatsApp Version 25.20.84 (767160041), July30,at16:20, ‎Received from Princeton",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          },
+{
+            "role": "AXLink",
+            "description": "767160041",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          }
+          ]
+        },
+{
+          "role": "AXGroup",
+          "depth": 5,
+          "childrenCount": 1,
+          "children": [
+{
+            "role": "AXGenericElement",
+            "description": "‎message, 可以触发 focus, July30,at16:20, ‎Received from Princeton",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          }
+          ]
+        },
+{
+          "role": "AXGroup",
+          "depth": 5,
+          "childrenCount": 1,
+          "children": [
+{
+            "role": "AXGenericElement",
+            "description": "‎message, 换个电脑太难登录WhatsApp了，试了两天才成功，哈哈, July30,at16:20, ‎Received from Princeton",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          }
+          ]
+        },
+{
+          "role": "AXGroup",
+          "depth": 5,
+          "childrenCount": 1,
+          "children": [
+{
+            "role": "AXGenericElement",
+            "description": "‎message, 还有另外一台公司mac，系统版本太老了，用不了 WhatsApp，没法测试, July30,at16:21, ‎Received from Princeton",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          }
+          ]
+        },
+{
+          "role": "AXGroup",
+          "depth": 5,
+          "childrenCount": 1,
+          "children": [
+{
+            "role": "AXGenericElement",
+            "description": "‎Your message, ok, July30,at16:23, ‎Sent to Princeton, ‎Red",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          }
+          ]
+        },
+{
+          "role": "AXGroup",
+          "depth": 5,
+          "childrenCount": 1,
+          "children": [
+{
+            "role": "AXGenericElement",
+            "description": "‎Your message, 基本上把bug修的差不多了, July30,at16:23, ‎Sent to Princeton, ‎Red",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          }
+          ]
+        },
+{
+          "role": "AXGroup",
+          "depth": 5,
+          "childrenCount": 1,
+          "children": [
+{
+            "role": "AXGenericElement",
+            "description": "‎Your message, 明天看看没有什么问题的话，先发一版, July30,at16:23, ‎Sent to Princeton, ‎Red",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          }
+          ]
+        },
+{
+          "role": "AXGroup",
+          "depth": 5,
+          "childrenCount": 2,
+          "children": [
+{
+            "role": "AXGenericElement",
+            "description": "‎message, 好，我晚上也测测, July30,at16:23, ‎Received from Princeton",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          },
+{
+            "role": "AXLink",
+            "description": "晚上",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          }
+          ]
+        },
+{
+          "role": "AXHeading",
+          "description": "Sunday",
+          "depth": 5,
+          "childrenCount": 1,
+          "children": [
+{
+            "role": "AXHeading",
+            "description": "Sunday",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          }
+          ]
+        },
+{
+          "role": "AXGroup",
+          "depth": 5,
+          "childrenCount": 1,
+          "children": [
+{
+            "role": "AXGenericElement",
+            "description": "‎Your message, test message, please ignore it, August3,at22:52, ‎Sent to Princeton, ‎Sent",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          }
+          ]
+        },
+{
+          "role": "AXGroup",
+          "depth": 5,
+          "childrenCount": 1,
+          "children": [
+{
+            "role": "AXGenericElement",
+            "description": "‎Your message, Test again, August3,at23:00, ‎Sent to Princeton, ‎Sent",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          }
+          ]
+        }
+        ]
+      },
+{
+        "role": "AXButton",
+        "description": "‎Share media",
+        "depth": 4,
+        "childrenCount": 0,
+        "children": []
+      },
+{
+        "role": "AXTextArea",
+        "description": "‎Compose message",
+        "depth": 4,
+        "childrenCount": 0,
+        "children": []
+      },
+{
+        "role": "AXButton",
+        "description": "CB581EFF 6D52 4BD2 9102 6776DC",
+        "depth": 4,
+        "childrenCount": 0,
+        "children": []
+      },
+{
+        "role": "AXButton",
+        "description": "‎Voice message",
+        "depth": 4,
+        "childrenCount": 0,
+        "children": []
+      }
+      ]
+    }
+    ]
+  }
+  ]
+},
+{
+  "role": "AXButton",
+  "subrole": "AXCloseButton",
+  "depth": 1,
+  "childrenCount": 0,
+  "children": []
+},
+{
+  "role": "AXButton",
+  "subrole": "AXFullScreenButton",
+  "depth": 1,
+  "childrenCount": 1,
+  "children": [
+{
+    "role": "AXGroup",
+    "depth": 2,
+    "childrenCount": 1,
+    "children": [
+{
+      "role": "AXGroup",
+      "depth": 3,
+      "childrenCount": 0,
+      "children": []
+    }
+    ]
+  }
+  ]
+},
+{
+  "role": "AXButton",
+  "subrole": "AXMinimizeButton",
+  "depth": 1,
+  "childrenCount": 0,
+  "children": []
+}
+]
+}
