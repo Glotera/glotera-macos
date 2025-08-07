@@ -97,56 +97,56 @@ class ConfigManager {
         }
         
         // Fall back to JSON bundle file
-        guard let bundleURL = Bundle.main.url(forResource: "language-iso-639", withExtension: "json") else {
-            Logger.error("Default language configuration file not found in bundle")
-            cachedConfigs = []
-            isConfigsLoaded = true
-            return
-        }
-        
-        do {
-            let data = try Data(contentsOf: bundleURL)
-            // Parse the dictionary format from language-iso-639.json
-            let jsonObject = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-            
-            var configs: [LanguageConfig] = []
-            
-            for (code, value) in jsonObject ?? [:] {
-                if let langData = value as? [String: Any],
-                   let name = langData["name"] as? String,
-                   let popular = langData["popular"] as? Int,
-                   let triggers = langData["triggers"] as? [String] {
-                    
-                    let config = LanguageConfig(
-                        code: code,
-                        name: name,
-                        popular: popular,
-                        triggers: triggers
-                    )
-                    configs.append(config)
-                }
-            }
-            
-            // Sort by popular level, then by name
-            configs.sort { first, second in
-                if first.popular != second.popular {
-                    return first.popular < second.popular
-                }
-                return first.name < second.name
-            }
-            
-            cachedConfigs = configs
-            isConfigsLoaded = true
+         guard let bundleURL = Bundle.main.url(forResource: "language-iso-639", withExtension: "json") else {
+             Logger.error("Default language configuration file not found in bundle")
+             cachedConfigs = []
+             isConfigsLoaded = true
+             return
+         }
+         
+         do {
+             let data = try Data(contentsOf: bundleURL)
+             // Parse the dictionary format from language-iso-639.json
+             let jsonObject = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+             
+             var configs: [LanguageConfig] = []
+             
+             for (code, value) in jsonObject ?? [:] {
+                 if let langData = value as? [String: Any],
+                    let name = langData["name"] as? String,
+                    let popular = langData["popular"] as? Int,
+                    let triggers = langData["triggers"] as? [String] {
+                     
+                     let config = LanguageConfig(
+                         code: code,
+                         name: name,
+                         popular: popular,
+                         triggers: triggers
+                     )
+                     configs.append(config)
+                 }
+             }
+             
+             // Sort by popular level, then by name
+             configs.sort { first, second in
+                 if first.popular != second.popular {
+                     return first.popular < second.popular
+                 }
+                 return first.name < second.name
+             }
+             
+             cachedConfigs = configs
+             isConfigsLoaded = true
             Logger.info("Loaded \(cachedConfigs.count) default language configurations from JSON")
             
             // Save to database for future use
             _ = saveLanguageConfigsToDatabase(cachedConfigs)
             
-        } catch {
-            Logger.error("Failed to load default language configurations: \(error)")
-            cachedConfigs = []
-            isConfigsLoaded = true
-        }
+         } catch {
+             Logger.error("Failed to load default language configurations: \(error)")
+             cachedConfigs = []
+             isConfigsLoaded = true
+         }
     }
     
     func loadLanguageConfigs() -> [LanguageConfig] {
@@ -166,11 +166,11 @@ class ConfigManager {
             Logger.info("Language configurations saved successfully to database")
             
             // Also save to JSON file as backup
-            do {
-                let encoder = JSONEncoder()
-                encoder.outputFormatting = .prettyPrinted
-                let data = try encoder.encode(configs)
-                try data.write(to: languageConfigURL)
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = .prettyPrinted
+            let data = try encoder.encode(configs)
+            try data.write(to: languageConfigURL)
                 Logger.info("Language configurations also saved to JSON file")
             } catch {
                 Logger.warn("Failed to save language configurations to JSON file: \(error)")
@@ -194,55 +194,55 @@ class ConfigManager {
         try? FileManager.default.removeItem(at: languageConfigURL)
         
         // Reload from JSON bundle file
-        guard let bundleURL = Bundle.main.url(forResource: "language-iso-639", withExtension: "json") else {
-            Logger.error("Default language configuration file not found in bundle")
-            cachedConfigs = []
-            return cachedConfigs
-        }
-        
-        do {
-            let data = try Data(contentsOf: bundleURL)
-            // Parse the dictionary format from language-iso-639.json
-            let jsonObject = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-            
-            var configs: [LanguageConfig] = []
-            
-            for (code, value) in jsonObject ?? [:] {
-                if let langData = value as? [String: Any],
-                   let name = langData["name"] as? String,
-                   let popular = langData["popular"] as? Int,
-                   let triggers = langData["triggers"] as? [String] {
-                    
-                    let config = LanguageConfig(
-                        code: code,
-                        name: name,
-                        popular: popular,
-                        triggers: triggers
-                    )
-                    configs.append(config)
-                }
-            }
-            
-            // Sort by popular level, then by name
-            configs.sort { first, second in
-                if first.popular != second.popular {
-                    return first.popular < second.popular
-                }
-                return first.name < second.name
-            }
-            
-            cachedConfigs = configs
-            Logger.info("Reset to default language configurations")
+         guard let bundleURL = Bundle.main.url(forResource: "language-iso-639", withExtension: "json") else {
+             Logger.error("Default language configuration file not found in bundle")
+             cachedConfigs = []
+             return cachedConfigs
+         }
+         
+         do {
+             let data = try Data(contentsOf: bundleURL)
+             // Parse the dictionary format from language-iso-639.json
+             let jsonObject = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+             
+             var configs: [LanguageConfig] = []
+             
+             for (code, value) in jsonObject ?? [:] {
+                 if let langData = value as? [String: Any],
+                    let name = langData["name"] as? String,
+                    let popular = langData["popular"] as? Int,
+                    let triggers = langData["triggers"] as? [String] {
+                     
+                     let config = LanguageConfig(
+                         code: code,
+                         name: name,
+                         popular: popular,
+                         triggers: triggers
+                     )
+                     configs.append(config)
+                 }
+             }
+             
+             // Sort by popular level, then by name
+             configs.sort { first, second in
+                 if first.popular != second.popular {
+                     return first.popular < second.popular
+                 }
+                 return first.name < second.name
+             }
+             
+             cachedConfigs = configs
+             Logger.info("Reset to default language configurations")
             
             // Save to database for future use
             _ = saveLanguageConfigsToDatabase(cachedConfigs)
             
-            return cachedConfigs
-        } catch {
-            Logger.error("Failed to load default language configurations during reset: \(error)")
-            cachedConfigs = []
-            return cachedConfigs
-        }
+             return cachedConfigs
+         } catch {
+             Logger.error("Failed to load default language configurations during reset: \(error)")
+             cachedConfigs = []
+             return cachedConfigs
+         }
     }
     
     func findLanguageConfig(withTrigger trigger: String) -> LanguageConfig? {
@@ -393,11 +393,11 @@ class ConfigManager {
             Logger.info("App settings saved successfully to database")
             
             // Also save to JSON file as backup
-            do {
-                let encoder = JSONEncoder()
-                encoder.outputFormatting = .prettyPrinted
-                let data = try encoder.encode(settings)
-                try data.write(to: appSettingsURL)
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = .prettyPrinted
+            let data = try encoder.encode(settings)
+            try data.write(to: appSettingsURL)
                 Logger.info("App settings also saved to JSON file")
             } catch {
                 Logger.warn("Failed to save app settings to JSON file: \(error)")

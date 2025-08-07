@@ -1,10 +1,46 @@
 import Cocoa
 import Carbon
+import CryptoKit
+
+/// 翻译结果缓存项
+struct TranslationCacheItem {
+    let originalText: String
+    let translatedText: String
+    let sourceLanguage: String?
+    let targetLanguage: String
+    let timestamp: Date
+    let translatedTextHash: String
+    
+    /// 检查缓存是否已过期（5分钟有效期）
+    var isExpired: Bool {
+        Date().timeIntervalSince(timestamp) > 300 // 5分钟 = 300秒
+    }
+    
+    init(originalText: String, translatedText: String, sourceLanguage: String?, targetLanguage: String) {
+        self.originalText = originalText
+        self.translatedText = translatedText
+        self.sourceLanguage = sourceLanguage
+        self.targetLanguage = targetLanguage
+        self.timestamp = Date()
+        self.translatedTextHash = Self.calculateHash(translatedText)
+    }
+    
+    /// 计算文本的SHA256哈希值
+    static func calculateHash(_ text: String) -> String {
+        let data = text.data(using: .utf8) ?? Data()
+        let digest = SHA256.hash(data: data)
+        return digest.compactMap { String(format: "%02x", $0) }.joined()
+    }
+}
 
 class InputMonitor {
     // 移除独立的 eventTap 管理，改为依赖 AppDelegate
     private let triggerPattern = #"(.*?)[@#](id|en|zh|ja|jp|ko|fr|de|es|ru|th)\s*$"#
     private let regex: NSRegularExpression
+    
+    // 翻译缓存相关
+    private var translationCache: [String: TranslationCacheItem] = [:]
+    private let cacheQueue = DispatchQueue(label: "com.glotera.translation-cache", attributes: .concurrent)
     
     // 事件统计和业务逻辑相关属性
     private var lastEventTime: Date = Date()
@@ -40,6 +76,7 @@ class InputMonitor {
         )
         
         startHealthCheck()
+        startPeriodicCacheCleanup()
     }
     
     // 启动健康检查定时器
@@ -306,6 +343,15 @@ class InputMonitor {
                 switch result {
                 case .success(let translationResult):
                     Logger.debug("Translation result: \(translationResult.translated)")
+                    
+                    // 缓存翻译结果
+                    self?.cacheTranslation(
+                        original: text,
+                        translated: translationResult.translated,
+                        sourceLanguage: translationResult.fromLanguage,
+                        targetLanguage: lang
+                    )
+                    
                     // 翻译成功后立即隐藏状态窗口，然后开始回填
                     TranslationStatusWindow.shared.hideStatus()
                   
@@ -362,37 +408,74 @@ class InputMonitor {
 
     // 检查是否应该拦截回车键进行翻译 - 优化版本
     func shouldInterceptEnter() -> Bool {
-        // 首先检查用户是否启用了Return键拦截功能（With Trigger）
-        guard ConfigManager.shared.isReturnKeyWithTriggerEnabled() else {
-            Logger.info("Return key with trigger is disabled in settings")
-            return false
-        }
+        Logger.info("=== Auto-translate Enter Key Check ===")
         
         // 只在聊天软件中启用回车键拦截功能
         guard AppDetectionManager.shared.isChatApp() else {
-            Logger.debug("Return key interception disabled - not a chat application: \(AppDetectionManager.shared.getBundleId())")
+            Logger.info("❌ Not a chat application: \(AppDetectionManager.shared.getBundleId())")
             return false
         }
+        Logger.info("✅ Chat application detected: \(AppDetectionManager.shared.getBundleId())")
         
         // 防止拦截我们自己发送的Enter键
         if InputManager.shared.isSendingEnterKeyEvent() {
-            Logger.debug("Ignoring Enter key - we are currently sending one")
+            Logger.info("❌ Currently sending Enter key - avoiding loop")
             return false
         }
         
         // 如果最近刚发送过Enter键，也忽略（防止时序问题）
         if let sentTime = InputManager.shared.getEnterKeySentTime(),
            Date().timeIntervalSince(sentTime) < 1.0 {
-            Logger.debug("Ignoring Enter key - recently sent one")
+            Logger.info("❌ Recently sent Enter key - avoiding loop")
             return false
         }
           
         // 如果最近通过菜单进行了划词翻译，不拦截回车
         if let selectionTime = lastSelectionTranslationTime, Date().timeIntervalSince(selectionTime) < 2.0 {
+            Logger.info("❌ Recent selection translation - avoiding conflict")
             return false
-        }  
+        }
         
-        return true
+        // 检查是否启用了Return键拦截功能（With Trigger 或 Without Trigger）
+        let withTriggerEnabled = ConfigManager.shared.isReturnKeyWithTriggerEnabled()
+        let withoutTriggerEnabled = ConfigManager.shared.isReturnKeyWithoutTriggerEnabled()
+        
+        Logger.info("Settings - With Trigger: \(withTriggerEnabled), Without Trigger: \(withoutTriggerEnabled)")
+        
+        if !withTriggerEnabled && !withoutTriggerEnabled {
+            Logger.info("❌ Both Return key interception options are disabled in settings")
+            return false
+        }
+        
+        // 如果启用了Without Trigger，检查翻译窗口是否开启（仅限WhatsApp）
+        if withoutTriggerEnabled {
+            // 检查是否为WhatsApp
+            let isWhatsApp = AppDetectionManager.shared.isWhatsAppApp()
+            Logger.info("Is WhatsApp app: \(isWhatsApp)")
+            
+            if isWhatsApp {
+                let translationWindowVisible = ChatTranslationManager.shared.getTranslationWindowVisible()
+                Logger.info("Translation window visible: \(translationWindowVisible)")
+                
+                if translationWindowVisible {
+                    Logger.info("✅ Return key interception enabled - WhatsApp app with translation window visible and without trigger enabled")
+                    return true
+                } else {
+                    Logger.info("❌ Translation window is not visible - without trigger mode requires visible window")
+                }
+            } else {
+                Logger.info("❌ Without trigger mode is only available for WhatsApp")
+            }
+        }
+        
+        // 如果启用了With Trigger，检查是否有触发词
+        if withTriggerEnabled {
+            Logger.info("✅ Return key with trigger is enabled")
+            return true
+        }
+        
+        Logger.info("❌ No conditions met for Enter key interception")
+        return false
     }
     
     // 处理被拦截的回车键
@@ -401,22 +484,280 @@ class InputMonitor {
         
         // 获取当前焦点元素，避免重复调用
         let focusedElement = AXController.shared.getFocusedElement() 
+        
+        // 检查是否启用了Without Trigger模式且翻译窗口可见
+        let withoutTriggerEnabled = ConfigManager.shared.isReturnKeyWithoutTriggerEnabled()
+        let translationWindowVisible = ChatTranslationManager.shared.getTranslationWindowVisible()
+        
         DispatchQueue.global(qos: .userInitiated).async {
+            // 首先尝试检测触发词（With Trigger模式）
             if let result = AXController.shared.detectTriggerAndExtract(focusedElement: focusedElement) {
                 // 成功检测到触发词，启动翻译
                 Logger.info("Trigger detected via intercepted Enter: text=\(result.text), lang=\(result.lang)")
                 DispatchQueue.main.async {
                     self.startTranslationWithAutoSend(text: result.text, lang: result.lang, focusedElement: focusedElement)
                 }
+            } else if withoutTriggerEnabled && translationWindowVisible {
+                // 没有触发词，但启用了Without Trigger模式且翻译窗口可见
+                // 检查是否为WhatsApp（Without Trigger模式仅限WhatsApp）
+                let isWhatsApp = AppDetectionManager.shared.isWhatsAppApp()
+                
+                if isWhatsApp {
+                    Logger.info("No trigger found, but without trigger mode is enabled for WhatsApp and translation window is visible")
+                    
+                    // 获取输入框中的文本
+                    if let focusedElement = focusedElement,
+                       let text = AXController.shared.getValue(of: focusedElement), 
+                       !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        // 检测对方发送的语言，并翻译成对方的语言
+                        DispatchQueue.main.async {
+                            self.handleWithoutTriggerTranslation(text: text, focusedElement: focusedElement)
+                        }
+                    } else {
+                        Logger.warn("No text found in input field, sending original Enter key")
+                        DispatchQueue.main.async {
+                            InputManager.shared.sendEnterKey()
+                        }
+                    }
+                } else {
+                    Logger.info("Without trigger mode is only available for WhatsApp, sending original Enter key")
+                    DispatchQueue.main.async {
+                        InputManager.shared.sendEnterKey()
+                    }
+                }
             } else {
-                Logger.warn("No trigger found, sending original Enter key")
-                // 如果没有检测到触发器，发送原始回车键
+                Logger.warn("No trigger found and without trigger mode not applicable, sending original Enter key")
+                // 如果没有检测到触发器且不适用Without Trigger模式，发送原始回车键
                 DispatchQueue.main.async {
                     InputManager.shared.sendEnterKey()
                 }
             }
         }
+    }
+    
+    // 处理Without Trigger模式的翻译
+    private func handleWithoutTriggerTranslation(text: String, focusedElement: AXUIElement? = nil) {
+        Logger.info("=== Without Trigger Translation ===")
+        Logger.info("Input text: '\(text.prefix(50))...' (length: \(text.count))")
+        
+        // 获取对方发送的语言
+        let targetLanguage = getOpponentLanguage()
+        Logger.info("Target language for translation: \(targetLanguage)")
+        
+        // 对于输入框翻译（Without Trigger模式），需要在翻译开始前记录应用信息
+        EnvironmentManager.shared.recordTriggerApp()
+        
+        // 使用传入的焦点元素，如果没有传入则获取当前焦点元素
+        let elementToUse = focusedElement ?? AXController.shared.getFocusedElement()
+        
+        // 获取应用名称
+        guard let activeApp = NSWorkspace.shared.frontmostApplication,
+              let bundleId = activeApp.bundleIdentifier else {
+            Logger.debug("Unable to get active app for opponent language detection")
+            return
+        }
 
+        let appName = AppDetectionManager.shared.getChatAppName(bundleId: bundleId)
+        
+        // 获取当前聊天会话ID
+        var sessionId = "Unknown"
+        if AppDetectionManager.shared.isWhatsAppApp(bundleId: bundleId) {
+            if let whatsappSessionId = WhatsAppMessagesProcessor.getCurrentChatSessionId(activeApp: activeApp) {
+                sessionId = whatsappSessionId
+            }
+        }
+
+        // 获取当前焦点元素用于定位状态窗口
+        let mouseLocation = NSEvent.mouseLocation
+        // 显示翻译中状态
+        TranslationStatusWindow.shared.showTranslating(near: elementToUse, mousePoint: mouseLocation)
+        Logger.info("Translation status window shown")
+        
+        // Check login status before translation
+        guard SessionManager.shared.isAuthenticated else {
+            Logger.info("❌ User not logged in for without trigger translation, showing login prompt")
+            TranslationStatusWindow.shared.hideStatus()
+            UserManager.shared.promptLogin(reason: "Please sign in to use Glotera.")
+            // Send Enter key to complete the action even without translation
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                InputManager.shared.sendEnterKey()
+                EnvironmentManager.shared.clearTriggerAppInfo()
+            }
+            return
+        }
+        Logger.info("✅ User authentication verified")
+        
+        // 开始翻译（不禁用输入，避免死锁）
+        TranslatorClient.shared.translate(text: text, to: targetLanguage) { [weak self] result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let translationResult):
+                    Logger.info("Without trigger translation result: \(translationResult.translated)")
+                    
+                    // 对于回车自动翻译，不需要缓存（直接保存到数据库）
+                    // self?.cacheTranslation(...) - 移除缓存逻辑
+                    
+                    // 翻译成功后立即隐藏状态窗口，然后开始回填
+                    TranslationStatusWindow.shared.hideStatus()
+                    // 回填翻译结果，完成后发送回车键
+                    AXController.shared.replaceInput(with: translationResult.translated) {
+                        Logger.info("Without trigger auto-translation with send completed")
+                        
+                        // 根据不同应用调整延迟时间
+                        let isWeChat = AppDetectionManager.shared.isWeChatApp()
+                        let delay = isWeChat ? 0.05 : 0.05  // 稍微延迟，确保内容完全更新
+                        
+                        Logger.info("Waiting \(delay)s before sending Enter key (WeChat: \(isWeChat))")
+                        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                            InputManager.shared.sendEnterKey()
+                            
+                            // 发送成功后直接保存翻译记录（回车自动翻译场景）
+                            self?.saveAutoTranslationDirectly(
+                                appName: appName,
+                                sessionId: sessionId,
+                                originalText: text,
+                                translatedText: translationResult.translated,
+                                sourceLanguage: translationResult.fromLanguage,
+                                targetLanguage: targetLanguage
+                            )
+                            
+                            // 翻译完成后清除缓存的应用信息
+                            EnvironmentManager.shared.clearTriggerAppInfo()
+                        }
+                    }
+                case .failure(let error):
+                    Logger.warn("Without trigger translation failed: \(error.localizedDescription)")
+                    // If token expired, prompt for re-login
+                    if error.localizedDescription.contains("token") || error.localizedDescription.contains("401") {
+                        SessionManager.shared.clearSession()
+                        UserManager.shared.promptLogin(reason: "Your session has expired. Please sign in again.")
+                    } else {
+                        // 显示失败状态
+                        TranslationStatusWindow.shared.showFailure()
+                    }
+                    // 翻译失败时发送原始内容
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                        InputManager.shared.sendEnterKey()
+                        // 翻译失败后也清除缓存的应用信息
+                        EnvironmentManager.shared.clearTriggerAppInfo()
+                    }
+                }
+            }
+        }
+    }
+    
+    // 获取对方发送的语言
+    private func getOpponentLanguage() -> String {
+        // 获取当前活跃应用
+        guard let activeApp = NSWorkspace.shared.frontmostApplication,
+              let bundleId = activeApp.bundleIdentifier else {
+            Logger.debug("Unable to get active app for opponent language detection")
+            let preferredLanguage = ConfigManager.shared.getUserPreferredLanguage()
+            Logger.info("No active app detected, using user's preferred language as fallback: \(preferredLanguage)")
+            return preferredLanguage
+        }
+        
+        // 检查是否是支持的聊天应用
+        guard AppDetectionManager.shared.isChatApp(bundleId: bundleId) else {
+            Logger.debug("Current app is not a chat app, using preferred language")
+            let preferredLanguage = ConfigManager.shared.getUserPreferredLanguage()
+            return preferredLanguage
+        }
+        
+        // 获取应用名称和会话ID
+        let appName = AppDetectionManager.shared.getChatAppName(bundleId: bundleId)
+        var sessionId = "Unknown"
+        
+        if AppDetectionManager.shared.isWhatsAppApp(bundleId: bundleId) {
+            if let whatsappSessionId = WhatsAppMessagesProcessor.getCurrentChatSessionId(activeApp: activeApp) {
+                sessionId = whatsappSessionId
+            }
+        }
+        // TODO: 后续可以添加其他聊天应用的会话ID获取逻辑
+        
+        // 从数据库获取最近收到的消息语言
+        let dbManager = DatabaseManager.shared
+        if let lastReceivedLanguage = dbManager.getLastReceivedMessageLanguage(forApp: appName, sessionId: sessionId),
+           !lastReceivedLanguage.isEmpty {
+            Logger.info("Using last received message language from database: \(lastReceivedLanguage) for session: \(sessionId)")
+            return lastReceivedLanguage
+        }
+        
+        // 如果没有检测到对方语言，使用用户的首选语言作为回退
+        let preferredLanguage = ConfigManager.shared.getUserPreferredLanguage()
+        Logger.info("No opponent language detected, using user's preferred language as fallback: \(preferredLanguage)")
+        return preferredLanguage
+    }
+    
+    // 在回车发送时检查是否需要保存翻译记录到数据库
+    private func checkAndSaveTranslationOnSend(sentText: String) {
+        // 获取当前活跃应用
+        guard let activeApp = NSWorkspace.shared.frontmostApplication,
+              let bundleId = activeApp.bundleIdentifier else {
+            Logger.debug("Unable to get active app for translation save check")
+            return
+        }
+        
+        // 第一个条件：检查是否是支持的聊天应用
+        guard AppDetectionManager.shared.isChatApp(bundleId: bundleId) else {
+            Logger.debug("Current app is not a chat app, skipping translation save check")
+            return
+        }
+        
+        // 第二个条件：检查发送的内容是否匹配最近的翻译缓存
+        guard let cachedTranslation = findCachedTranslation(byTranslatedText: sentText) else {
+            Logger.debug("No cached translation found for sent text: \(sentText.prefix(30))...")
+            return
+        }
+        
+        // 匹配成功，保存到数据库
+        let appName = activeApp.localizedName ?? "Unknown"
+        Logger.info("Found cached translation for sent text, saving to database for app: \(appName)")
+        
+        // 获取当前聊天会话ID
+        var sessionId = "Unknown"
+        if AppDetectionManager.shared.isWhatsAppApp(bundleId: bundleId) {
+            if let whatsappSessionId = WhatsAppMessagesProcessor.getCurrentChatSessionId(activeApp: activeApp) {
+                sessionId = whatsappSessionId
+            }
+        }
+        // TODO: 后续可以添加其他聊天应用的会话ID获取逻辑
+        
+        // 计算内容哈希
+        let dbManager = DatabaseManager.shared
+        let contentHash = dbManager.calculateContentHash(cachedTranslation.originalText)
+        
+        // 创建消息记录
+        let messageRecord = MessageRecord(
+            sender: "You", // 用户发送的消息
+            content: cachedTranslation.originalText, // 保存原文内容
+            contentHash: contentHash,
+            contentLanguage: cachedTranslation.sourceLanguage ?? "unknown", // 原文语言
+            contentTranslation: sentText, // 保存翻译后的内容（这是实际发送的内容）
+            contentTranslationLanguage: cachedTranslation.targetLanguage, // 翻译目标语言
+            contentTimestamp: Date(), // 当前时间
+            chatApp: appName,
+            sessionId: sessionId
+        )
+        
+        Logger.info("Saving user translation: '\(cachedTranslation.originalText)' -> '\(sentText)' (session: \(sessionId))")
+        
+        // 保存到数据库
+        _ = dbManager.insertMessage(messageRecord)
+        
+        // 立即更新侧边翻译窗口（不等待定时器）
+        if let chatWindow = ChatTranslationManager.shared.getChatTranslationWindow() {
+            chatWindow.addUserMessage(
+                originalText: cachedTranslation.originalText,
+                translatedText: sentText,
+                sourceLanguage: cachedTranslation.sourceLanguage,
+                targetLanguage: cachedTranslation.targetLanguage,
+                sessionId: sessionId
+            )
+            Logger.debug("Chat window updated immediately after user translation")
+        }
+        
+        Logger.debug("User translation saved successfully")
     }
     
     // 翻译完成后自动发送
@@ -428,6 +769,23 @@ class InputMonitor {
         // 使用传入的焦点元素，如果没有传入则获取当前焦点元素
         let elementToUse = focusedElement ?? AXController.shared.getFocusedElement()
         
+        // 获取应用名称
+        guard let activeApp = NSWorkspace.shared.frontmostApplication,
+              let bundleId = activeApp.bundleIdentifier else {
+            Logger.debug("Unable to get active app for opponent language detection")
+            return
+        }
+
+        let appName = AppDetectionManager.shared.getChatAppName(bundleId: bundleId)
+        
+        // 获取当前聊天会话ID
+        var sessionId = "Unknown"
+        if AppDetectionManager.shared.isWhatsAppApp(bundleId: bundleId) {
+            if let whatsappSessionId = WhatsAppMessagesProcessor.getCurrentChatSessionId(activeApp: activeApp) {
+                sessionId = whatsappSessionId
+            }
+        }
+
         // 获取当前焦点元素用于定位状态窗口
         let mouseLocation = NSEvent.mouseLocation
         // 显示翻译中状态
@@ -453,6 +811,10 @@ class InputMonitor {
                 switch result {
                 case .success(let translationResult):
                     Logger.info("Translation result: \(translationResult.translated)")
+                    
+                    // 对于触发词自动翻译，不需要缓存（直接保存到数据库）
+                    // self?.cacheTranslation(...) - 移除缓存逻辑
+                    
                     // 翻译成功后立即隐藏状态窗口，然后开始回填
                     TranslationStatusWindow.shared.hideStatus() 
                     // 回填翻译结果，完成后发送回车键
@@ -466,6 +828,17 @@ class InputMonitor {
                         Logger.info("Waiting \(delay)s before sending Enter key (WeChat: \(isWeChat))")
                         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                             InputManager.shared.sendEnterKey()
+                            
+                            // 发送成功后直接保存翻译记录（触发词自动翻译场景）
+                            self?.saveAutoTranslationDirectly(
+                                appName: appName,
+                                sessionId: sessionId,
+                                originalText: text,
+                                translatedText: translationResult.translated,
+                                sourceLanguage: translationResult.fromLanguage,
+                                targetLanguage: lang
+                            )
+                            
                             // 翻译完成后清除缓存的应用信息
                             EnvironmentManager.shared.clearTriggerAppInfo()
                         }
@@ -617,4 +990,107 @@ class InputMonitor {
             SelectEventManager.shared.checkForTextSelectionAfterKeyboardSelection()
         }
     }  
-} 
+    
+    // MARK: - 翻译缓存管理
+    
+    /// 缓存翻译结果
+    private func cacheTranslation(original: String, translated: String, sourceLanguage: String?, targetLanguage: String) {
+        let item = TranslationCacheItem(
+            originalText: original,
+            translatedText: translated,
+            sourceLanguage: sourceLanguage,
+            targetLanguage: targetLanguage
+        )
+        
+        cacheQueue.async(flags: .barrier) {
+            self.translationCache[item.translatedTextHash] = item
+            Logger.debug("Cached translation: '\(original)' -> '\(translated)' (hash: \(item.translatedTextHash))")
+        }
+    }
+    
+    /// 根据翻译文本查找缓存项
+    private func findCachedTranslation(byTranslatedText text: String) -> TranslationCacheItem? {
+        let hash = TranslationCacheItem.calculateHash(text)
+        
+        return cacheQueue.sync {
+            guard let item = translationCache[hash], !item.isExpired else {
+                if translationCache[hash] != nil { // Check if it existed but expired
+                    Logger.debug("Translation cache expired for text: \(text.prefix(30))...")
+                    translationCache.removeValue(forKey: hash)
+                }
+                return nil
+            }
+            
+            Logger.debug("Found cached translation for text: \(text.prefix(30))... -> original: \(item.originalText.prefix(30))...")
+            return item
+        }
+    }
+    
+    /// 清理过期的缓存项
+    private func cleanupExpiredCacheItems() {
+        cacheQueue.async(flags: .barrier) {
+            let expiredKeys = self.translationCache.compactMap { (key, item) in
+                item.isExpired ? key : nil
+            }
+            
+            for key in expiredKeys {
+                self.translationCache.removeValue(forKey: key)
+            }
+            
+            if !expiredKeys.isEmpty {
+                Logger.debug("Cleaned up \(expiredKeys.count) expired translation cache items")
+            }
+        }
+    }
+    
+    /// 启动定期清理任务（每分钟清理一次）
+    private func startPeriodicCacheCleanup() {
+        Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in
+            self.cleanupExpiredCacheItems()
+        }
+    }
+    
+    /// 直接保存自动翻译记录到数据库（用于回车键自动翻译场景）
+    private func saveAutoTranslationDirectly(appName: String, sessionId: String, originalText: String, translatedText: String, sourceLanguage: String?, targetLanguage: String)  { 
+         
+        Logger.info("Saving auto translation directly for app: \(appName)")
+        
+        // 计算内容哈希
+        let dbManager = DatabaseManager.shared
+        let contentHash = dbManager.calculateContentHash(originalText)
+        
+        // 创建消息记录
+        let messageRecord = MessageRecord(
+            sender: "You", // 用户发送的消息
+            content: originalText, // 保存原文内容
+            contentHash: contentHash,
+            contentLanguage: sourceLanguage ?? "unknown", // 原文语言
+            contentTranslation: translatedText, // 保存翻译后的内容（这是实际发送的内容）
+            contentTranslationLanguage: targetLanguage, // 翻译目标语言
+            contentTimestamp: Date(), // 当前时间
+            chatApp: appName,
+            sessionId: sessionId
+        )
+        
+        Logger.info("Saving auto translation directly: '\(originalText)' -> '\(translatedText)' (session: \(sessionId))")
+        
+        // 保存到数据库
+        _ = dbManager.insertMessage(messageRecord)
+        
+        // 立即更新侧边翻译窗口（不等待定时器）
+        if let chatWindow = ChatTranslationManager.shared.getChatTranslationWindow() {
+            chatWindow.addUserMessage(
+                originalText: originalText,
+                translatedText: translatedText,
+                sourceLanguage: sourceLanguage,
+                targetLanguage: targetLanguage,
+                sessionId: sessionId
+            )
+            Logger.debug("Chat window updated immediately after auto translation")
+        }
+        
+        Logger.debug("Auto translation saved successfully")
+    }
+}
+
+ 

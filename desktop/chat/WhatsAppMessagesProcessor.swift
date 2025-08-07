@@ -55,27 +55,48 @@ class WhatsAppMessagesProcessor: ChatMessagesProcessor {
         return nil
     }
 
-    // Traverse the window element tree to find AXButton with Description starting with "‎Start video call with" or "‎Start voice call with"
+    // Traverse the window element tree to find contact name from multiple sources
     private static func findContactNameInElementTree(_ element: AXUIElement) -> String? {
-        // Check if element is AXButton
+        // Check if element is AXButton or AXGenericElement
         var roleValue: CFTypeRef?
         let roleResult = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleValue)
-        if roleResult == .success, let role = roleValue as? String, role == kAXButtonRole as String {
+        if roleResult == .success, let role = roleValue as? String {
             // Try to get the description
             var descValue: CFTypeRef?
             let descResult = AXUIElementCopyAttributeValue(element, kAXDescriptionAttribute as CFString, &descValue)
-            if descResult == .success, let desc = descValue as? String {
-                let videoPrefix = "‎Start video call with "
-                let voicePrefix = "‎Start voice call with "
-                if desc.hasPrefix(videoPrefix) {
-                    let contactName = desc.replacingOccurrences(of: videoPrefix, with: "")
-                    return contactName
-                } else if desc.hasPrefix(voicePrefix) {
-                    let contactName = desc.replacingOccurrences(of: voicePrefix, with: "")
-                    return contactName
+            if descResult == .success, let desc = descValue as? String {  
+        
+                // Method 1: Check for received messages (AXGenericElement)
+                if role == "AXGenericElement" && desc.hasPrefix("‎message,") && desc.contains("Received from ") {
+                    // Extract contact name using regex
+                    let pattern = "Received from (.+)$"
+                    if let regex = try? NSRegularExpression(pattern: pattern, options: []),
+                       let match = regex.firstMatch(in: desc, options: [], range: NSRange(location: 0, length: desc.count)),
+                       let contactRange = Range(match.range(at: 1), in: desc) {
+                        let contactName = String(desc[contactRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+                        Logger.info("Found contact name from received message: \(contactName)")
+                        Logger.debug("Full message description: \(desc)")
+                        return contactName
+                    }
+                }
+                // 修改名称后，这两个按钮的描述中引用的联系名称还是老的，所以调整为备用方案
+                // Method 2: Check for call buttons (AXButton)
+                if role == kAXButtonRole as String {
+                    let videoPrefix = "‎Start video call with "
+                    let voicePrefix = "‎Start voice call with "
+                    if desc.hasPrefix(videoPrefix) {
+                        let contactName = desc.replacingOccurrences(of: videoPrefix, with: "")
+                        Logger.info("Found contact name from video call button: \(contactName)")
+                        return contactName
+                    } else if desc.hasPrefix(voicePrefix) {
+                        let contactName = desc.replacingOccurrences(of: voicePrefix, with: "")
+                        Logger.info("Found contact name from voice call button: \(contactName)")
+                        return contactName
+                    }
                 }
             }
         }
+        
         // Recursively search children
         var children: CFTypeRef?
         let childrenResult = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children)
@@ -107,10 +128,9 @@ class WhatsAppMessagesProcessor: ChatMessagesProcessor {
         
         let windowElement = window as! AXUIElement
         
-        // Print the chat area element tree
-        Logger.info("=== WhatsApp Chat Area Element Tree ===")
-        ChatMessagesUtil.printElementTree(windowElement)
-        Logger.info("=== End Chat Area Element Tree ===")
+        // Note: printElementTree removed to prevent performance issues and crashes
+        // Only enable for debugging purposes when needed
+        // ChatMessagesUtil.printElementTree(windowElement)
 
           // Get the first child of the window
         var contentGroupElement: CFTypeRef?
@@ -204,48 +224,11 @@ class WhatsAppMessagesProcessor: ChatMessagesProcessor {
             Logger.debug("Chat area doesn't have expected 2 children")
             return
         }
-        
-        // Parse contact name from first child
-        let contactName = parseContactName(from: childrenArray[0])
-        Logger.info("=== WhatsApp Chat Parsing ===")
-        Logger.info("Contact name: \(contactName)")
- 
+         
         // Parse messages from second child
         parseMessagesFromContentArea(childrenArray[1], messages: &messages, filterAfterTimestamp: filterAfterTimestamp)
-        
-        Logger.info("=== End WhatsApp Chat Parsing ===")
-    }
-    
-    /// Parse contact name from the first child element
-    private static func parseContactName(from element: AXUIElement) -> String {
-        // Get the first child of this element
-        var firstChild: CFTypeRef?
-        let firstChildResult = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &firstChild)
-        
-        guard firstChildResult == .success, let children = firstChild as? [AXUIElement], children.count > 0 else {
-            return "Unknown"
-        }
-        
-        let firstChildElement = children[0]
-        
-        // Get element role
-        var role: CFTypeRef?
-        let roleResult = AXUIElementCopyAttributeValue(firstChildElement, kAXRoleAttribute as CFString, &role)
-        
-        guard roleResult == .success, let roleString = role as? String, roleString == "AXHeading" else {
-            return "Unknown"
-        }
-        
-        // Get element description (contains contact name)
-        var description: CFTypeRef?
-        let descResult = AXUIElementCopyAttributeValue(firstChildElement, kAXDescriptionAttribute as CFString, &description)
-        
-        if descResult == .success, let descString = description as? String, !descString.isEmpty {
-            return descString.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        
-        return "Unknown"
-    }
+         
+    } 
     
     /// Parse messages from the content area (second child)
     private static func parseMessagesFromContentArea(_ element: AXUIElement, messages: inout [ChatMessage], filterAfterTimestamp: Date? = nil) {
