@@ -78,12 +78,12 @@ class ChatTranslationWindow: NSWindow {
     /// Show the window at screen right edge
     func showWindowAtScreenSide(_ appInfo: AppInfo) {
         currentAppInfo = appInfo
-        appName = appInfo.appName 
+        appName = appInfo.appName
         
         if appInfo.bundleId == "net.whatsapp.WhatsApp" {
             // Supported app - show normal translation interface
             Logger.info("WhatsApp detected - showing normal translation interface")
-            updateChatTranslationView()
+        updateChatTranslationView()
         } else if AppDetectionManager.shared.isChatApp(bundleId: appInfo.bundleId) {
             // Unsupported app - show coming soon message
             Logger.info("\(appInfo.appName) - Unsupported chat app detected")
@@ -136,7 +136,7 @@ class ChatTranslationWindow: NSWindow {
                 contentTranslationLanguage: record.contentTranslationLanguage,
                 contentHash: record.contentHash
             )
-             
+            
             // Add to messages array and tracking set
             messages.append(message)
             messageHashes.insert(message.messageHash)
@@ -163,7 +163,7 @@ class ChatTranslationWindow: NSWindow {
     }
     
     /// Hide the window
-    func hideWindow() { 
+    func hideWindow() {
         // Clear the data model
         chatTranslationData?.clear()
         
@@ -273,7 +273,7 @@ class ChatTranslationWindow: NSWindow {
         stopMessageMonitoring()
         Logger.info("ChatTranslationWindow deallocating")
     }
- 
+    
     /// Start monitoring WhatsApp messages
     private func startMessageMonitoring() {
         // Start a timer to periodically check for new messages
@@ -332,9 +332,9 @@ class ChatTranslationWindow: NSWindow {
         if lastMessageTimestamp == nil {
             let dbManager = DatabaseManager.shared
             lastMessageTimestamp = dbManager.getLastMessageTimestamp(forApp: appName, sessionId: currentSessionId)
-            if let lastTimestamp = lastMessageTimestamp {
+        if let lastTimestamp = lastMessageTimestamp {
                 Logger.info("Set lastMessageTimestamp from database: \(lastTimestamp)")
-            } else {
+        } else {
                 Logger.info("No previous messages found in database for session: \(currentSessionId)")
             }
         }
@@ -389,33 +389,25 @@ class ChatTranslationWindow: NSWindow {
                 
                 Logger.info("Found existing translation for message: \(message.content.prefix(30))...")
             } else {
-                Logger.info("No existing translation found, will translate message: \(message.content.prefix(30))...")
-                // Detect language and translate， 不需要检测原始语言是什么，LLM会返回结果
-//                let detectedLanguage = detectLanguage(message.content)
-//                finalLanguage = detectedLanguage
+                Logger.info("No existing translation found for message: \(message.content.prefix(30))...")
                 
-                // Always translate to user's preferred language
-                let targetLanguage = ConfigManager.shared.getUserPreferredLanguage()
-                finalTranslationLanguage = targetLanguage
-                
-                // Translate message using non-streaming mode
-                do {
-                    let translationResult = try await translateMessage(message.content, to: targetLanguage) 
-                    finalLanguage = translationResult.fromLanguage ?? ""
-                    finalTranslation = translationResult.translated
+                // Skip translation for sent messages (they were already translated before sending)
+                if message.isFromMe {
+                    Logger.info("Skipping translation for sent message: \(message.content.prefix(30))...")
                     
-                    Logger.info("Translated message: \(message.content.prefix(30))... -> \(translationResult.translated.prefix(30))...")
-                    Logger.info("Detected source language: \(finalLanguage)")
-                
-                    // Save to database
+                    // For sent messages, only detect language but don't translate
+                    let detectedLanguage = detectLanguage(message.content)
+                    finalLanguage = detectedLanguage
+                    
+                    // Save sent message to database without translation
                     let timestamp = ChatMessagesUtil.parseTimestamp(message.timestamp) ?? Date()
                     let messageRecord = MessageRecord(
                         sender: message.sender,
                         content: message.content,
                         contentHash: contentHash,
-                        contentLanguage: finalLanguage ?? "",
-                        contentTranslation: finalTranslation ?? "",
-                        contentTranslationLanguage: targetLanguage,
+                        contentLanguage: detectedLanguage,
+                        contentTranslation: "", // No translation for sent messages
+                        contentTranslationLanguage: "", // No translation language
                         contentTimestamp: timestamp,
                         chatApp: "WhatsApp",
                         sessionId: currentSessionId
@@ -426,9 +418,79 @@ class ChatTranslationWindow: NSWindow {
                     // Update lastMessageTimestamp after successful insertion
                     lastMessageTimestamp = timestamp
                     Logger.debug("Updated lastMessageTimestamp to: \(timestamp)")
+                } else {
+                    // For received messages, check translation rules
+                    Logger.info("Checking translation rules for received message: \(message.content.prefix(30))...")
+                    
+                    // First detect the source language
+                    let detectedLanguage = detectLanguage(message.content)
+                    finalLanguage = detectedLanguage
+                    
+                    Logger.info("Detected source language: \(detectedLanguage)")
+                    
+                    // Check translation rules to determine if translation is needed
+                    if shouldTranslateMessage(sourceLanguage: detectedLanguage) {
+                        Logger.info("Translation rules allow translation for language: \(detectedLanguage)")
+                        
+                        // Translate to user's preferred language
+                        let targetLanguage = ConfigManager.shared.getUserPreferredLanguage()
+                finalTranslationLanguage = targetLanguage
+                
+                // Translate message using non-streaming mode
+                do {
+                    let translationResult = try await translateMessage(message.content, to: targetLanguage) 
+                            finalLanguage = translationResult.fromLanguage ?? ""
+                            finalTranslation = translationResult.translated
+                    
+                    Logger.info("Translated message: \(message.content.prefix(30))... -> \(translationResult.translated.prefix(30))...")
+                            Logger.info("Detected source language: \(finalLanguage ?? "unknown")")
+                
+                    // Save to database
+                            let timestamp = ChatMessagesUtil.parseTimestamp(message.timestamp) ?? Date()
+                    let messageRecord = MessageRecord(
+                        sender: message.sender,
+                        content: message.content,
+                        contentHash: contentHash,
+                                contentLanguage: finalLanguage ?? "",
+                                contentTranslation: finalTranslation ?? "",
+                        contentTranslationLanguage: targetLanguage,
+                        contentTimestamp: timestamp,
+                        chatApp: "WhatsApp",
+                        sessionId: currentSessionId
+                    )
+                    
+                    _ = dbManager.insertMessage(messageRecord)
+                            
+                            // Update lastMessageTimestamp after successful insertion
+                            lastMessageTimestamp = timestamp
+                            Logger.debug("Updated lastMessageTimestamp to: \(timestamp)")
                 } catch {
                     Logger.error("Failed to translate message: \(error)")
                     finalTranslation = "[Translation failed]"
+                        }
+                    } else {
+                        Logger.info("Translation rules do not allow translation for language: \(detectedLanguage), skipping translation")
+                        
+                        // Save message to database without translation
+                        let timestamp = ChatMessagesUtil.parseTimestamp(message.timestamp) ?? Date()
+                        let messageRecord = MessageRecord(
+                            sender: message.sender,
+                            content: message.content,
+                            contentHash: contentHash,
+                            contentLanguage: detectedLanguage,
+                            contentTranslation: "", // No translation
+                            contentTranslationLanguage: "", // No translation language
+                            contentTimestamp: timestamp,
+                            chatApp: "WhatsApp",
+                            sessionId: currentSessionId
+                        )
+                        
+                        _ = dbManager.insertMessage(messageRecord)
+                        
+                        // Update lastMessageTimestamp after successful insertion
+                        lastMessageTimestamp = timestamp
+                        Logger.debug("Updated lastMessageTimestamp to: \(timestamp)")
+                    }
                 }
             }
             
@@ -445,31 +507,227 @@ class ChatTranslationWindow: NSWindow {
             )
             
             // Add to messages array maintaining chronological order
-            messages.append(processedMessage) 
+            messages.append(processedMessage)
             
             // Keep messages within limit
             if messages.count > maxMessagesLimit {
-                messages.removeFirst() 
-            }
-            
-            // Update UI immediately after each message is processed
-            await MainActor.run {
-                self.updateChatTranslationView()
-            }
+                messages.removeFirst()
         }
         
+            // Update UI immediately after each message is processed
+        await MainActor.run {
+            self.updateChatTranslationView()
+        }
+    }
+    
         // Hide translation indicator after all messages are processed
         await MainActor.run {
             chatTranslationData?.setTranslating(false)
         }
     }
  
-    /// Detect language of text (simple heuristic)
-//    private func detectLanguage(_ text: String) -> String {
-//        // Simple detection: check for Chinese characters
-//        let chineseRange = text.range(of: "\\p{Han}", options: .regularExpression)
-//        return chineseRange != nil ? "zh" : "en"
-//    }
+    /// Detect language of text using macOS NSLinguisticTagger
+    private func detectLanguage(_ text: String) -> String {
+        // Use NSLinguisticTagger for accurate language detection
+        let tagger = NSLinguisticTagger(tagSchemes: [.language], options: 0)
+        tagger.string = text
+        
+        // Get the dominant language
+        let language = tagger.dominantLanguage
+        
+        Logger.debug("NSLinguisticTagger detected language: \(language ?? "unknown") for text: \(text.prefix(50))...")
+        
+        // Map language codes to our standard format
+        if let detectedLanguage = language {
+            switch detectedLanguage {
+            case "zh-Hans", "zh-CN":
+                return "zh" // Simplified Chinese
+            case "zh-Hant", "zh-TW", "zh-HK":
+                return "zh" // Traditional Chinese (map to zh for now)
+        case "ja":
+                return "ja" // Japanese
+        case "ko":
+                return "ko" // Korean
+            case "ar":
+                return "ar" // Arabic
+            case "th":
+                return "th" // Thai
+            case "hi":
+                return "hi" // Hindi
+            case "ru":
+                return "ru" // Russian
+            case "el":
+                return "el" // Greek
+            case "he":
+                return "he" // Hebrew
+            case "en":
+                return "en" // English
+        case "es":
+                return "es" // Spanish
+        case "fr":
+                return "fr" // French
+        case "de":
+                return "de" // German
+        case "it":
+                return "it" // Italian
+        case "pt":
+                return "pt" // Portuguese
+            case "nl":
+                return "nl" // Dutch
+            case "pl":
+                return "pl" // Polish
+            case "tr":
+                return "tr" // Turkish
+            case "vi":
+                return "vi" // Vietnamese
+            case "id":
+                return "id" // Indonesian
+            case "ms":
+                return "ms" // Malay
+            case "sv":
+                return "sv" // Swedish
+            case "da":
+                return "da" // Danish
+            case "no":
+                return "no" // Norwegian
+            case "fi":
+                return "fi" // Finnish
+            case "cs":
+                return "cs" // Czech
+            case "sk":
+                return "sk" // Slovak
+            case "hu":
+                return "hu" // Hungarian
+            case "ro":
+                return "ro" // Romanian
+            case "bg":
+                return "bg" // Bulgarian
+            case "hr":
+                return "hr" // Croatian
+            case "sr":
+                return "sr" // Serbian
+            case "sl":
+                return "sl" // Slovenian
+            case "et":
+                return "et" // Estonian
+            case "lv":
+                return "lv" // Latvian
+            case "lt":
+                return "lt" // Lithuanian
+            case "uk":
+                return "uk" // Ukrainian
+            case "be":
+                return "be" // Belarusian
+            case "mk":
+                return "mk" // Macedonian
+            case "sq":
+                return "sq" // Albanian
+            case "fa":
+                return "fa" // Persian
+            case "ur":
+                return "ur" // Urdu
+            case "bn":
+                return "bn" // Bengali
+            case "ta":
+                return "ta" // Tamil
+            case "te":
+                return "te" // Telugu
+            case "ml":
+                return "ml" // Malayalam
+            case "kn":
+                return "kn" // Kannada
+            case "gu":
+                return "gu" // Gujarati
+            case "pa":
+                return "pa" // Punjabi
+            case "mr":
+                return "mr" // Marathi
+            case "ne":
+                return "ne" // Nepali
+            case "si":
+                return "si" // Sinhala
+            case "my":
+                return "my" // Burmese
+            case "km":
+                return "km" // Khmer
+            case "lo":
+                return "lo" // Lao
+            case "ka":
+                return "ka" // Georgian
+            case "hy":
+                return "hy" // Armenian
+            case "az":
+                return "az" // Azerbaijani
+            case "kk":
+                return "kk" // Kazakh
+            case "ky":
+                return "ky" // Kyrgyz
+            case "uz":
+                return "uz" // Uzbek
+            case "tg":
+                return "tg" // Tajik
+            case "mn":
+                return "mn" // Mongolian
+            case "bo":
+                return "bo" // Tibetan
+            case "am":
+                return "am" // Amharic
+            case "sw":
+                return "sw" // Swahili
+            case "zu":
+                return "zu" // Zulu
+            case "af":
+                return "af" // Afrikaans
+            case "is":
+                return "is" // Icelandic
+            case "mt":
+                return "mt" // Maltese
+            case "cy":
+                return "cy" // Welsh
+            case "ga":
+                return "ga" // Irish
+            case "eu":
+                return "eu" // Basque
+            case "ca":
+                return "ca" // Catalan
+            case "gl":
+                return "gl" // Galician
+        default:
+                // For unknown languages, return the detected language code as is
+                Logger.debug("Unknown language detected: \(detectedLanguage), using as is")
+                return detectedLanguage
+            }
+        }
+        
+        // Fallback to English if no language detected
+        Logger.debug("No language detected by NSLinguisticTagger, defaulting to English")
+        return "en"
+    }
+    
+    /// Check if message should be translated based on translation rules
+    private func shouldTranslateMessage(sourceLanguage: String) -> Bool {
+        let settings = ConfigManager.shared.loadAppSettings()
+        
+        Logger.debug("Checking translation rules for language: \(sourceLanguage)")
+        Logger.debug("Translation rule type: \(settings.translationRuleType)")
+        Logger.debug("Includes languages: \(settings.translationRuleLanguagesIncludes)")
+        Logger.debug("Excludes languages: \(settings.translationRuleLanguagesExcludes)")
+        
+        if settings.translationRuleType == "includes" {
+            // In includes mode, only translate if the language is in the includes list
+            let shouldTranslate = settings.translationRuleLanguagesIncludes.contains(sourceLanguage)
+            Logger.debug("Includes mode: language \(sourceLanguage) should translate: \(shouldTranslate)")
+            return shouldTranslate
+        } else {
+            // In excludes mode, translate all languages except those in the excludes list
+            // Note: Preferred language is automatically excluded in excludes mode
+            let preferredLanguage = ConfigManager.shared.getUserPreferredLanguage()
+            let isExcluded = settings.translationRuleLanguagesExcludes.contains(sourceLanguage) || sourceLanguage == preferredLanguage
+            let shouldTranslate = !isExcluded
+            Logger.debug("Excludes mode: language \(sourceLanguage) is excluded: \(isExcluded), should translate: \(shouldTranslate)")
+            return shouldTranslate
+        }
+    }
     
     /// Translate message using TranslatorClient
     private func translateMessage(_ text: String, to language: String) async throws -> TranslationResult {
@@ -483,8 +741,55 @@ class ChatTranslationWindow: NSWindow {
                 }
             }
         }
-    } 
-     
+    }
+    
+    /// Get recent messages for external access
+    func getRecentMessages() -> [ChatMessage]? {
+        return messages.isEmpty ? nil : messages
+    }
+    
+    /// Add user message immediately after sending (without waiting for timer)
+    func addUserMessage(originalText: String, translatedText: String, sourceLanguage: String?, targetLanguage: String, sessionId: String) {
+        Logger.info("Adding user message immediately: '\(originalText)' -> '\(translatedText)'")
+        
+        // Check if this is the correct session
+        if sessionId != currentSessionId {
+            Logger.debug("Session mismatch: current=\(currentSessionId), provided=\(sessionId), skipping immediate add")
+            return
+        }
+        
+        // Create ChatMessage with proper translation data
+        let timestamp = Date()
+        let formattedTimestamp = formatTimestamp(timestamp)
+        
+        let chatMessage = ChatMessage(
+            sender: "You",
+            content: originalText,  // 原文
+            timestamp: formattedTimestamp,
+            isFromMe: true,
+            contentTranslation: translatedText,  // 译文
+            contentLanguage: sourceLanguage ?? "unknown",
+            contentTranslationLanguage: targetLanguage,
+            contentHash: DatabaseManager.shared.calculateContentHash(originalText)
+        )
+        
+        // Add to messages array
+        messages.append(chatMessage)
+        
+        // Keep messages within limit
+        if messages.count > maxMessagesLimit {
+            messages.removeFirst()
+        }
+        
+        // Update lastMessageTimestamp
+        lastMessageTimestamp = timestamp
+        
+        // Update UI immediately
+        updateChatTranslationView()
+        
+        Logger.debug("User message added immediately to chat window")
+    }
+
 }
 
 /// Observable data model for chat translation view
@@ -724,7 +1029,7 @@ struct MessageView: View {
                 HStack(spacing: 8) {
                     if !message.isFromMe {
                         Text(message.sender)
-                            .font(.caption) 
+                            .font(.caption)
                             .fontWeight(.medium)
                             .foregroundColor(.secondary)
                         

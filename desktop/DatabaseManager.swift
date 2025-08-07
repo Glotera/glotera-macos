@@ -423,6 +423,42 @@ class DatabaseManager {
         return nil
     }
     
+    /// Get the language of the most recent received message (not from user) in a session
+    func getLastReceivedMessageLanguage(forApp appName: String, sessionId: String) -> String? {
+        let querySQL = """
+            SELECT content_language
+            FROM messages 
+            WHERE chat_app = ? AND session_id = ? AND sender != 'You'
+            ORDER BY content_timestamp DESC
+            LIMIT 1;
+        """
+        
+        Logger.debug("🔍 Executing SQL query for getLastReceivedMessageLanguage:")
+        Logger.debug("📄 SQL: \(querySQL.replacingOccurrences(of: "\n", with: " "))")
+        Logger.debug("📋 Parameters: appName='\(appName)', sessionId='\(sessionId)'")
+        
+        var statement: OpaquePointer?
+        
+        guard sqlite3_prepare_v2(db, querySQL, -1, &statement, nil) == SQLITE_OK else {
+            Logger.error("Failed to prepare last received message language query")
+            return nil
+        }
+        
+        defer { sqlite3_finalize(statement) }
+        
+        sqlite3_bind_text(statement, 1, (appName as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(statement, 2, (sessionId as NSString).utf8String, -1, nil)
+        
+        if sqlite3_step(statement) == SQLITE_ROW {
+            let languageStr = String(cString: sqlite3_column_text(statement, 0))
+            Logger.info("✅ Found last received message language: '\(languageStr)' for session: '\(sessionId)'")
+            return languageStr
+        }
+        
+        Logger.warn("❌ No received messages found for appName: '\(appName)', sessionId: '\(sessionId)'")
+        return nil
+    }
+    
     /// Test database functionality
     func testDatabase() {
         Logger.info("Testing database functionality...")

@@ -599,4 +599,14 @@ class ChatTranslationManager: NSObject {
     }
     
     // positionWindowAtScreenRightEdge method removed - window positioning is now handled by ChatTranslationWindow
+    
+    /// Get the chat translation window instance
+    func getChatTranslationWindow() -> ChatTranslationWindow? {
+        return chatTranslationWindow
+    }
+    
+    /// Check if translation window is currently visible
+    func getTranslationWindowVisible() -> Bool {
+        return isTranslationWindowVisible
+    }
 } 

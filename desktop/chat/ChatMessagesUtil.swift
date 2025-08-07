@@ -50,12 +50,41 @@ class ChatMessagesUtil {
        
     /// Print the entire element tree for debugging in JSON format
     static func printElementTree(_ element: AXUIElement, depth: Int = -1) {
+        // 重置访问状态，防止多次调用时的状态残留
+        visitedElements.removeAll()
+        
         let jsonString = buildOrderedJSON(element, currentDepth: 0, maxDepth: depth) 
         Logger.info(jsonString) 
+        
+        // 清理访问状态，释放内存
+        visitedElements.removeAll()
     }
+    
+    /// Visited elements to prevent infinite recursion
+    private static var visitedElements: Set<String> = []
+    private static let maxRecursionDepth = 50  // Maximum recursion depth
     
     /// Extract element data recursively and build JSON structure
     private static func extractElementData(_ element: AXUIElement, currentDepth: Int, maxDepth: Int) -> [String: Any] {
+        // 防止过深的递归
+        if currentDepth > maxRecursionDepth {
+            Logger.warn("Maximum recursion depth (\(maxRecursionDepth)) reached, stopping traversal")
+            return ["error": "max_depth_reached", "depth": currentDepth]
+        }
+        
+        // 创建元素的唯一标识符
+        let elementPointer = Unmanaged.passUnretained(element).toOpaque()
+        let elementId = "\(elementPointer)"
+        
+        // 检查是否已经访问过这个元素（防止循环引用）
+        if visitedElements.contains(elementId) {
+            Logger.warn("Circular reference detected for element at depth \(currentDepth), skipping")
+            return ["error": "circular_reference", "depth": currentDepth, "elementId": elementId]
+        }
+        
+        // 标记这个元素为已访问
+        visitedElements.insert(elementId)
+        
         var elementData: [String: Any] = [:]
         
         // Get element role
@@ -124,6 +153,9 @@ class ChatMessagesUtil {
         orderedData["depth"] = elementData["depth"] ?? 0
         orderedData["childrenCount"] = elementData["childrenCount"] ?? 0
         orderedData["children"] = elementData["children"] ?? []
+        
+        // 回溯时移除访问标记，允许在不同路径中重新访问同一元素
+        visitedElements.remove(elementId)
         
         return orderedData
     }
