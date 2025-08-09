@@ -221,17 +221,26 @@ class ChatTranslationManager: NSObject {
         
         Logger.info("showTranslationWindow called with currentActiveApp: bundleId=\(currentActiveApp.bundleId), appName=\(currentActiveApp.appName)")
         
+        // Check if this is WhatsApp or other chat app
+        let isWhatsApp = AppDetectionManager.shared.isWhatsAppApp(bundleId: currentActiveApp.bundleId)
+        
         // Create window if it doesn't exist
         if chatTranslationWindow == nil {
             chatTranslationWindow = ChatTranslationWindow()
             Logger.debug("Created new ChatTranslationWindow instance")
         }
         
-        // Show the window next to the chat application
-        chatTranslationWindow?.showWindowAtScreenSide(currentActiveApp)
-        isTranslationWindowVisible = true
+        if isWhatsApp {
+            // Show the normal translation window for WhatsApp
+            chatTranslationWindow?.showWindowAtScreenSide(currentActiveApp)
+            isTranslationWindowVisible = true
+            Logger.info("Translation window shown for WhatsApp: \(currentActiveApp.appName)")
+        } else {
+            // Show unsupported app message for other chat apps
+            showTranslationWindowForUnsupportedApp(currentActiveApp)
+            Logger.info("Translation window shown with unsupported message for: \(currentActiveApp.appName)")
+        }
         
-        Logger.info("Translation window shown and marked as visible for app: \(currentActiveApp.appName)")
         Logger.debug("Translation window visible state: \(isTranslationWindowVisible)")
     }
     
@@ -467,6 +476,9 @@ class ChatTranslationManager: NSObject {
         Logger.debug("AppDetectionManager.isChatApp(\(bundleId)) = \(isChatApp)")
         
         if isChatApp {
+            // Check if this is WhatsApp (fully supported) or other chat app (needs user action)
+            let isWhatsApp = AppDetectionManager.shared.isWhatsAppApp(bundleId: bundleId)
+            
             // Check if this is the same app we're already monitoring
             if bundleId == lastActiveAppBundleId {
                 // Same app, no need to reinitialize - preserve current state
@@ -492,12 +504,27 @@ class ChatTranslationManager: NSObject {
                 javaScriptPermissionsEnabled: false
             )
             
-            // Enable logo bar for chat application (Grammarly-style UX)
-            enableLogoBarForApp(appInfo)
-            lastActiveAppBundleId = bundleId
-            currentActiveApp = appInfo
-            
-            Logger.info("Chat application activated: \(cleanAppName) - Logo bar enabled")
+            if isWhatsApp {
+                // WhatsApp: Enable logo bar and allow auto-show of translation window
+                enableLogoBarForApp(appInfo)
+                lastActiveAppBundleId = bundleId
+                currentActiveApp = appInfo
+                Logger.info("WhatsApp activated: \(cleanAppName) - Logo bar enabled, auto-translation supported")
+            } else {
+                // Other chat apps: Enable logo bar but hide translation window automatically
+                enableLogoBarForApp(appInfo)
+                lastActiveAppBundleId = bundleId
+                currentActiveApp = appInfo
+                
+                // Hide translation window for unsupported chat apps (user needs to click logo to see unsupported message)
+                if isTranslationWindowVisible {
+                    chatTranslationWindow?.orderOut(nil)
+                    isTranslationWindowVisible = false
+                    Logger.info("Unsupported chat app activated: \(cleanAppName) - Logo bar enabled but translation window hidden")
+                } else {
+                    Logger.info("Unsupported chat app activated: \(cleanAppName) - Logo bar enabled (window already hidden)")
+                }
+            }
         } else if lastActiveAppBundleId != nil {
             // If a non-chat app was activated, hide translation window but keep user control state
             logoBarManager.disable()
