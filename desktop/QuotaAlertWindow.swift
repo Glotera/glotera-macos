@@ -248,7 +248,7 @@ class QuotaAlertWindow: NSWindow {
     }
     
     private func openUpgradePage() {
-        let upgradeURL = "https://glotera.ai/upgrade"
+        let upgradeURL = "https://glotera.ai/pricing"
         
         if let url = URL(string: upgradeURL) {
             NSWorkspace.shared.open(url)
@@ -261,7 +261,7 @@ class QuotaAlertWindow: NSWindow {
             alert.messageText = "Upgrade Information"
             alert.informativeText = """
             Please visit the following URL to upgrade to Pro:
-            https://glotera.ai/upgrade
+            https://glotera.ai/pricing
             
             Or contact support for assistance:
             support@glotera.ai

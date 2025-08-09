@@ -321,6 +321,12 @@ class GloteraLogoBarManager: NSObject {
     func enable() {
         guard !isEnabled else { return }
         
+        // Check if user has access to chat translation feature
+        guard SessionManager.shared.hasChatTranslationAccess() else {
+            Logger.info("Cannot enable logo bar - user does not have Pro/Max access")
+            return
+        }
+        
         isEnabled = true
         mouseTracker.startTracking()
         Logger.info("Glotera logo bar manager enabled")
@@ -352,6 +358,12 @@ class GloteraLogoBarManager: NSObject {
     /// Show logo bar on specified screen
     private func showLogoBar(on screen: NSScreen) {
         guard isEnabled else { return }
+        
+        // Double-check user has access before showing logo bar
+        guard SessionManager.shared.hasChatTranslationAccess() else {
+            Logger.debug("Skipping logo bar display - user does not have Pro/Max access")
+            return
+        }
         
         // Cancel any pending hide timer
         hideTimer?.invalidate()

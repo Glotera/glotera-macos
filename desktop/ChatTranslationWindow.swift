@@ -80,7 +80,11 @@ class ChatTranslationWindow: NSWindow {
         currentAppInfo = appInfo
         appName = appInfo.appName
         
-        if appInfo.bundleId == "net.whatsapp.WhatsApp" {
+        // Check if user has access to chat translation feature
+        if !SessionManager.shared.hasChatTranslationAccess() {
+            Logger.info("User does not have chat translation access - showing upgrade message")
+            showUpgradeRequiredMessage(appInfo.appName)
+        } else if appInfo.bundleId == "net.whatsapp.WhatsApp" {
             // Supported app - show normal translation interface
             Logger.info("WhatsApp detected - showing normal translation interface")
             updateChatTranslationView()
@@ -242,6 +246,38 @@ class ChatTranslationWindow: NSWindow {
         chatTranslationData?.setUnsupportedApp(true)
         
         Logger.info("Showing unsupported app message for: \(appName)")
+    }
+    
+    /// Show upgrade required message for free users
+    private func showUpgradeRequiredMessage(_ appName: String) {
+        // Clear current messages and session
+        messages.removeAll()
+        messageHashes.removeAll()
+        currentSessionId = "default"
+        lastMessageTimestamp = nil
+        
+        // Initialize data and view only once
+        if chatTranslationData == nil {
+            chatTranslationData = ChatTranslationData()
+            
+            let chatView = ChatTranslationView(
+                data: chatTranslationData!,
+                onClose: { [weak self] in
+                    // Notify ChatTranslationManager that window was closed by user
+                    ChatTranslationManager.shared.notifyWindowClosedByUser()
+                    self?.hideWindow()
+                }
+            )
+            
+            hostingView = NSHostingView(rootView: chatView)
+            self.contentView = hostingView
+        }
+        
+        // Update data with upgrade required message
+        chatTranslationData?.updateData(appName: appName, sessionId: "", messages: [])
+        chatTranslationData?.setUpgradeRequired(true)
+        
+        Logger.info("Showing upgrade required message for: \(appName)")
     }
     
     
@@ -745,6 +781,7 @@ class ChatTranslationData: ObservableObject {
     @Published var messages: [ChatMessage] = []
     @Published var isTranslating: Bool = false
     @Published var isUnsupportedApp: Bool = false
+    @Published var isUpgradeRequired: Bool = false
     @Published var isLoadingHistory: Bool = false // Track initial history loading state
     
     func updateData(appName: String, sessionId: String, messages: [ChatMessage]) {
@@ -768,12 +805,17 @@ class ChatTranslationData: ObservableObject {
         isUnsupportedApp = unsupported
     }
     
+    func setUpgradeRequired(_ upgradeRequired: Bool) {
+        isUpgradeRequired = upgradeRequired
+    }
+    
     func clear() {
         appName = ""
         sessionId = ""
         messages.removeAll()
         isTranslating = false
         isUnsupportedApp = false
+        isUpgradeRequired = false
     }
 }
 
@@ -786,6 +828,7 @@ struct ChatTranslationView: View {
     var sessionId: String { data.sessionId }
     var messages: [ChatMessage] { data.messages }
     var isUnsupportedApp: Bool { data.isUnsupportedApp }
+    var isUpgradeRequired: Bool { data.isUpgradeRequired }
     
     var body: some View {
         VStack(spacing: 0) {
@@ -824,7 +867,58 @@ struct ChatTranslationView: View {
             ScrollViewReader { proxy in
                 ScrollView(.vertical, showsIndicators: true) {
                     LazyVStack(alignment: .leading, spacing: 8) {
-                        if isUnsupportedApp {
+                        if isUpgradeRequired {
+                            // Show upgrade required message
+                            VStack(spacing: 16) {
+                                Spacer()
+                                
+                                Image(systemName: "star.circle.fill")
+                                    .font(.system(size: 48))
+                                    .foregroundColor(.yellow)
+                                
+                                Text("Pro Feature")
+                                    .font(.title2)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.primary)
+                                    .multilineTextAlignment(.center)
+                                
+                                Text("Chat translation is available for Pro and Max users")
+                                    .font(.body)
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal, 20)
+                                
+                                VStack(spacing: 8) {
+                                    Text("• Pro: 500 translations/month - $2.9")
+                                    Text("• Max: Unlimited translations - $4.9")
+                                }
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .padding(.top, 8)
+                                
+                                Button(action: {
+                                    // Open upgrade page
+                                    if let url = URL(string: "https://glotera.ai/pricing") {
+                                        NSWorkspace.shared.open(url)
+                                    }
+                                }) {
+                                    Text("Upgrade Now")
+                                        .font(.body)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 20)
+                                        .padding(.vertical, 8)
+                                        .background(Color.blue)
+                                        .cornerRadius(16)
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                .padding(.top, 8)
+                                
+                                Spacer()
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .padding()
+                        } else if isUnsupportedApp {
                             // Show unsupported app message
                             VStack(spacing: 16) {
                                 Spacer()

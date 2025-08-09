@@ -398,6 +398,16 @@ class SessionManager {
         return (hasCachedEntry, pendingCount)
     }
     
+    /// Check if current user has access to chat translation feature (Pro/Max only)
+    func hasChatTranslationAccess() -> Bool {
+        guard let user = getCurrentUser() else {
+            return false
+        }
+        
+        // Allow access for pro and enterprise (max) users only
+        return user.userType.lowercased() == "pro" || user.userType.lowercased() == "max"
+    }
+    
     // MARK: - Private UserDefaults Methods
     
     private func getStoredToken() -> String? {
