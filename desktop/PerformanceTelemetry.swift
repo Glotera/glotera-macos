@@ -371,21 +371,21 @@ class PerformanceTelemetry {
         let summary = getPerformanceSummary()
         let critical = getCriticalMetrics()
         
-        Logger.info("📊 Performance Summary:")
-        Logger.info("  - Total metrics: \(summary["total_metrics"] ?? 0)")
-        Logger.info("  - Total operations: \(summary["total_operations"] ?? 0)")
-        Logger.info("  - Success rate: \(String(format: "%.1f", (summary["success_rate"] as? Double ?? 0) * 100))%")
+        Logger.debug("📊 Performance Summary:")
+        Logger.debug("  - Total metrics: \(summary["total_metrics"] ?? 0)")
+        Logger.debug("  - Total operations: \(summary["total_operations"] ?? 0)")
+        Logger.debug("  - Success rate: \(String(format: "%.1f", (summary["success_rate"] as? Double ?? 0) * 100))%")
         
         if let authCacheHitRate = critical["auth_cache_hit_rate"] {
-            Logger.info("  - Auth cache hit rate: \(String(format: "%.1f", authCacheHitRate * 100))%")
+            Logger.debug("  - Auth cache hit rate: \(String(format: "%.1f", authCacheHitRate * 100))%")
         }
         
         if let avgTranslationTime = critical["avg_translation_time_ms"] {
-            Logger.info("  - Avg translation time: \(String(format: "%.0f", avgTranslationTime))ms")
+            Logger.debug("  - Avg translation time: \(String(format: "%.0f", avgTranslationTime))ms")
         }
         
         if let memoryUsage = critical["memory_usage_mb"] {
-            Logger.info("  - Memory usage: \(String(format: "%.1f", memoryUsage))MB")
+            Logger.debug("  - Memory usage: \(String(format: "%.1f", memoryUsage))MB")
         }
     }
     

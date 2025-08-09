@@ -766,7 +766,7 @@ struct LanguageConfigRow: View {
 class LanguageConfigViewModel: ObservableObject {
     @Published var configs: [LanguageConfig] = []
     @Published var searchText: String = ""
-    @Published var preferredLanguage: String = Locale.current.language.languageCode?.identifier ?? "en"
+    @Published var preferredLanguage: String = EnvironmentManager.shared.getSystemLanguage()
     @Published var translationRuleType: String = "excludes"
     @Published var translationRuleLanguagesIncludes: [String] = []
     @Published var translationRuleLanguagesExcludes: [String] = []

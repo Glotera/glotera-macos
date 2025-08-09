@@ -116,11 +116,16 @@ class ChatTranslationWindow: NSWindow {
     private func loadRecentMessagesFromDatabase(appName: String, sessionId: String, limit: Int = 50) {
         let dbManager = DatabaseManager.shared
         
+        // Set loading state for UI
+        chatTranslationData?.isLoadingHistory = true
+        
         // Clear current messages before loading from database
         messages.removeAll()
         messageHashes.removeAll()
         
-        let recentRecords = dbManager.getRecentMessages(forApp: appName, sessionId: sessionId, limit: limit)
+        var recentRecords = dbManager.getRecentMessages(forApp: appName, sessionId: sessionId, limit: limit)
+        // Sort by created_time ascending to ensure stable order within the same minute
+        recentRecords.sort { $0.createdTime < $1.createdTime }
         
         Logger.info("Loading \(recentRecords.count) recent messages from database for session: \(sessionId)")
         
@@ -137,9 +142,12 @@ class ChatTranslationWindow: NSWindow {
                 contentHash: record.contentHash
             )
             
-            // Add to messages array and tracking set
-            messages.append(message)
-            messageHashes.insert(message.messageHash)
+            // Skip empty content
+            if !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                // Add to messages array and tracking set
+                messages.append(message)
+                messageHashes.insert(message.messageHash)
+            }
         }
         
         // Get the timestamp of the last message for filtering new messages
@@ -159,6 +167,14 @@ class ChatTranslationWindow: NSWindow {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US")
         formatter.dateFormat = "MMMM d, HH:mm"
+        return formatter.string(from: date)
+    }
+    
+    /// Format timestamp for database/message string (yyyy-MM-dd HH:mm:ss)
+    private func formatDbTimestampString(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
         return formatter.string(from: date)
     }
     
@@ -193,6 +209,7 @@ class ChatTranslationWindow: NSWindow {
         // Update data instead of recreating the view
         chatTranslationData?.updateData(appName: appName, sessionId: currentSessionId, messages: messages)
         chatTranslationData?.setUnsupportedApp(false) // Reset unsupported app state for supported apps
+        chatTranslationData?.isLoadingHistory = false // Clear loading state after UI update
     }
     
     /// Show unsupported app message
@@ -332,27 +349,87 @@ class ChatTranslationWindow: NSWindow {
         if lastMessageTimestamp == nil {
             let dbManager = DatabaseManager.shared
             lastMessageTimestamp = dbManager.getLastMessageTimestamp(forApp: appName, sessionId: currentSessionId)
-        if let lastTimestamp = lastMessageTimestamp {
-                Logger.info("Set lastMessageTimestamp from database: \(lastTimestamp)")
-        } else {
+            if let lastTimestamp = lastMessageTimestamp {
+                    Logger.info("Set lastMessageTimestamp from database: \(lastTimestamp)")
+            } else {
                 Logger.info("No previous messages found in database for session: \(currentSessionId)")
             }
         }
 
         // Extract messages from WhatsApp with timestamp filtering
-        let extractedMessages = WhatsAppMessagesProcessor.extractMessages(from: activeApp, filterAfterTimestamp: lastMessageTimestamp ?? Date.distantPast)
+        // Align filter to minute start minus 1s so that messages within the same minute are included
+        let filterAfterTs: Date = {
+            guard let lastTs = lastMessageTimestamp else { return Date.distantPast }
+            let calendar = Calendar(identifier: .gregorian)
+            var comps = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: lastTs)
+            comps.second = 0
+            let minuteFloor = calendar.date(from: comps) ?? lastTs
+            return minuteFloor.addingTimeInterval(-1)
+        }()
+        let extractedMessages = WhatsAppMessagesProcessor.extractMessages(from: activeApp, filterAfterTimestamp: filterAfterTs)
          
         
         // Only process if there are actually new messages
         if !extractedMessages.isEmpty {
             Logger.info("Found \(extractedMessages.count) new messages")
             
-            // Process messages with translation in background
-            Task {
-                await self.processNewMessages(extractedMessages)
-                // Reset fetching flag after processing is complete
-                await MainActor.run {
-                    self.isFetchingMessages = false
+            // Same-minute post check: if message is in the same minute as lastTimestamp and
+            // DB has no same-minute record with the same hash, treat it as new and set its time to lastTimestamp+1s.
+            let finalNewMessages: [ChatMessage] = {
+                guard let lastTs = self.lastMessageTimestamp else { return extractedMessages }
+                let calendar = Calendar(identifier: .gregorian)
+                let lastMinuteComps = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: lastTs)
+                var results: [ChatMessage] = []
+                for msg in extractedMessages {
+                    guard let msgDate = ChatMessagesUtil.parseTimestamp(msg.timestamp) else {
+                        results.append(msg)
+                        continue
+                    }
+                    if msgDate > lastTs {
+                        results.append(msg)
+                        continue
+                    }
+                    if msg.isFromMe { continue }
+                    let msgComps = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: msgDate)
+                    let sameMinute = (msgComps.year == lastMinuteComps.year &&
+                                      msgComps.month == lastMinuteComps.month &&
+                                      msgComps.day == lastMinuteComps.day &&
+                                      msgComps.hour == lastMinuteComps.hour &&
+                                      msgComps.minute == lastMinuteComps.minute)
+                    if sameMinute {
+                        let hash = DatabaseManager.shared.calculateContentHash(msg.content)
+                        var minuteStartComps = lastMinuteComps
+                        minuteStartComps.second = 0
+                        let minuteStart = calendar.date(from: minuteStartComps) ?? lastTs
+                        let exists = DatabaseManager.shared.hasReceivedMessageHashInSameMinute(appName: self.appName, sessionId: self.currentSessionId, contentHash: hash, minuteStart: minuteStart)
+                        if !exists {
+                            // Treat as new and adjust timestamp to lastTs + 1s
+                            let adjusted = lastTs.addingTimeInterval(1)
+                            let adjustedMsg = ChatMessage(
+                                messageType: msg.messageType,
+                                content: msg.content,
+                                sender: msg.sender,
+                                timestamp: self.formatDbTimestampString(adjusted),
+                                isFromMe: msg.isFromMe
+                            )
+                            results.append(adjustedMsg)
+                        }
+                    }
+                }
+                return results
+            }()
+
+            // If nothing new after same-minute check, do nothing to avoid UI flicker
+            if finalNewMessages.isEmpty {
+                self.isFetchingMessages = false
+            } else {
+                // Process messages with translation in background
+                Task {
+                    await self.processNewMessages(finalNewMessages)
+                    // Reset fetching flag after processing is complete
+                    await MainActor.run {
+                        self.isFetchingMessages = false
+                    }
                 }
             }
         } else {
@@ -365,10 +442,26 @@ class ChatTranslationWindow: NSWindow {
     /// Process new messages with translation
     private func processNewMessages(_ newMessages: [ChatMessage]) async {
         let dbManager = DatabaseManager.shared
+
+        // Decide whether to show translation indicator (only if there exists a received message that will be translated)
+        let shouldShowIndicator: Bool = {
+            for msg in newMessages {
+                if !msg.isFromMe {
+                    let lang = ContentProcessor.detectLanguage(msg.content)
+                    if shouldTranslateMessage(sourceLanguage: lang) {
+                        return true
+                    }
+                }
+            }
+            return false
+        }()
         
-        // Show translation indicator
-        await MainActor.run {
-            chatTranslationData?.setTranslating(true)
+        // If messages array is empty and we're processing new messages, show loading state
+        let isInitialLoad = messages.isEmpty && !newMessages.isEmpty
+        if isInitialLoad {
+            await MainActor.run { self.chatTranslationData?.isLoadingHistory = true }
+        } else if shouldShowIndicator {
+            await MainActor.run { self.chatTranslationData?.setTranslating(true) }
         }
         
         for message in newMessages {
@@ -396,7 +489,7 @@ class ChatTranslationWindow: NSWindow {
                     Logger.info("Skipping translation for sent message: \(message.content.prefix(30))...")
                     
                     // For sent messages, only detect language but don't translate
-                    let detectedLanguage = detectLanguage(message.content)
+                    let detectedLanguage = ContentProcessor.detectLanguage(message.content)
                     finalLanguage = detectedLanguage
                     
                     // Save sent message to database without translation
@@ -423,7 +516,7 @@ class ChatTranslationWindow: NSWindow {
                     Logger.info("Checking translation rules for received message: \(message.content.prefix(30))...")
                     
                     // First detect the source language
-                    let detectedLanguage = detectLanguage(message.content)
+                    let detectedLanguage = ContentProcessor.detectLanguage(message.content)
                     finalLanguage = detectedLanguage
                     
                     Logger.info("Detected source language: \(detectedLanguage)")
@@ -446,7 +539,7 @@ class ChatTranslationWindow: NSWindow {
                             Logger.info("Detected source language: \(finalLanguage ?? "unknown")")
                 
                     // Save to database
-                            let timestamp = ChatMessagesUtil.parseTimestamp(message.timestamp) ?? Date()
+                    let timestamp = ChatMessagesUtil.parseTimestamp(message.timestamp) ?? Date()
                     let messageRecord = MessageRecord(
                         sender: message.sender,
                         content: message.content,
@@ -495,214 +588,51 @@ class ChatTranslationWindow: NSWindow {
             }
             
             // Create processed message with all translation fields
+            // Unify display timestamp format for received/sent messages
+            let displayTimestamp: String = {
+                if let parsed = ChatMessagesUtil.parseTimestamp(message.timestamp) {
+                    return self.formatTimestamp(parsed)
+                } else {
+                    return message.timestamp
+                }
+            }()
+            
             let processedMessage = ChatMessage(
                 sender: message.sender,
                 content: message.content,
-                timestamp: message.timestamp,
+                timestamp: displayTimestamp,
                 isFromMe: message.isFromMe,
                 contentTranslation: finalTranslation,
                 contentLanguage: finalLanguage,
                 contentTranslationLanguage: finalTranslationLanguage,
                 contentHash: contentHash
             )
-            
-            // Add to messages array maintaining chronological order
-            messages.append(processedMessage)
+
+            // Add only if content is not empty
+            if !processedMessage.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                // Add to messages array maintaining chronological order
+                messages.append(processedMessage)
+            }
             
             // Keep messages within limit
             if messages.count > maxMessagesLimit {
                 messages.removeFirst()
         }
         
-            // Update UI immediately after each message is processed
-        await MainActor.run {
-            self.updateChatTranslationView()
-        }
+            // Defer UI updates until after the loop to avoid flicker
     }
     
-        // Hide translation indicator after all messages are processed
-        await MainActor.run {
-            chatTranslationData?.setTranslating(false)
+        // Single UI update after all messages are processed to minimize flicker
+        await MainActor.run { self.updateChatTranslationView() }
+        if shouldShowIndicator {
+            await MainActor.run { self.chatTranslationData?.setTranslating(false) }
+        }
+        if isInitialLoad {
+            await MainActor.run { self.chatTranslationData?.isLoadingHistory = false }
         }
     }
  
-    /// Detect language of text using macOS NSLinguisticTagger
-    private func detectLanguage(_ text: String) -> String {
-        // Use NSLinguisticTagger for accurate language detection
-        let tagger = NSLinguisticTagger(tagSchemes: [.language], options: 0)
-        tagger.string = text
-        
-        // Get the dominant language
-        let language = tagger.dominantLanguage
-        
-        Logger.debug("NSLinguisticTagger detected language: \(language ?? "unknown") for text: \(text.prefix(50))...")
-        
-        // Map language codes to our standard format
-        if let detectedLanguage = language {
-            switch detectedLanguage {
-            case "zh-Hans", "zh-CN":
-                return "zh" // Simplified Chinese
-            case "zh-Hant", "zh-TW", "zh-HK":
-                return "zh" // Traditional Chinese (map to zh for now)
-        case "ja":
-                return "ja" // Japanese
-        case "ko":
-                return "ko" // Korean
-            case "ar":
-                return "ar" // Arabic
-            case "th":
-                return "th" // Thai
-            case "hi":
-                return "hi" // Hindi
-            case "ru":
-                return "ru" // Russian
-            case "el":
-                return "el" // Greek
-            case "he":
-                return "he" // Hebrew
-            case "en":
-                return "en" // English
-        case "es":
-                return "es" // Spanish
-        case "fr":
-                return "fr" // French
-        case "de":
-                return "de" // German
-        case "it":
-                return "it" // Italian
-        case "pt":
-                return "pt" // Portuguese
-            case "nl":
-                return "nl" // Dutch
-            case "pl":
-                return "pl" // Polish
-            case "tr":
-                return "tr" // Turkish
-            case "vi":
-                return "vi" // Vietnamese
-            case "id":
-                return "id" // Indonesian
-            case "ms":
-                return "ms" // Malay
-            case "sv":
-                return "sv" // Swedish
-            case "da":
-                return "da" // Danish
-            case "no":
-                return "no" // Norwegian
-            case "fi":
-                return "fi" // Finnish
-            case "cs":
-                return "cs" // Czech
-            case "sk":
-                return "sk" // Slovak
-            case "hu":
-                return "hu" // Hungarian
-            case "ro":
-                return "ro" // Romanian
-            case "bg":
-                return "bg" // Bulgarian
-            case "hr":
-                return "hr" // Croatian
-            case "sr":
-                return "sr" // Serbian
-            case "sl":
-                return "sl" // Slovenian
-            case "et":
-                return "et" // Estonian
-            case "lv":
-                return "lv" // Latvian
-            case "lt":
-                return "lt" // Lithuanian
-            case "uk":
-                return "uk" // Ukrainian
-            case "be":
-                return "be" // Belarusian
-            case "mk":
-                return "mk" // Macedonian
-            case "sq":
-                return "sq" // Albanian
-            case "fa":
-                return "fa" // Persian
-            case "ur":
-                return "ur" // Urdu
-            case "bn":
-                return "bn" // Bengali
-            case "ta":
-                return "ta" // Tamil
-            case "te":
-                return "te" // Telugu
-            case "ml":
-                return "ml" // Malayalam
-            case "kn":
-                return "kn" // Kannada
-            case "gu":
-                return "gu" // Gujarati
-            case "pa":
-                return "pa" // Punjabi
-            case "mr":
-                return "mr" // Marathi
-            case "ne":
-                return "ne" // Nepali
-            case "si":
-                return "si" // Sinhala
-            case "my":
-                return "my" // Burmese
-            case "km":
-                return "km" // Khmer
-            case "lo":
-                return "lo" // Lao
-            case "ka":
-                return "ka" // Georgian
-            case "hy":
-                return "hy" // Armenian
-            case "az":
-                return "az" // Azerbaijani
-            case "kk":
-                return "kk" // Kazakh
-            case "ky":
-                return "ky" // Kyrgyz
-            case "uz":
-                return "uz" // Uzbek
-            case "tg":
-                return "tg" // Tajik
-            case "mn":
-                return "mn" // Mongolian
-            case "bo":
-                return "bo" // Tibetan
-            case "am":
-                return "am" // Amharic
-            case "sw":
-                return "sw" // Swahili
-            case "zu":
-                return "zu" // Zulu
-            case "af":
-                return "af" // Afrikaans
-            case "is":
-                return "is" // Icelandic
-            case "mt":
-                return "mt" // Maltese
-            case "cy":
-                return "cy" // Welsh
-            case "ga":
-                return "ga" // Irish
-            case "eu":
-                return "eu" // Basque
-            case "ca":
-                return "ca" // Catalan
-            case "gl":
-                return "gl" // Galician
-        default:
-                // For unknown languages, return the detected language code as is
-                Logger.debug("Unknown language detected: \(detectedLanguage), using as is")
-                return detectedLanguage
-            }
-        }
-        
-        // Fallback to English if no language detected
-        Logger.debug("No language detected by NSLinguisticTagger, defaulting to English")
-        return "en"
-    }
+    // detectLanguage moved to ContentProcessor.detectLanguage
     
     /// Check if message should be translated based on translation rules
     private func shouldTranslateMessage(sourceLanguage: String) -> Bool {
@@ -773,8 +703,11 @@ class ChatTranslationWindow: NSWindow {
             contentHash: DatabaseManager.shared.calculateContentHash(originalText)
         )
         
-        // Add to messages array
-        messages.append(chatMessage)
+        // Add only if original content is not empty
+        if !chatMessage.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // Add to messages array
+            messages.append(chatMessage)
+        }
         
         // Keep messages within limit
         if messages.count > maxMessagesLimit {
@@ -799,6 +732,7 @@ class ChatTranslationData: ObservableObject {
     @Published var messages: [ChatMessage] = []
     @Published var isTranslating: Bool = false
     @Published var isUnsupportedApp: Bool = false
+    @Published var isLoadingHistory: Bool = false // Track initial history loading state
     
     func updateData(appName: String, sessionId: String, messages: [ChatMessage]) {
         self.appName = appName
@@ -901,6 +835,27 @@ struct ChatTranslationView: View {
                             }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .padding()
+                        } else if data.isLoadingHistory {
+                            VStack(spacing: 16) {
+                                Spacer()
+                                
+                                // Loading animation
+                                ProgressView()
+                                    .scaleEffect(1.2)
+                                    .progressViewStyle(CircularProgressViewStyle())
+                                
+                                Text("Loading chat history...")
+                                    .font(.body)
+                                    .foregroundColor(.secondary)
+                                
+                                Text("Please wait while we process your messages")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.center)
+                                
+                                Spacer()
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                         } else if messages.isEmpty {
                             VStack {
                                 Spacer()

@@ -52,6 +52,7 @@ class InputMonitor {
     var totalKeyEventCount = 0
     private var lastTranslationTime: Date?
     private var lastSelectionTranslationTime: Date?
+    // Using translation cache for consistency; no extra state needed for Enter bypass
     
     // MARK: - App Detection Caching
     private var cachedAppInfo: (bundleId: String, isChat: Bool, isWeChat: Bool, isDiscord: Bool, timestamp: Date)?
@@ -540,9 +541,65 @@ class InputMonitor {
         Logger.info("=== Without Trigger Translation ===")
         Logger.info("Input text: '\(text.prefix(50))...' (length: \(text.count))")
         
+        // Early-bypass: If current input equals a recent translated text (<=60s),
+        // directly send Enter and persist using cached original to keep UI/DB consistent
+        if let cached = findCachedTranslation(byTranslatedText: text) {
+            let age = Date().timeIntervalSince(cached.timestamp)
+            if age < 60 {
+                Logger.info("✅ Without-trigger early-bypass: matches cached translation (\(Int(age))s)")
+                DispatchQueue.main.async {
+                    InputManager.shared.sendEnterKey()
+                }
+                // Persist immediately so the chat window and DB have both original and translated
+                checkAndSaveTranslationOnSend(sentText: text)
+                EnvironmentManager.shared.clearTriggerAppInfo()
+                return
+            }
+        }
+        
         // 获取对方发送的语言
         let targetLanguage = getOpponentLanguage()
         Logger.info("Target language for translation: \(targetLanguage)")
+
+        // 如果输入语言与对方语言相同，则不进行翻译，直接发送，并保存到数据库
+        let sourceLanguage = ContentProcessor.detectLanguage(text)
+        let normalize: (String) -> String = { code in
+            let lower = code.lowercased()
+            if lower.hasPrefix("zh") { return lower.contains("tw") || lower.contains("hant") || lower.contains("hk") ? "zh-tw" : "zh" }
+            if let base = lower.split(separator: "-").first { return String(base) }
+            return lower
+        }
+        if !sourceLanguage.isEmpty && normalize(sourceLanguage) == normalize(targetLanguage) {
+            Logger.info("Source language (\(sourceLanguage)) equals opponent language (\(targetLanguage)). Skipping translation; will send original and persist record.")
+
+            // 获取应用与会话信息用于持久化
+            var appName = "Unknown"
+            var sessionId = "Unknown"
+            if let activeApp = NSWorkspace.shared.frontmostApplication, let bundleId = activeApp.bundleIdentifier {
+                appName = AppDetectionManager.shared.getChatAppName(bundleId: bundleId)
+                if AppDetectionManager.shared.isWhatsAppApp(bundleId: bundleId) {
+                    if let whatsappSessionId = WhatsAppMessagesProcessor.getCurrentChatSessionId(activeApp: activeApp) {
+                        sessionId = whatsappSessionId
+                    }
+                }
+            }
+
+            // 保存未翻译的直接发送记录
+            self.saveDirectSendWithoutTranslation(
+                appName: appName,
+                sessionId: sessionId,
+                originalText: text,
+                sourceLanguage: sourceLanguage,
+                targetLanguage: targetLanguage
+            )
+
+            // 发送回车并清理环境
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                InputManager.shared.sendEnterKey()
+                EnvironmentManager.shared.clearTriggerAppInfo()
+            }
+            return
+        }
         
         // 对于输入框翻译（Without Trigger模式），需要在翻译开始前记录应用信息
         EnvironmentManager.shared.recordTriggerApp()
@@ -1090,6 +1147,43 @@ class InputMonitor {
         }
         
         Logger.debug("Auto translation saved successfully")
+    }
+
+    /// 保存未翻译的直接发送记录到数据库（用于 Without Trigger 且同语种跳过翻译场景）
+    private func saveDirectSendWithoutTranslation(appName: String, sessionId: String, originalText: String, sourceLanguage: String?, targetLanguage: String) {
+        Logger.info("Saving direct send without translation for app: \(appName)")
+
+        // 计算内容哈希
+        let dbManager = DatabaseManager.shared
+        let contentHash = dbManager.calculateContentHash(originalText)
+
+        // 创建消息记录（无翻译）
+        let messageRecord = MessageRecord(
+            sender: "You",
+            content: originalText,
+            contentHash: contentHash,
+            contentLanguage: sourceLanguage ?? "unknown",
+            contentTranslation: "",
+            contentTranslationLanguage: "",
+            contentTimestamp: Date(),
+            chatApp: appName,
+            sessionId: sessionId
+        )
+
+        _ = dbManager.insertMessage(messageRecord)
+
+        // 立即更新侧边翻译窗口（显示仅原文气泡）
+        if let chatWindow = ChatTranslationManager.shared.getChatTranslationWindow() {
+            chatWindow.addUserMessage(
+                originalText: originalText,
+                translatedText: "",
+                sourceLanguage: sourceLanguage,
+                targetLanguage: targetLanguage,
+                sessionId: sessionId
+            )
+        }
+
+        Logger.debug("Direct send (no translation) saved successfully")
     }
 }
 
