@@ -505,7 +505,7 @@ class ConfigManager {
         Logger.debug("User preferred language from settings: \(preferredLanguage)")
         
         // Return the user's preferred language, or fallback to system language if not set
-        if !preferredLanguage.isEmpty && preferredLanguage != "en" {
+        if !preferredLanguage.isEmpty {
             return preferredLanguage
         }
         
@@ -514,32 +514,7 @@ class ConfigManager {
         
         Logger.debug("Fallback to system language: \(languageCode)")
         
-        // Map common language codes to our supported languages
-        switch languageCode {
-        case "zh", "zh-Hans", "zh-Hant":
-            return "zh"
-        case "en":
-            return "en"
-        case "ja":
-            return "ja"
-        case "ko":
-            return "ko"
-        case "es":
-            return "es"
-        case "fr":
-            return "fr"
-        case "de":
-            return "de"
-        case "it":
-            return "it"
-        case "pt":
-            return "pt"
-        case "ru":
-            return "ru"
-        default:
-            // Default to English if language not supported
-            return "en"
-        }
+        return languageCode
     }
     
     // MARK: - Database Operations for Language Configurations

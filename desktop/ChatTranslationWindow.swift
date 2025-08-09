@@ -83,7 +83,7 @@ class ChatTranslationWindow: NSWindow {
         if appInfo.bundleId == "net.whatsapp.WhatsApp" {
             // Supported app - show normal translation interface
             Logger.info("WhatsApp detected - showing normal translation interface")
-        updateChatTranslationView()
+            updateChatTranslationView()
         } else if AppDetectionManager.shared.isChatApp(bundleId: appInfo.bundleId) {
             // Unsupported app - show coming soon message
             Logger.info("\(appInfo.appName) - Unsupported chat app detected")
@@ -316,6 +316,12 @@ class ChatTranslationWindow: NSWindow {
             return
         }
         
+        // Check if window is actually visible to user - if not, skip message processing
+        guard self.isVisible else {
+            // Logger.debug("Chat translation window is not visible - skipping message processing")
+            return
+        }
+        
         //MARK: 暂时只支持WhatsApp
         guard let activeApp = NSWorkspace.shared.frontmostApplication
                 ,let bundleId = activeApp.bundleIdentifier else {
@@ -529,6 +535,9 @@ class ChatTranslationWindow: NSWindow {
                         let targetLanguage = ConfigManager.shared.getUserPreferredLanguage()
                 finalTranslationLanguage = targetLanguage
                 
+                // Record the current app info before translation for environment info
+                EnvironmentManager.shared.recordTriggerApp()
+                
                 // Translate message using non-streaming mode
                 do {
                     let translationResult = try await translateMessage(message.content, to: targetLanguage) 
@@ -561,6 +570,9 @@ class ChatTranslationWindow: NSWindow {
                     Logger.error("Failed to translate message: \(error)")
                     finalTranslation = "[Translation failed]"
                         }
+                        
+                        // Clear trigger app info after translation is complete
+                        EnvironmentManager.shared.clearTriggerAppInfo()
                     } else {
                         Logger.info("Translation rules do not allow translation for language: \(detectedLanguage), skipping translation")
                         
@@ -651,10 +663,11 @@ class ChatTranslationWindow: NSWindow {
         } else {
             // In excludes mode, translate all languages except those in the excludes list
             // Note: Preferred language is automatically excluded in excludes mode
-            let preferredLanguage = ConfigManager.shared.getUserPreferredLanguage()
+            let preferredLanguage = settings.preferredLanguage
             let isExcluded = settings.translationRuleLanguagesExcludes.contains(sourceLanguage) || sourceLanguage == preferredLanguage
             let shouldTranslate = !isExcluded
             Logger.debug("Excludes mode: language \(sourceLanguage) is excluded: \(isExcluded), should translate: \(shouldTranslate)")
+            Logger.debug("Preferred language from settings: \(preferredLanguage)")
             return shouldTranslate
         }
     }
