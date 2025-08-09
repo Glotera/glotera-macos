@@ -281,9 +281,14 @@ struct FavoriteSettingsView: View {
                 
                                 // Translation Rules Section
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Auto Translation Rules")
-                        .font(.headline)
-                        .fontWeight(.semibold)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Auto Translation Rules")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                        Text("only for Pro and Max users")
+                            .font(.caption)
+                            .foregroundColor(.red)
+                    }
                     
                     VStack(alignment: .leading, spacing: 12) {
                         // Rule Type Selection
@@ -442,6 +447,10 @@ struct FavoriteSettingsView: View {
                             
                             Spacer()
                         }
+                        Text("Only for Pro and Max users")
+                            .font(.caption)
+                            .foregroundColor(.red)
+                            .fixedSize(horizontal: false, vertical: true)
                         
                         Text("When enabled and the translation sidebar is open, pressing Return key will automatically translate content to sender's language without needing to type a trigger.")
                             .font(.caption)
