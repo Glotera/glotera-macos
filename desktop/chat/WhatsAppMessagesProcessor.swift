@@ -134,27 +134,16 @@ class WhatsAppMessagesProcessor: ChatMessagesProcessor {
                 let descResult = AXUIElementCopyAttributeValue(element, kAXDescriptionAttribute as CFString, &descValue)
                 if descResult == .success, let desc = descValue as? String {
                     // 尝试从接收消息中提取联系人名称
-                    if desc.hasPrefix("‎message,") && desc.contains("Received from ") {
-                        let pattern = "Received from (.+)$"
-                        if let regex = try? NSRegularExpression(pattern: pattern, options: []),
-                           let match = regex.firstMatch(in: desc, options: [], range: NSRange(location: 0, length: desc.count)),
-                           let contactRange = Range(match.range(at: 1), in: desc) {
-                            let contactName = String(desc[contactRange]).trimmingCharacters(in: .whitespacesAndNewlines)
-                            Logger.info("Found contact name from received message: \(contactName)")
-                            return contactName
-                        }
-                    }
-                    
-                    // 尝试从发送消息中提取联系人名称
-                    if desc.hasPrefix("‎Your message,") && desc.contains("Sent to ") {
-                        let pattern = "Sent to (.+?)(?:,|$)"
-                        if let regex = try? NSRegularExpression(pattern: pattern, options: []),
-                           let match = regex.firstMatch(in: desc, options: [], range: NSRange(location: 0, length: desc.count)),
-                           let contactRange = Range(match.range(at: 1), in: desc) {
-                            let contactName = String(desc[contactRange]).trimmingCharacters(in: .whitespacesAndNewlines)
-                            Logger.info("Found contact name from sent message: \(contactName)")
-                            return contactName
-                        }
+                   if let chatMessage = ContentProcessor.shared.parseWhatsAppMessage(desc,language: "en"),
+                      !chatMessage.sender.isEmpty && chatMessage.sender != "You" {
+                        Logger.info("Found contact name from received message: \(chatMessage.sender)")
+                        return chatMessage.sender
+                    } 
+
+                    if let chatMessage = ContentProcessor.shared.parseWhatsAppMessage(desc,language: "zh"),
+                       !chatMessage.sender.isEmpty && chatMessage.sender != "You" {
+                        Logger.info("Found contact name from received message: \(chatMessage.sender)")
+                        return chatMessage.sender
                     }
                 }
             }
