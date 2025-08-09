@@ -199,7 +199,7 @@ class WhatsAppMessagesProcessor: ChatMessagesProcessor {
         
         // Note: printElementTree removed to prevent performance issues and crashes
         // Only enable for debugging purposes when needed
-        ChatMessagesUtil.printElementTree(windowElement)
+        // ChatMessagesUtil.printElementTree(windowElement)
 
         // 首先尝试使用元素块特征查找对话框
         if let messages = findMessagesByElementBlockFeatures(windowElement, filterAfterTimestamp: filterAfterTimestamp) {
