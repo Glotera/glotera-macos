@@ -31,8 +31,28 @@ class ChatTranslationManager: NSObject {
         setupNotifications()
         setupLogoBarManager()
         
-        // Start monitoring since feature is enabled by default
-        startMonitoring()
+        // Start monitoring only if user has chat translation access
+        if SessionManager.shared.hasChatTranslationAccess() {
+            startMonitoring()
+        } else {
+            isEnabled = false
+            Logger.info("Chat translation disabled for free user")
+        }
+        
+        // Listen for user login/logout to update feature access
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(userDidLogin),
+            name: .userDidLogin,
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(userDidLogout),
+            name: .userDidLogout,
+            object: nil
+        )
     }
     
     deinit {
@@ -48,6 +68,12 @@ class ChatTranslationManager: NSObject {
     /// Enable chat translation feature
     func enable() {
         guard !isEnabled else { return }
+        
+        // Check if user has access to chat translation feature
+        guard SessionManager.shared.hasChatTranslationAccess() else {
+            Logger.info("Cannot enable chat translation - user does not have Pro/Max access")
+            return
+        }
         
         isEnabled = true
         Logger.info("Chat translation feature enabled with Grammarly-style UX")
@@ -383,6 +409,22 @@ class ChatTranslationManager: NSObject {
             name: NSWindow.didResizeNotification,
             object: nil
         )
+    }
+    
+    @objc private func userDidLogin(_ notification: Notification) {
+        // Check if user now has chat translation access
+        if SessionManager.shared.hasChatTranslationAccess() && !isEnabled {
+            Logger.info("User upgraded - enabling chat translation feature")
+            enable()
+        }
+    }
+    
+    @objc private func userDidLogout(_ notification: Notification) {
+        // Disable chat translation when user logs out
+        if isEnabled {
+            Logger.info("User logged out - disabling chat translation feature")
+            disable()
+        }
     }
     
     @objc private func applicationDidActivate(_ notification: Notification) {
