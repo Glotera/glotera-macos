@@ -2,37 +2,16 @@ import Cocoa
 import Foundation
 
 /// WhatsApp messages processor using Accessibility API
-// Whatsapp Window Element Tree:
-// AXWindow:
-//   ContentGroup:
-//      LeftSideBar:
-//      Splitter:
-//      SessionList:
-//      Splitter:
-//      ChatAreaHeader:
-//         ContactName:
-//         ...
-//      ChatAreaContent:
-//         AXGroup：
-//            Messsage1:
-//               Role: AXGenericElement
-//               Description: xxx
-//            Messsage2:
-//               Role: AXGenericElement
-//               Description: xxx
-//            ...
-//         ... // 最下面的输入框等
-//         InputBox:
-//            InputBoxContent:
-//            ...
-//   CloseButton:
-//   MinimizeButton:
-//   FullScrenButton: 
-// 前一天debug时，ContentGroup只有5个，ChatAreaHeader和ChatAreaContent是一个元素下面，所以需要获取第5个元素
-// 现在ContentGroup有6个，ChatAreaHeader和ChatAreaContent是两个元素，所以需要获取第6个元素
-// MARK: 不知道后面还会不会再变
+
+// 根据whatsapp.md分析，使用元素块特征来查找内容：
+// 1. 联系人元素块特征：AXGroup下面有4个子元素，第一个是AXHeading，其它3个是AXButton
+// 2. 对话框元素块特征：AXGroup下面有5个子元素，第一个是AXGroup，第三个是AXTextArea，其它三个是AXButton
+
 class WhatsAppMessagesProcessor: ChatMessagesProcessor {
-    /// Get current chat session ID from WhatsApp
+    static let maxRecursionDepth = 20
+    static let maxChildrenCount = 50
+    
+    /// Get current chat session ID from WhatsApp using element block features
     static func getCurrentChatSessionId(activeApp: NSRunningApplication) -> String? {
         
         let pid = activeApp.processIdentifier
@@ -48,61 +27,47 @@ class WhatsAppMessagesProcessor: ChatMessagesProcessor {
         
         let windowElement = window as! AXUIElement 
 
-        // Start searching from the main window element
-        if let contactName = findContactNameInElementTree(windowElement) {
+        // 首先尝试使用元素块特征查找联系人名称
+        if let contactName = findContactNameByElementBlockFeatures(windowElement) {
+            Logger.info("Found contact name using element block features: \(contactName)")
             return contactName
         }
+        
+        // 如果元素块特征查找失败，使用fallback方式从历史消息中解析
+        Logger.info("Element block features failed, trying fallback method from history messages")
+        if let contactName = findContactNameFromHistoryMessages(windowElement) {
+            Logger.info("Found contact name from history messages: \(contactName)")
+            return contactName
+        }
+        
         return nil
     }
 
-    // Traverse the window element tree to find contact name from multiple sources
-    private static func findContactNameInElementTree(_ element: AXUIElement) -> String? {
-        // Check if element is AXButton or AXGenericElement
-        var roleValue: CFTypeRef?
-        let roleResult = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleValue)
-        if roleResult == .success, let role = roleValue as? String {
-            // Try to get the description
-            var descValue: CFTypeRef?
-            let descResult = AXUIElementCopyAttributeValue(element, kAXDescriptionAttribute as CFString, &descValue)
-            if descResult == .success, let desc = descValue as? String {  
-        
-                // Method 1: Check for received messages (AXGenericElement)
-                if role == "AXGenericElement" && desc.hasPrefix("‎message,") && desc.contains("Received from ") {
-                    // Extract contact name using regex
-                    let pattern = "Received from (.+)$"
-                    if let regex = try? NSRegularExpression(pattern: pattern, options: []),
-                       let match = regex.firstMatch(in: desc, options: [], range: NSRange(location: 0, length: desc.count)),
-                       let contactRange = Range(match.range(at: 1), in: desc) {
-                        let contactName = String(desc[contactRange]).trimmingCharacters(in: .whitespacesAndNewlines)
-                        Logger.info("Found contact name from received message: \(contactName)")
-                        Logger.debug("Full message description: \(desc)")
-                        return contactName
-                    }
-                }
-                // 修改名称后，这两个按钮的描述中引用的联系名称还是老的，所以调整为备用方案
-                // Method 2: Check for call buttons (AXButton)
-                if role == kAXButtonRole as String {
-                    let videoPrefix = "‎Start video call with "
-                    let voicePrefix = "‎Start voice call with "
-                    if desc.hasPrefix(videoPrefix) {
-                        let contactName = desc.replacingOccurrences(of: videoPrefix, with: "")
-                        Logger.info("Found contact name from video call button: \(contactName)")
-                        return contactName
-                    } else if desc.hasPrefix(voicePrefix) {
-                        let contactName = desc.replacingOccurrences(of: voicePrefix, with: "")
-                        Logger.info("Found contact name from voice call button: \(contactName)")
-                        return contactName
-                    }
-                }
-            }
+    // 使用元素块特征查找联系人名称 - 添加深度限制防止崩溃
+    private static func findContactNameByElementBlockFeatures(_ element: AXUIElement, currentDepth: Int = 0, maxDepth: Int = 10) -> String? {
+        // 防止过深的递归导致栈溢出
+        if currentDepth > maxDepth {
+            Logger.warn("WhatsApp: Reached maximum search depth (\(maxDepth)) for contact name, stopping traversal")
+            return nil
         }
         
-        // Recursively search children
+        // 检查当前元素是否为联系人元素块
+        if let contactName = checkContactElementBlock(element) {
+            return contactName
+        }
+        
+        // 递归搜索子元素 - 限制递归深度
         var children: CFTypeRef?
         let childrenResult = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children)
         if childrenResult == .success, let childrenArray = children as? [AXUIElement] {
-            for child in childrenArray {
-                if let found = findContactNameInElementTree(child) {
+            // 限制子元素数量，避免处理过大的UI树
+            let limitedChildren = Array(childrenArray.prefix(maxChildrenCount))
+            if childrenArray.count > maxChildrenCount {
+                Logger.warn("WhatsApp: Contact search UI tree has \(childrenArray.count) children, limiting to \(maxChildrenCount)")
+            }
+            
+            for child in limitedChildren {
+                if let found = findContactNameByElementBlockFeatures(child, currentDepth: currentDepth + 1, maxDepth: maxDepth) {
                     return found
                 }
             }
@@ -110,7 +75,111 @@ class WhatsAppMessagesProcessor: ChatMessagesProcessor {
         return nil
     }
     
-    /// Extract messages from WhatsApp using Accessibility API
+    // 检查元素是否为联系人元素块
+    private static func checkContactElementBlock(_ element: AXUIElement) -> String? {
+        var role: CFTypeRef?
+        let roleResult = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
+        guard roleResult == .success, let roleString = role as? String, roleString == "AXGroup" else {
+            return nil
+        }
+        
+        // 获取子元素
+        var children: CFTypeRef?
+        let childrenResult = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children)
+        guard childrenResult == .success, let childrenArray = children as? [AXUIElement], childrenArray.count == 4 else {
+            return nil
+        }
+        
+        // 检查第一个子元素是否为AXHeading
+        var firstChildRole: CFTypeRef?
+        let firstChildRoleResult = AXUIElementCopyAttributeValue(childrenArray[0], kAXRoleAttribute as CFString, &firstChildRole)
+        guard firstChildRoleResult == .success, let firstChildRoleString = firstChildRole as? String, firstChildRoleString == "AXHeading" else {
+            return nil
+        }
+        
+        // 检查其他3个子元素是否为AXButton
+        for i in 1..<4 {
+            var childRole: CFTypeRef?
+            let childRoleResult = AXUIElementCopyAttributeValue(childrenArray[i], kAXRoleAttribute as CFString, &childRole)
+            guard childRoleResult == .success, let childRoleString = childRole as? String, childRoleString == "AXButton" else {
+                return nil
+            }
+        }
+        
+        // 获取AXHeading的描述作为联系人名称
+        var description: CFTypeRef?
+        let descResult = AXUIElementCopyAttributeValue(childrenArray[0], kAXDescriptionAttribute as CFString, &description)
+        if descResult == .success, let descString = description as? String, !descString.isEmpty {
+            Logger.info("Found contact name from element block: \(descString)")
+            return descString.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        
+        return nil
+    }
+    
+    // 从历史消息中解析联系人名称（fallback方法） - 添加深度限制防止崩溃
+    private static func findContactNameFromHistoryMessages(_ element: AXUIElement, currentDepth: Int = 0, maxDepth: Int = 8) -> String? {
+        // 防止过深的递归导致栈溢出
+        if currentDepth > maxDepth {
+            Logger.warn("WhatsApp: Reached maximum search depth (\(maxDepth)) for history messages, stopping traversal")
+            return nil
+        }
+        
+        // 检查当前元素是否为AXGenericElement且包含消息
+        var role: CFTypeRef?
+        let roleResult = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
+        if roleResult == .success, let roleString = role as? String {
+            if roleString == "AXGenericElement" {
+                var descValue: CFTypeRef?
+                let descResult = AXUIElementCopyAttributeValue(element, kAXDescriptionAttribute as CFString, &descValue)
+                if descResult == .success, let desc = descValue as? String {
+                    // 尝试从接收消息中提取联系人名称
+                    if desc.hasPrefix("‎message,") && desc.contains("Received from ") {
+                        let pattern = "Received from (.+)$"
+                        if let regex = try? NSRegularExpression(pattern: pattern, options: []),
+                           let match = regex.firstMatch(in: desc, options: [], range: NSRange(location: 0, length: desc.count)),
+                           let contactRange = Range(match.range(at: 1), in: desc) {
+                            let contactName = String(desc[contactRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+                            Logger.info("Found contact name from received message: \(contactName)")
+                            return contactName
+                        }
+                    }
+                    
+                    // 尝试从发送消息中提取联系人名称
+                    if desc.hasPrefix("‎Your message,") && desc.contains("Sent to ") {
+                        let pattern = "Sent to (.+?)(?:,|$)"
+                        if let regex = try? NSRegularExpression(pattern: pattern, options: []),
+                           let match = regex.firstMatch(in: desc, options: [], range: NSRange(location: 0, length: desc.count)),
+                           let contactRange = Range(match.range(at: 1), in: desc) {
+                            let contactName = String(desc[contactRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+                            Logger.info("Found contact name from sent message: \(contactName)")
+                            return contactName
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 递归搜索子元素 - 限制递归深度
+        var children: CFTypeRef?
+        let childrenResult = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children)
+        if childrenResult == .success, let childrenArray = children as? [AXUIElement] {
+            // 限制子元素数量，避免处理过大的UI树
+            let limitedChildren = Array(childrenArray.prefix(maxChildrenCount))
+            if childrenArray.count > maxChildrenCount {
+                Logger.warn("WhatsApp: History message search UI tree has \(childrenArray.count) children, limiting to \(maxChildrenCount)")
+            }
+            
+            for child in limitedChildren {
+                if let found = findContactNameFromHistoryMessages(child, currentDepth: currentDepth + 1, maxDepth: maxDepth) {
+                    return found
+                }
+            }
+        }
+        return nil
+    }
+    
+    /// Extract messages from WhatsApp using Accessibility API with element block features
     static func extractMessages(from app: NSRunningApplication, filterAfterTimestamp: Date) -> [ChatMessage] {
         var extractedMessages: [ChatMessage] = []
         
@@ -130,37 +199,163 @@ class WhatsAppMessagesProcessor: ChatMessagesProcessor {
         
         // Note: printElementTree removed to prevent performance issues and crashes
         // Only enable for debugging purposes when needed
-        // ChatMessagesUtil.printElementTree(windowElement)
+        ChatMessagesUtil.printElementTree(windowElement)
 
-          // Get the first child of the window
-        var contentGroupElement: CFTypeRef?
-        let contentGroupResult = AXUIElementCopyAttributeValue(windowElement, kAXChildrenAttribute as CFString, &contentGroupElement)
-        
-        guard contentGroupResult == .success, let children = contentGroupElement as? [AXUIElement], children.count > 0 else {
-            return extractedMessages
-        }
-         
-        
-        var firstChild: CFTypeRef?
-        let firstChildResult = AXUIElementCopyAttributeValue(children[0], kAXChildrenAttribute as CFString, &firstChild)
-        
-        guard firstChildResult == .success, let children2 = firstChild as? [AXUIElement], children.count > 0 else {
-            return extractedMessages
+        // 首先尝试使用元素块特征查找对话框
+        if let messages = findMessagesByElementBlockFeatures(windowElement, filterAfterTimestamp: filterAfterTimestamp) {
+            Logger.info("Extracted \(messages.count) messages using element block features")
+            return messages
         }
         
-        // Get the 5th, 6th child of the first child
-        var chatAreaChildren: CFTypeRef?
-        let chatAreaResult = AXUIElementCopyAttributeValue(children2[0], kAXChildrenAttribute as CFString, &chatAreaChildren)
+        // 如果元素块特征查找失败，使用fallback方式
+        Logger.info("Element block features failed, trying fallback method")
+        return fallback(windowElement: windowElement, filterAfterTimestamp: filterAfterTimestamp)
+    }
+    
+    // 使用元素块特征查找消息 - 添加深度限制防止崩溃
+    private static func findMessagesByElementBlockFeatures(_ element: AXUIElement, filterAfterTimestamp: Date, currentDepth: Int = 0, maxDepth: Int = maxRecursionDepth) -> [ChatMessage]? {
+        // 防止过深的递归导致栈溢出
+        if currentDepth > maxDepth {
+            Logger.warn("WhatsApp: Reached maximum search depth (\(maxDepth)), stopping traversal to prevent crashes")
+            return nil
+        }
         
-        //如果不是新的数据结构，尝试老的数据结构
-        guard chatAreaResult == .success, let chatAreaChildren = chatAreaChildren as? [AXUIElement], chatAreaChildren.count >= 6 else {
-            return fallback(windowElement: windowElement, filterAfterTimestamp: filterAfterTimestamp);
-        } 
+        var messages: [ChatMessage] = []
         
-        parseMessagesFromContentArea(chatAreaChildren[5], messages: &extractedMessages, filterAfterTimestamp: filterAfterTimestamp)
+        // 检查当前元素是否为对话框元素块
+        if let elementMessages = checkDialogElementBlock(element, filterAfterTimestamp: filterAfterTimestamp) {
+            messages.append(contentsOf: elementMessages)
+            return messages
+        }
         
-        Logger.info("Extracted \(extractedMessages.count) messages from WhatsApp")
-        return extractedMessages
+        // 递归搜索子元素 - 限制递归深度
+        var children: CFTypeRef?
+        let childrenResult = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children)
+        if childrenResult == .success, let childrenArray = children as? [AXUIElement] {
+            // 限制子元素数量，避免处理过大的UI树，只取最后的maxChildrenCount个
+            let limitedChildren = Array(childrenArray.suffix(maxChildrenCount))
+            if childrenArray.count > maxChildrenCount {
+                Logger.warn("WhatsApp: UI tree has \(childrenArray.count) children, limiting to \(maxChildrenCount) to prevent performance issues")
+            }
+            
+            for child in limitedChildren {
+                if let childMessages = findMessagesByElementBlockFeatures(child, filterAfterTimestamp: filterAfterTimestamp, currentDepth: currentDepth + 1, maxDepth: maxDepth) {
+                    messages.append(contentsOf: childMessages)
+                    return messages
+                }
+            }
+        }
+        
+        return messages.isEmpty ? nil : messages
+    }
+    
+    // 检查元素是否为对话框元素块
+    private static func checkDialogElementBlock(_ element: AXUIElement, filterAfterTimestamp: Date) -> [ChatMessage]? {
+        var role: CFTypeRef?
+        let roleResult = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
+        guard roleResult == .success, let roleString = role as? String, roleString == "AXGroup" else {
+            return nil
+        }
+        
+        // 获取子元素
+        var children: CFTypeRef?
+        let childrenResult = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children)
+        guard childrenResult == .success, let childrenArray = children as? [AXUIElement], childrenArray.count >= 5 else {
+            return nil
+        }
+        
+        // 检查第一个子元素是否为AXGroup
+        var firstChildRole: CFTypeRef?
+        let firstChildRoleResult = AXUIElementCopyAttributeValue(childrenArray[0], kAXRoleAttribute as CFString, &firstChildRole)
+        guard firstChildRoleResult == .success, let firstChildRoleString = firstChildRole as? String, firstChildRoleString == "AXGroup" else {
+            return nil
+        }
+        
+        // Check if there is at least one AXTextArea and the rest are AXButton (order does not matter)
+        var textAreaFound = false
+        var buttonCount = 0
+        for (idx, child) in childrenArray.enumerated() {
+            var childRole: CFTypeRef?
+            let childRoleResult = AXUIElementCopyAttributeValue(child, kAXRoleAttribute as CFString, &childRole)
+            guard childRoleResult == .success, let childRoleString = childRole as? String else {
+                return nil
+            }
+            if childRoleString == "AXTextArea" {
+                textAreaFound = true
+            } else if childRoleString == "AXButton" {
+                buttonCount += 1
+            }
+        }
+        // There must be at least one AXTextArea and at least three AXButton
+        guard textAreaFound, buttonCount >= 3 else {
+            return nil
+        }
+        
+        // 解析第一个AXGroup中的消息
+        return parseMessagesFromDialogGroup(childrenArray[0], filterAfterTimestamp: filterAfterTimestamp)
+    }
+    
+    // 解析对话框组中的消息
+    private static func parseMessagesFromDialogGroup(_ dialogGroup: AXUIElement, filterAfterTimestamp: Date) -> [ChatMessage]? {
+        var messages: [ChatMessage] = []
+        
+        // 获取对话框组的子元素
+        var children: CFTypeRef?
+        let childrenResult = AXUIElementCopyAttributeValue(dialogGroup, kAXChildrenAttribute as CFString, &children)
+        guard childrenResult == .success, let childrenArray = children as? [AXUIElement] else {
+            return nil
+        }
+        
+        Logger.info("Found \(childrenArray.count) elements in dialog group")
+        
+        // 遍历所有子元素，查找AXGenericElement类型的消息
+        for (index, child) in childrenArray.enumerated() {
+            // 获取子元素
+            var children2: CFTypeRef?
+            let childrenResult2 = AXUIElementCopyAttributeValue(child, kAXChildrenAttribute as CFString, &children2)
+            guard childrenResult2 == .success, let childrenArray2 = children2 as? [AXUIElement] else {
+                return nil
+            }
+            
+            if childrenArray2.count<1 {
+                continue
+            }
+
+            var role: CFTypeRef?
+            let roleResult = AXUIElementCopyAttributeValue(childrenArray2[0], kAXRoleAttribute as CFString, &role)
+            guard roleResult == .success, let roleString = role as? String else {
+                continue
+            }
+            
+            if roleString == "AXGenericElement" {
+                // 获取消息描述
+                var description: CFTypeRef?
+                let descResult = AXUIElementCopyAttributeValue(childrenArray2[0], kAXDescriptionAttribute as CFString, &description)
+                if descResult == .success, let descString = description as? String, !descString.isEmpty {
+                    Logger.debug("Raw description for message \(index + 1): \(descString)")
+                    
+                    if let chatMessage = ContentProcessor.shared.parseWhatsAppMessage(descString) {
+                        // 过滤时间戳
+                        if let messageTimestamp = ChatMessagesUtil.parseTimestamp(chatMessage.timestamp) {
+                            let isNewer = messageTimestamp > filterAfterTimestamp
+                            Logger.debug("Message timestamp: \(chatMessage.timestamp) -> \(messageTimestamp), is newer: \(isNewer)")
+                            if isNewer {
+                                messages.append(chatMessage)
+                                Logger.info("Append parsed message (newer than \(filterAfterTimestamp)): \(chatMessage)")
+                            } else {
+                                Logger.info("Skipping message (older than \(filterAfterTimestamp)): \(chatMessage.content.prefix(30))...")
+                            }
+                        } else {
+                            Logger.warn("Failed to parse timestamp for message: '\(chatMessage.timestamp)', including message")
+                            messages.append(chatMessage)
+                            Logger.info("Append parsed message (timestamp parsing failed): \(chatMessage)")
+                        }
+                    }
+                }
+            }
+        }
+        
+        return messages.isEmpty ? nil : messages
     }
 
     private static func fallback(windowElement: AXUIElement, filterAfterTimestamp: Date? = nil) -> [ChatMessage] {
@@ -235,7 +430,7 @@ class WhatsAppMessagesProcessor: ChatMessagesProcessor {
         // Get the first child of this element
         var firstChild: CFTypeRef?
         let firstChildResult = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &firstChild)
-        guard firstChildResult == .success, let children = firstChild as? [AXUIElement] else {
+        guard firstChildResult == .success, let children = firstChild as? [AXUIElement] , children.count>0 else {
             Logger.info("No children found in content area")
             return
         }
@@ -254,9 +449,16 @@ class WhatsAppMessagesProcessor: ChatMessagesProcessor {
             Logger.info("Not enough children, need at least 1")
             return
         }
+
+        var limtiedChildren = children2
+        if children2.count > maxChildrenCount  {
+            Logger.warn("WhatsApp: UI tree has \(children2.count) children, limiting to \(maxChildrenCount) to prevent performance issues")
+            let limitedChildren = Array(children2.suffix(maxChildrenCount))
+        }
          
+        // ChatMessagesUtil.printElementTree(children[0])  // Disabled to prevent performance issues
         // Loop through all children, parse each if it's AXGenericElement
-        for (index, child) in children2.enumerated() {
+        for (index, child) in limtiedChildren.enumerated() {
             var firstChild3: CFTypeRef?
             let firstChildResult3 = AXUIElementCopyAttributeValue(child, kAXChildrenAttribute as CFString, &firstChild3)
             guard firstChildResult3 == .success, let children3 = firstChild3 as? [AXUIElement] else {

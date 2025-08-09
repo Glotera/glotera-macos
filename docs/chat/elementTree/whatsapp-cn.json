@@ -1,0 +1,511 @@
+{
+"role": "AXWindow",
+"title": "‎WhatsApp",
+"subrole": "AXStandardWindow",
+"depth": 0,
+"childrenCount": 4,
+"children": [
+{
+  "role": "AXGroup",
+  "subrole": "iOSContentGroup",
+  "depth": 1,
+  "childrenCount": 1,
+  "children": [
+{
+    "role": "AXGroup",
+    "depth": 2,
+    "childrenCount": 3,
+    "children": [
+{
+      "role": "AXGroup",
+      "depth": 3,
+      "childrenCount": 1,
+      "children": [
+{
+        "role": "AXGroup",
+        "depth": 4,
+        "childrenCount": 2,
+        "children": [
+{
+          "role": "AXGroup",
+          "depth": 5,
+          "childrenCount": 5,
+          "children": [
+{
+            "role": "AXButton",
+            "description": "‎对话",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          },
+{
+            "role": "AXButton",
+            "description": "‎通话",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          },
+{
+            "role": "AXButton",
+            "description": "‎更新",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          },
+{
+            "role": "AXButton",
+            "description": "‎已归档",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          },
+{
+            "role": "AXButton",
+            "description": "‎已加星标",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          }
+          ]
+        },
+{
+          "role": "AXGroup",
+          "depth": 5,
+          "childrenCount": 1,
+          "children": [
+{
+            "role": "AXButton",
+            "description": "‎设置",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          }
+          ]
+        }
+        ]
+      }
+      ]
+    },
+{
+      "role": "AXGroup",
+      "depth": 3,
+      "childrenCount": 2,
+      "children": [
+{
+        "role": "AXGroup",
+        "depth": 4,
+        "childrenCount": 5,
+        "children": [
+{
+          "role": "AXHeading",
+          "description": "‎对话",
+          "depth": 5,
+          "childrenCount": 0,
+          "children": []
+        },
+{
+          "role": "AXButton",
+          "description": "‎新对话",
+          "depth": 5,
+          "childrenCount": 0,
+          "children": []
+        },
+{
+          "role": "AXButton",
+          "description": "‎“未读”筛选条件",
+          "depth": 5,
+          "childrenCount": 0,
+          "children": []
+        },
+{
+          "role": "AXStaticText",
+          "description": "‎搜索",
+          "subrole": "AXSearchField",
+          "depth": 5,
+          "childrenCount": 0,
+          "children": []
+        },
+{
+          "role": "AXButton",
+          "description": "‎“未读”筛选条件",
+          "depth": 5,
+          "childrenCount": 0,
+          "children": []
+        }
+        ]
+      },
+{
+        "role": "AXGroup",
+        "depth": 4,
+        "childrenCount": 1,
+        "children": [
+{
+          "role": "AXGroup",
+          "depth": 5,
+          "childrenCount": 3,
+          "children": [
+{
+            "role": "AXStaticText",
+            "value": "‎你的消息, Este problema ya ha sido solucionado., 11:37, ‎已发送到Carlos, ‎已读",
+            "description": "Carlos",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          },
+{
+            "role": "AXButton",
+            "value": "‎你添加了Software Developers, 2024年11月16日15:53",
+            "description": "Software Developers",
+            "depth": 6,
+            "childrenCount": 0,
+            "children": []
+          },
+{
+            "role": "AXGroup",
+            "depth": 6,
+            "childrenCount": 2,
+            "children": [
+{
+              "role": "AXStaticText",
+              "description": "‎你的个人消息已进行端到端加密",
+              "depth": 7,
+              "childrenCount": 0,
+              "children": []
+            },
+{
+              "role": "AXLink",
+              "description": "端到端加密",
+              "depth": 7,
+              "childrenCount": 0,
+              "children": []
+            }
+            ]
+          }
+          ]
+        }
+        ]
+      }
+      ]
+    },
+{
+      "role": "AXGroup",
+      "depth": 3,
+      "childrenCount": 2,
+      "children": [
+{
+        "role": "AXGroup",
+        "depth": 4,
+        "childrenCount": 4,
+        "children": [
+{
+          "role": "AXHeading",
+          "value": "‎在线",
+          "description": "Carlos",
+          "depth": 5,
+          "childrenCount": 0,
+          "children": []
+        },
+{
+          "role": "AXButton",
+          "description": "‎向Carlos发起视频通话",
+          "depth": 5,
+          "childrenCount": 0,
+          "children": []
+        },
+{
+          "role": "AXButton",
+          "description": "‎向Carlos发起语音通话",
+          "depth": 5,
+          "childrenCount": 0,
+          "children": []
+        },
+{
+          "role": "AXButton",
+          "description": "搜索",
+          "depth": 5,
+          "childrenCount": 0,
+          "children": []
+        }
+        ]
+      },
+{
+        "role": "AXGroup",
+        "depth": 4,
+        "childrenCount": 5,
+        "children": [
+{
+          "role": "AXGroup",
+          "depth": 5,
+          "childrenCount": 14,
+          "children": [
+{
+            "role": "AXGroup",
+            "depth": 6,
+            "childrenCount": 1,
+            "children": [
+{
+              "role": "AXStaticText",
+              "description": "‎在手机上使用 WhatsApp 可查看较早的消息。",
+              "depth": 7,
+              "childrenCount": 0,
+              "children": []
+            }
+            ]
+          },
+{
+            "role": "AXGroup",
+            "depth": 6,
+            "childrenCount": 1,
+            "children": [
+{
+              "role": "AXGenericElement",
+              "description": "‎消息, ¡Estupendo, esperamos vuestra llegada!, 10:15, ‎从Carlos收到",
+              "depth": 7,
+              "childrenCount": 0,
+              "children": []
+            }
+            ]
+          },
+{
+            "role": "AXGroup",
+            "depth": 6,
+            "childrenCount": 1,
+            "children": [
+{
+              "role": "AXGenericElement",
+              "description": "‎消息, Nosotros nos encargaremos de prepararlo todo, 10:19, ‎从Carlos收到",
+              "depth": 7,
+              "childrenCount": 0,
+              "children": []
+            }
+            ]
+          },
+{
+            "role": "AXGroup",
+            "depth": 6,
+            "childrenCount": 1,
+            "children": [
+{
+              "role": "AXGenericElement",
+              "description": "‎你的消息, Estoy muy emocionado por esta visita de inspección, 10:20, ‎已发送到Carlos, ‎已读",
+              "depth": 7,
+              "childrenCount": 0,
+              "children": []
+            }
+            ]
+          },
+{
+            "role": "AXGroup",
+            "depth": 6,
+            "childrenCount": 1,
+            "children": [
+{
+              "role": "AXGenericElement",
+              "description": "‎消息, Entonces iremos al aeropuerto a buscarlos., 10:26, ‎从Carlos收到",
+              "depth": 7,
+              "childrenCount": 0,
+              "children": []
+            }
+            ]
+          },
+{
+            "role": "AXGroup",
+            "depth": 6,
+            "childrenCount": 1,
+            "children": [
+{
+              "role": "AXGenericElement",
+              "description": "‎你的消息, Iremos al aeropuerto a recogerlos., 10:31, ‎已发送到Carlos, ‎已读",
+              "depth": 7,
+              "childrenCount": 0,
+              "children": []
+            }
+            ]
+          },
+{
+            "role": "AXGroup",
+            "depth": 6,
+            "childrenCount": 1,
+            "children": [
+{
+              "role": "AXGenericElement",
+              "description": "‎消息, Iremos al aeropuerto a recogerlos., 10:31, ‎从Carlos收到",
+              "depth": 7,
+              "childrenCount": 0,
+              "children": []
+            }
+            ]
+          },
+{
+            "role": "AXGroup",
+            "depth": 6,
+            "childrenCount": 1,
+            "children": [
+{
+              "role": "AXGenericElement",
+              "description": "‎消息, Iremos al aeropuerto a recogerlos, 10:32, ‎从Carlos收到",
+              "depth": 7,
+              "childrenCount": 0,
+              "children": []
+            }
+            ]
+          },
+{
+            "role": "AXGroup",
+            "depth": 6,
+            "childrenCount": 1,
+            "children": [
+{
+              "role": "AXGenericElement",
+              "description": "‎消息, Los estaremos esperando en la salida del aeropuerto, 10:42, ‎从Carlos收到",
+              "depth": 7,
+              "childrenCount": 0,
+              "children": []
+            }
+            ]
+          },
+{
+            "role": "AXGroup",
+            "depth": 6,
+            "childrenCount": 1,
+            "children": [
+{
+              "role": "AXGenericElement",
+              "description": "‎你的消息, 没有开启侧边窗口的情况是否会自动翻译, 11:01, ‎已发送到Carlos, ‎已读",
+              "depth": 7,
+              "childrenCount": 0,
+              "children": []
+            }
+            ]
+          },
+{
+            "role": "AXGroup",
+            "depth": 6,
+            "childrenCount": 1,
+            "children": [
+{
+              "role": "AXGenericElement",
+              "description": "‎你的消息, ¿Se traducirá automáticamente si no se abre la ventana lateral?, 11:02, ‎已发送到Carlos, ‎已读",
+              "depth": 7,
+              "childrenCount": 0,
+              "children": []
+            }
+            ]
+          },
+{
+            "role": "AXGroup",
+            "depth": 6,
+            "childrenCount": 1,
+            "children": [
+{
+              "role": "AXGenericElement",
+              "description": "‎消息, Parece que no se traduce automáticamente, 11:03, ‎从Carlos收到",
+              "depth": 7,
+              "childrenCount": 0,
+              "children": []
+            }
+            ]
+          },
+{
+            "role": "AXGroup",
+            "depth": 6,
+            "childrenCount": 1,
+            "children": [
+{
+              "role": "AXGenericElement",
+              "description": "‎消息, Vuelva a probar si la pantalla sigue colgada en estado de salvapantallas, 11:11, ‎从Carlos收到",
+              "depth": 7,
+              "childrenCount": 0,
+              "children": []
+            }
+            ]
+          },
+{
+            "role": "AXGroup",
+            "depth": 6,
+            "childrenCount": 1,
+            "children": [
+{
+              "role": "AXGenericElement",
+              "description": "‎你的消息, Este problema ya ha sido solucionado., 11:37, ‎已发送到Carlos, ‎已读",
+              "depth": 7,
+              "childrenCount": 0,
+              "children": []
+            }
+            ]
+          }
+          ]
+        },
+{
+          "role": "AXButton",
+          "description": "‎分享媒体",
+          "depth": 5,
+          "childrenCount": 0,
+          "children": []
+        },
+{
+          "role": "AXTextArea",
+          "description": "‎撰写消息",
+          "depth": 5,
+          "childrenCount": 0,
+          "children": []
+        },
+{
+          "role": "AXButton",
+          "description": "A7DC532E F602 4BA4 97AD C33615",
+          "depth": 5,
+          "childrenCount": 0,
+          "children": []
+        },
+{
+          "role": "AXButton",
+          "description": "‎语音消息",
+          "depth": 5,
+          "childrenCount": 0,
+          "children": []
+        }
+        ]
+      }
+      ]
+    }
+    ]
+  }
+  ]
+},
+{
+  "role": "AXButton",
+  "subrole": "AXCloseButton",
+  "depth": 1,
+  "childrenCount": 0,
+  "children": []
+},
+{
+  "role": "AXButton",
+  "subrole": "AXFullScreenButton",
+  "depth": 1,
+  "childrenCount": 1,
+  "children": [
+{
+    "role": "AXGroup",
+    "depth": 2,
+    "childrenCount": 1,
+    "children": [
+{
+      "role": "AXGroup",
+      "depth": 3,
+      "childrenCount": 0,
+      "children": []
+    }
+    ]
+  }
+  ]
+},
+{
+  "role": "AXButton",
+  "subrole": "AXMinimizeButton",
+  "depth": 1,
+  "childrenCount": 0,
+  "children": []
+}
+]
+}

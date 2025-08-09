@@ -19,10 +19,10 @@ struct AppSettings: Codable {
     var returnKeyWithoutTrigger: Bool // Auto translate when pressing return without trigger (when sidebar is open)
     
     static let `default` = AppSettings(
-        preferredLanguage: Locale.current.language.languageCode?.identifier ?? "en",
+        preferredLanguage: EnvironmentManager.shared.getSystemLanguage(),
         translationRuleType: "excludes",
         translationRuleLanguagesIncludes: [],
-        translationRuleLanguagesExcludes: [Locale.current.language.languageCode?.identifier ?? "en"],
+        translationRuleLanguagesExcludes: [EnvironmentManager.shared.getSystemLanguage()],
         returnKeyWithTrigger: true,
         returnKeyWithoutTrigger: true
     )
@@ -510,8 +510,7 @@ class ConfigManager {
         }
         
         // Fallback to system locale if no preference is set
-        let locale = Locale.current
-        let languageCode = locale.language.languageCode?.identifier ?? "en"
+        let languageCode = EnvironmentManager.shared.getSystemLanguage()
         
         Logger.debug("Fallback to system language: \(languageCode)")
         

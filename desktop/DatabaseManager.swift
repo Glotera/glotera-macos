@@ -364,7 +364,7 @@ class DatabaseManager {
                    content_timestamp, chat_app, session_id, created_time, updated_time
             FROM messages 
             WHERE chat_app = ? AND session_id = ?
-            ORDER BY content_timestamp DESC
+            ORDER BY content_timestamp DESC, created_time DESC
             LIMIT ?;
         """
         
@@ -390,6 +390,42 @@ class DatabaseManager {
         
         // Reverse to get chronological order (oldest first)
         return messages.reversed()
+    }
+
+    /// Check if a received message (sender != 'You') with the given content hash exists in the same minute
+    /// as the provided minuteStart (the second is ignored; only Y-M-D H:M must match)
+    func hasReceivedMessageHashInSameMinute(appName: String, sessionId: String, contentHash: String, minuteStart: Date) -> Bool {
+         
+        let calendar = Calendar(identifier: .gregorian)
+        let targetComponents = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: minuteStart)
+          
+        let querySQL = """
+            SELECT id 
+            FROM messages 
+            WHERE chat_app = ? AND session_id = ?
+            and content_hash = ? and content_timestamp >= ? and content_timestamp < ?;
+        """
+        
+        var statement: OpaquePointer?
+        
+        guard sqlite3_prepare_v2(db, querySQL, -1, &statement, nil) == SQLITE_OK else {
+            Logger.error("Failed to prepare same-minute hash check query")
+            return false
+        }
+        
+        defer { sqlite3_finalize(statement) }
+        
+        sqlite3_bind_text(statement, 1, (appName as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(statement, 2, (sessionId as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(statement, 3, (contentHash as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(statement, 4, (minuteStart.ISO8601Format() as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(statement, 5, (minuteStart.addingTimeInterval(60).ISO8601Format() as NSString).utf8String, -1, nil)
+        
+        while sqlite3_step(statement) == SQLITE_ROW {
+            return true
+        }
+        
+        return false
     }
     
     /// Get the timestamp of the last message for a specific session
@@ -428,7 +464,7 @@ class DatabaseManager {
         let querySQL = """
             SELECT content_language
             FROM messages 
-            WHERE chat_app = ? AND session_id = ? AND sender != 'You'
+            WHERE chat_app = ? AND session_id = ? AND sender != 'You' AND sender !=''
             ORDER BY content_timestamp DESC
             LIMIT 1;
         """

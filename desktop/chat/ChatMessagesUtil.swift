@@ -1,51 +1,19 @@
 import Cocoa
 
 class ChatMessagesUtil {
-       /// Parse timestamp string into Date object for proper comparison
-    /// Expected format: "July 30, 14:30" or "July 30, 02:30"
+    /// Parse timestamp string into Date object for proper comparison 
+    /// Parse a timestamp string in "YYYY-MM-DD HH:MM:SS" format to a Date object
     static func parseTimestamp(_ timestamp: String) -> Date? {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US")
-        
-        // Try different timestamp formats
-        let formats = [
-            "MMMM d, HH:mm",    // "July 30, 14:30"
-            "MMMM d, H:mm",     // "July 30, 2:30"
-            "MMM d, HH:mm",     // "Jul 30, 14:30"
-            "MMM d, H:mm",      // "Jul 30, 2:30"
-            "yyyy-MM-dd HH:mm", // "2024-07-30 14:30"
-            "dd/MM/yyyy HH:mm", // "30/07/2024 14:30"
-            "MM/dd/yyyy HH:mm"  // "07/30/2024 14:30"
-        ]
-        
-        let currentYear = Calendar.current.component(.year, from: Date())
-        
-        for format in formats {
-            formatter.dateFormat = format
-            if let date = formatter.date(from: timestamp) {
-                // If the parsed date doesn't have a year (month/day only), add current year
-                let calendar = Calendar.current
-                let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: date)
-                
-                // Check if year is reasonable (not 1, 2000, or nil)
-                let year = components.year ?? 1
-                if year < 2020 {
-                    // Date without year or with invalid year, add current year
-                    var newComponents = components
-                    newComponents.year = currentYear
-                    if let dateWithYear = calendar.date(from: newComponents) {
-                        Logger.debug("Parsed timestamp '\(timestamp)' as \(dateWithYear) (added current year)")
-                        return dateWithYear
-                    }
-                }
-                
-                Logger.debug("Parsed timestamp '\(timestamp)' as \(date)")
-                return date
-            }
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        if let date = formatter.date(from: timestamp) {
+            Logger.debug("Parsed timestamp '\(timestamp)' as \(date)")
+            return date
+        } else {
+            Logger.warn("Failed to parse timestamp: '\(timestamp)'")
+            return nil
         }
-        
-        Logger.warn("Failed to parse timestamp: '\(timestamp)'")
-        return nil
     }
        
     /// Print the entire element tree for debugging in JSON format

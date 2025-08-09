@@ -6,25 +6,64 @@
 //
 
 import Foundation
+import NaturalLanguage
 
 // Chat message data model - unified structure for all chat applications
 struct ChatMessage: Identifiable, Equatable {
     let id = UUID()
-    let sender: String
     let content: String
+    let sender: String
     let timestamp: String
     let isFromMe: Bool
     
     // Additional fields for enhanced functionality
-    let messageType: String?     // Message type (e.g., "Your message", "Received message")
-    let date: String?           // Date part
-    let time: String?           // Time part
+    let messageType: String?     // Message type (e.g., text, sticker, image, video, audio, etc.)
     
     // Translation fields
     var contentTranslation: String?
     var contentLanguage: String?
     var contentTranslationLanguage: String?
     var contentHash: String?
+    
+    init(messageType: String?, content: String, sender: String, timestamp: String, isFromMe: Bool) {
+        self.messageType = messageType
+        self.content = content
+        self.sender = sender
+        self.timestamp = timestamp
+        self.isFromMe = isFromMe
+        self.contentTranslation = nil
+        self.contentLanguage = nil
+        self.contentTranslationLanguage = nil
+        self.contentHash = nil
+    }
+    
+    // Convenience initializer for backward compatibility
+    init(messageType: String?, content: String, sender: String, timestamp: String, isFromMe: Bool, date: String?, time: String?) {
+        self.messageType = messageType
+        self.content = content
+        self.sender = sender
+        self.timestamp = timestamp
+        self.isFromMe = isFromMe
+        self.contentTranslation = nil
+        self.contentLanguage = nil
+        self.contentTranslationLanguage = nil
+        self.contentHash = nil
+    }
+    
+    // Initializer with translation fields
+    init(sender: String, content: String, timestamp: String, isFromMe: Bool, 
+         contentTranslation: String?, contentLanguage: String?, 
+         contentTranslationLanguage: String?, contentHash: String?) {
+        self.messageType = nil
+        self.content = content
+        self.sender = sender
+        self.timestamp = timestamp
+        self.isFromMe = isFromMe
+        self.contentTranslation = contentTranslation
+        self.contentLanguage = contentLanguage
+        self.contentTranslationLanguage = contentTranslationLanguage
+        self.contentHash = contentHash
+    }
     
     // Custom equality check - prioritize timestamp when available
     static func == (lhs: ChatMessage, rhs: ChatMessage) -> Bool {
@@ -63,74 +102,22 @@ struct ChatMessage: Identifiable, Equatable {
         }
     }
     
-    // Convenience initializer for basic chat messages
-    init(sender: String, content: String, timestamp: String = "", isFromMe: Bool = false) {
-        self.sender = sender
-        self.content = content
-        self.timestamp = timestamp
-        self.isFromMe = isFromMe
-        self.messageType = nil
-        self.date = nil
-        self.time = nil
-        self.contentTranslation = nil
-        self.contentLanguage = nil
-        self.contentTranslationLanguage = nil
-        self.contentHash = nil
-    }
-    
-    // Convenience initializer for WhatsApp messages
-    init(messageType: String, content: String, sender: String, timestamp: String, isFromMe: Bool, date: String? = nil, time: String? = nil) {
-        self.sender = sender
-        self.content = content
-        self.timestamp = timestamp
-        self.isFromMe = isFromMe
-        self.messageType = messageType
-        self.date = date
-        self.time = time
-        self.contentTranslation = nil
-        self.contentLanguage = nil
-        self.contentTranslationLanguage = nil
-        self.contentHash = nil
-    }
-    
-    // Initializer with translation fields
-    init(sender: String, content: String, timestamp: String, isFromMe: Bool, 
-         contentTranslation: String?, contentLanguage: String?, 
-         contentTranslationLanguage: String?, contentHash: String?) {
-        self.sender = sender
-        self.content = content
-        self.timestamp = timestamp
-        self.isFromMe = isFromMe
-        self.messageType = nil
-        self.date = nil
-        self.time = nil
-        self.contentTranslation = contentTranslation
-        self.contentLanguage = contentLanguage
-        self.contentTranslationLanguage = contentTranslationLanguage
-        self.contentHash = contentHash
-    }
-    
     // Convenience method to get a formatted description
     var description: String {
-        var desc = "Sender: \(sender), Content: \(content)"
-        if let messageType = messageType {
-            desc = "Type: \(messageType), " + desc
-        }
-        if !timestamp.isEmpty {
-            desc += ", Time: \(timestamp)"
-        }
-        desc += ", IsFromMe: \(isFromMe)"
-        return desc
+        return "Type: \(messageType ?? "Unknown"), Content: \(content), Sender: \(sender), Time: \(timestamp), IsFromMe: \(isFromMe)"
     }
     
-    // Convenience method to check if message has valid content
+    // Convenience method to check if content is valid
     var hasValidContent: Bool {
         return !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
     
     // Convenience method to get sender display name
     var senderDisplayName: String {
-        return sender.isEmpty ? (isFromMe ? "You" : "Unknown") : sender
+        if sender.isEmpty {
+            return isFromMe ? "You" : "Unknown"
+        }
+        return sender
     }
 }
 
@@ -211,6 +198,34 @@ class ContentProcessor {
         return false
     }
 
+    // MARK: - Language Detection
+    /// Detect language of text using NaturalLanguage.NLLanguageRecognizer (BCP 47 codes)
+    static func detectLanguage(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "unknown" }
+
+        if let lang = NLLanguageRecognizer.dominantLanguage(for: trimmed) {
+            let code = lang.rawValue
+            Logger.debug("NLLanguageRecognizer detected language: \(code) for text: \(trimmed.prefix(50))...")
+
+            // Normalize Chinese variants to "zh"
+            if code == "zh-Hans" || code == "zh-CN"  {
+                return "zh"
+            }
+            
+            if code == "zh-Hant" || code == "zh-TW" || code == "zh-HK" {
+                return "zh-TW"
+            }
+
+            // Map undefined to unknown
+            if code == "und" { return "unknown" }
+
+            return code
+        }
+
+        Logger.debug("NLLanguageRecognizer failed to detect language")
+        return "unknown"
+    }
        
     // 预处理内容：清理可能的干扰文本
     func preprocessContent(_ content: String) -> String {
@@ -285,248 +300,357 @@ class ContentProcessor {
     }
 
        // 解析 WhatsApp 消息格式 - 返回包含详细信息的 ChatMessage 结构体
-    func parseWhatsAppMessage(_ rawText: String) -> ChatMessage? {
-        Logger.debug("Attempting to parse WhatsApp message: '\(rawText)'")
-        
-        // 清理不可见字符，特别是 U+200E (左到右标记)
-        let cleanedText = rawText.replacingOccurrences(of: "\u{200E}", with: "")
-                                  .replacingOccurrences(of: "\u{200B}", with: "")
-                                  .trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        Logger.debug("Cleaned text: '\(cleanedText)'")
+    func parseWhatsAppMessage(_ rawText: String, language: String? = nil) -> ChatMessage? {
+        Logger.info("Attempting to parse WhatsApp message: '\(rawText)'")
         
         // 过滤贴纸消息 - 如果消息以 "Sticker with:" 开头，则跳过
-        if cleanedText.hasPrefix("Sticker with:") {
-            Logger.debug("Skipping sticker message: '\(cleanedText)'")
+        // 两个\u{200E}开头可能是"\u{200E}\u{200E}消息和通话已进行端到端加密。。。"
+        if rawText.hasPrefix("\u{200E}Sticker with:") ||
+           rawText.hasPrefix("\u{200E}有这个表情符号的贴图：") ||
+           rawText.hasPrefix("\u{200E}GIF,") ||
+           rawText.hasPrefix("\u{200E}你的视频") ||
+           rawText.hasPrefix("\u{200E}your video") ||
+           rawText.hasPrefix("\u{200E}\u{200E}") {
+            Logger.debug("Skipping sticker message: '\(rawText)'")
             return nil
         }
         
-        // WhatsApp 消息格式分析：
-        // 发送消息: "Your message, [内容], [日期],at[时间], Sent to [联系人], Red"
-        // 接收消息: "message, [内容], [日期],at[时间], Received from [联系人]"
-        
-        // 首先检查消息类型
-        let messageType: String
-        let isSent: Bool
-        
-        if cleanedText.hasPrefix("Your message") {
-            messageType = "Your message"
-            isSent = true
-        } else if cleanedText.hasPrefix("message") {
-            messageType = "message"
-            isSent = false
-        } else {
-            Logger.warn("Unknown message type: '\(cleanedText)'")
+        // 根据U+200E字符进行分隔
+        let parts = rawText.components(separatedBy: "\u{200E}")
+        Logger.debug("Split by U+200E into \(parts.count) parts: \(parts)")
+        if parts.count<3 {
+            Logger.debug("Skipping message: '\(rawText)'")
             return nil
-        }
+        } 
+
+        // 获取系统语言
+        let systemLanguage = language ?? EnvironmentManager.shared.getSystemLanguage()
+        Logger.debug("System language: \(systemLanguage)")
         
-        // 使用正则表达式提取各个部分
-        let pattern: String
-        if isSent {
-            // 发送消息模式: 
-            // 1. "Your message, [内容], [日期],at[时间], Sent to [联系人], Red"
-            // 2. "Your message, [内容], [时间], Sent to [联系人]" (当天消息)
-            pattern = #"Your message,\s*(.*?),\s*(?:([A-Za-z]+\d+),\s*at)?(\d{1,2}:\d{2}),\s*Sent to\s+(.*?)(?:,\s*Red)?$"#
-        } else {
-            // 接收消息模式:
-            // 1. "message, [内容], [日期],at[时间], Received from [联系人]"
-            // 2. "message, [内容], [时间], Received from [联系人]" (当天消息)
-            pattern = #"message,\s*(.*?),\s*(?:([A-Za-z]+\d+),\s*at)?(\d{1,2}:\d{2}),\s*Received from\s+(.*?)$"#
+        // 根据系统语言和分隔后的部分进行解析
+        switch systemLanguage {
+        case "zh":
+            return parseChineseWhatsAppMessage(parts)
+        case "en":
+            return parseEnglishWhatsAppMessage(parts)
+        default:
+            // 默认使用英文解析
+            Logger.warn("Unsupported system language: \(systemLanguage), using English parser")
+            return parseEnglishWhatsAppMessage(parts)
         }
-        
-        do {
-            let regex = try NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
-            let range = NSRange(location: 0, length: cleanedText.utf16.count)
-            
-            if let match = regex.firstMatch(in: cleanedText, options: [], range: range) {
-                // 提取各个部分
-                let contentRange = Range(match.range(at: 1), in: cleanedText)!
-                let timeRange = Range(match.range(at: 3), in: cleanedText)!
-                let senderRange = Range(match.range(at: 4), in: cleanedText)!
-                
-                let content = String(cleanedText[contentRange]).trimmingCharacters(in: .whitespacesAndNewlines)
-                let rawTime = String(cleanedText[timeRange]).trimmingCharacters(in: .whitespacesAndNewlines)
-                let sender = String(cleanedText[senderRange]).trimmingCharacters(in: .whitespacesAndNewlines)
-                
-                // 检查是否有日期部分（可选）
-                var rawDate = ""
-                if match.range(at: 2).location != NSNotFound {
-                    let dateRange = Range(match.range(at: 2), in: cleanedText)!
-                    rawDate = String(cleanedText[dateRange]).trimmingCharacters(in: .whitespacesAndNewlines)
-                }
-                
-                // 解析标准化的日期和时间
-                let (standardDate, standardTime) = parseStandardDateTime(rawDate: rawDate, rawTime: rawTime)
-                let timestamp = "\(standardDate), \(standardTime)"
-                
-                // 对于发送的消息，sender 应该是"我"，而不是接收方
-                let finalSender: String
-                if isSent {
-                    finalSender = "You"  // 或者使用 "我" 如果希望显示中文
-                } else {
-                    finalSender = sender
-                }
-                
-                Logger.debug("Successfully parsed WhatsApp message: Type=\(messageType), Content='\(content)', Sender='\(finalSender)', Time='\(timestamp)', IsSent=\(isSent)")
-                
-                return ChatMessage(
-                    messageType: messageType,
-                    content: content,
-                    sender: finalSender,
-                    timestamp: timestamp,
-                    isFromMe: isSent,
-                    date: standardDate,
-                    time: standardTime
-                )
-            }
-        } catch {
-            Logger.warn("Regex error: \(error)")
-        }
-        
-        // 如果正则表达式匹配失败，尝试备用解析方法
-        Logger.info("Regex parsing failed, trying fallback method")
-        return parseWhatsAppMessageFallback(cleanedText, messageType: messageType, isSent: isSent)
-    }
+    } 
     
-    // 备用解析方法 - 使用传统的分割方法
-    private func parseWhatsAppMessageFallback(_ text: String, messageType: String, isSent: Bool) -> ChatMessage? {
-        let parts = text.components(separatedBy: ",")
+    // 解析中文WhatsApp消息
+    private func parseChineseWhatsAppMessage(_ parts: [String]) -> ChatMessage? {
+        Logger.debug("Parsing Chinese WhatsApp message with \(parts.count) parts")
         
-        guard parts.count >= 4 else {
-            Logger.warn("Fallback parsing failed: insufficient parts (\(parts.count))")
+        // 根据whatsapp.md分析，中文消息格式：
+        // 接收消息：‎消息, [内容], [时间], ‎从[联系人]收到
+        // 发送消息：‎你的消息, [内容], [时间], ‎已发送到[联系人], ‎[状态]
+        // 接收群消息：‎[发送人]发来的消息, [内容], [时间], ‎在[群名]收到
+        // 发送群消息：‎你的消息, [内容], [时间], ‎发送到[群名], ‎[状态]
+        guard parts.count >= 3 else {
+            Logger.warn("Chinese message has insufficient parts: \(parts.count)")
             return nil
         }
         
-        // 从后往前找发送人信息
-        var senderName: String?
-        var timeString: String?
-        var dateString: String?
+        // Determine sent/received by content instead of relying on parts count
+        // Sent when first part starts with "你的消息" or second part contains "已发送到"/"发送到"
+        var isSent = parts.count == 4
+        if !isSent {
+            let firstPartCheck = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            let firstPartHead = firstPartCheck.components(separatedBy: ",").first ?? firstPartCheck
+            if firstPartHead.contains("你的消息") { isSent = true }
+        }
         
-        // 查找发送人信息
-        for i in stride(from: parts.count - 1, through: 0, by: -1) {
-            let part = parts[i].trimmingCharacters(in: .whitespacesAndNewlines)
-            
-            if isSent && (part.lowercased().contains("sent to") || part.lowercased().contains("send to")) {
-                if let range = part.range(of: "to ", options: .caseInsensitive) {
-                    senderName = String(part[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
-                }
-                break
-            } else if !isSent && (part.lowercased().contains("received from") || part.lowercased().contains("receive from")) {
-                if let range = part.range(of: "from ", options: .caseInsensitive) {
-                    senderName = String(part[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
-                }
-                break
+        let messageType = "text"
+         
+        
+        // 解析第一部分：提取内容及时间
+        let firstPart = parts[1]
+        let contentStartIndex = firstPart.firstIndex(of: ",")?.utf16Offset(in: firstPart) ?? 0
+        // Get the position of the second-to-last comma
+        let commaIndices = firstPart.indices.filter { firstPart[$0] == "," }
+        let contentEndIndex = commaIndices.count >= 2 ? commaIndices[commaIndices.count - 2].utf16Offset(in: firstPart) : 0
+        let content = String(firstPart.prefix(contentEndIndex).dropFirst(contentStartIndex + 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+        // If split by comma, should get the second-to-last part as time string
+        let firstPartComponents = firstPart.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        let timeString = firstPartComponents.count >= 2 ? String(firstPartComponents[firstPartComponents.count - 2]) : ""
+        
+        
+        // 解析第二部分：提取发送人信息
+        var senderName = ""  
+        let preContent = String(firstPartComponents[0]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if preContent.contains("发来的消息") {
+            // 接收群消息：‎[发送人]发来的消息, [内容], [时间], ‎在[群名]收到
+            let senderRange = preContent.range(of: "发来的消息")
+            if let senderRange = senderRange {
+                senderName = String(preContent[..<senderRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
             }
-        }
-        
-        // 查找时间信息
-        for i in stride(from: parts.count - 2, through: 0, by: -1) {
-            let part = parts[i].trimmingCharacters(in: .whitespacesAndNewlines)
-            if part.lowercased().hasPrefix("at") && part.contains(":") {
-                timeString = part
-                // 查找日期
-                if i > 0 {
-                    let datePart = parts[i - 1].trimmingCharacters(in: .whitespacesAndNewlines)
-                    let datePattern = #"(?i)(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s*\d+"#
-                    if datePart.range(of: datePattern, options: .regularExpression) != nil {
-                        dateString = datePart
-                    }
-                }
-                break
-            }
-        }
-        
-        // 提取消息内容
-        var contentParts: [String] = []
-        let contentStartIndex = 1 // 跳过消息类型
-        
-        // 找到内容结束位置
-        var contentEndIndex = parts.count - 1
-        if let timeIndex = parts.firstIndex(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix("at") }) {
-            contentEndIndex = timeIndex - 1
-        }
-        
-        for i in contentStartIndex...contentEndIndex {
-            contentParts.append(parts[i])
-        }
-        
-        let content = contentParts.joined(separator: ",").trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        // 对于发送的消息，sender 应该是"我"，而不是接收方
-        let finalSender: String
+        } 
+
+        // 第二部分包含发送人信息
+        let secondPart = parts[2].trimmingCharacters(in: .whitespacesAndNewlines)
         if isSent {
-            finalSender = "You"  // 或者使用 "我" 如果希望显示中文
+            // 发送消息：已发送到[联系人]
+            senderName = "You"
         } else {
-            finalSender = senderName ?? "Unknown"
-        }
+            // 接收消息：从[联系人]收到
+            if let range = secondPart.range(of: "从") {
+                let afterFrom = String(secondPart[range.upperBound...])
+                if let receivedRange = afterFrom.range(of: "收到") {
+                    senderName = String(afterFrom[..<receivedRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                } else {
+                    senderName = afterFrom.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+            }
+        }  
         
         // 解析标准化的日期和时间
-        let (standardDate, standardTime) = parseStandardDateTime(rawDate: dateString ?? "", rawTime: timeString ?? "")
-        let timestamp = "\(standardDate), \(standardTime)"
-        
-        Logger.debug("Fallback parsed: Content='\(content)', Sender='\(finalSender)', Time='\(timestamp)'")
+        let timestamp = parseStandardDateTime(rawDateTime: timeString, language: "zh")  
+        Logger.debug("Chinese parsed: Content='\(content)', Sender='\(senderName)', Time='\(timestamp)'")
         
         return ChatMessage(
             messageType: messageType,
             content: content,
-            sender: finalSender,
+            sender: senderName,
             timestamp: timestamp,
-            isFromMe: isSent,
-            date: standardDate,
-            time: standardTime
+            isFromMe: isSent
         )
     }
     
-    // 解析标准化的日期和时间
-    private func parseStandardDateTime(rawDate: String, rawTime: String) -> (date: String, time: String) {
-        // 解析日期：将 "July30" 转换为 "July 30"
-        var standardDate = rawDate
-        if !rawDate.isEmpty {
-            // 在月份和日期之间添加空格
-            let datePattern = #"(?i)(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)(\d+)"#
-            if let regex = try? NSRegularExpression(pattern: datePattern, options: []) {
-                let range = NSRange(location: 0, length: rawDate.utf16.count)
-                if let match = regex.firstMatch(in: rawDate, options: [], range: range) {
-                    let monthRange = Range(match.range(at: 1), in: rawDate)!
-                    let dayRange = Range(match.range(at: 2), in: rawDate)!
-                    let month = String(rawDate[monthRange])
-                    let day = String(rawDate[dayRange])
-                    standardDate = "\(month) \(day)"
-                }
-            }
-        } else {
-            // 如果没有日期，使用今天的日期
-            let formatter = DateFormatter()
-            formatter.dateFormat = "MMMM d"
-            standardDate = formatter.string(from: Date())
+    // 解析英文WhatsApp消息
+    private func parseEnglishWhatsAppMessage(_ parts: [String]) -> ChatMessage? {
+        Logger.debug("Parsing English WhatsApp message with \(parts.count) parts")
+        
+        // 根据whatsapp.md分析，英文消息格式：
+        // 接收消息：‎message, [内容], [日期],at[时间], ‎Received from [联系人]
+        // 发送消息：‎Your message, [内容], [日期],at[时间], ‎Sent to [联系人], ‎[状态]
+        
+        guard parts.count >= 3 else {
+            Logger.warn("English message has insufficient parts: \(parts.count)")
+            return nil
+        }
+
+        // Determine sent/received by content instead of relying on parts count
+        // Sent when first part contains "Your message" or second part contains "Sent to"
+        var isSent = parts.count == 4
+        if !isSent {
+            let firstPartCheck = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            let firstPartHead = firstPartCheck.components(separatedBy: ",").first ?? firstPartCheck
+            if firstPartHead.contains("Your message") { isSent = true }
         }
         
-        // 解析时间：将 "at16:23" 转换为 "16:23"
-        var standardTime = rawTime
-        if !rawTime.isEmpty {
-            // 移除 "at" 前缀
-            if rawTime.lowercased().hasPrefix("at") {
-                standardTime = String(rawTime.dropFirst(2))
+        let messageType = "text"
+        var content = ""
+        var timeString = ""
+        var senderName = ""
+        
+        // 第一部分包含消息类型和内容
+        let firstPart = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+        let firstParts = firstPart.components(separatedBy: ",")
+        // Special handling: if the last part starts with "at" and is a time (e.g., at16:23), merge last two parts as timeString,
+        // remove the first part (message type), remove the time, and treat the middle as content.
+        if firstParts.count >= 4 {
+            let preContent = String(firstParts[0]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if preContent.contains("message from ") {
+                // 接收群消息：‎message from [发送人], [内容], [时间], ‎Received at [群名]
+                let senderRange = preContent.range(of: "message from ")
+                if let senderRange = senderRange {
+                    senderName = String(preContent[senderRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                }
             }
             
-            // 确保时间格式正确 (HH:MM)
-            let timePattern = #"(\d{1,2}):(\d{2})"#
-            if let regex = try? NSRegularExpression(pattern: timePattern, options: []) {
-                let range = NSRange(location: 0, length: standardTime.utf16.count)
-                if let match = regex.firstMatch(in: standardTime, options: [], range: range) {
-                    let hourRange = Range(match.range(at: 1), in: standardTime)!
-                    let minuteRange = Range(match.range(at: 2), in: standardTime)!
-                    let hour = String(standardTime[hourRange])
-                    let minute = String(standardTime[minuteRange])
-                    
-                    // 格式化小时为两位数
-                    let formattedHour = hour.count == 1 ? "0\(hour)" : hour
-                    standardTime = "\(formattedHour):\(minute)"
+            let lastPart = firstParts[firstParts.count - 2].trimmingCharacters(in: .whitespacesAndNewlines)
+            let secondLastPart = firstParts[firstParts.count - 3].trimmingCharacters(in: .whitespacesAndNewlines)
+            // Check if last part starts with "at" and is a time (e.g., at16:23)
+            if lastPart.hasPrefix("at") && lastPart.count >= 5 {
+                let timeCandidate = String(lastPart.dropFirst(2))
+                // Check if timeCandidate is in HH:MM format
+                let timeRegex = try? NSRegularExpression(pattern: #"^\d{1,2}:\d{2}$"#)
+                if let regex = timeRegex, regex.firstMatch(in: timeCandidate, options: [], range: NSRange(location: 0, length: timeCandidate.utf16.count)) != nil {
+                    // Merge secondLastPart and lastPart as timeString
+                    timeString = "\(secondLastPart),\(lastPart)"
+
+                    // Remove first part (message type)
+                    let contentParts = firstParts[1..<(firstParts.count - 3)]
+                    content = contentParts.joined(separator: ",").trimmingCharacters(in: .whitespacesAndNewlines) 
                 }
             }
-        }
+            else if  lastPart.count == 5 && lastPart.contains(":") {
+                // 如果时间格式不正确，则使用第二部分作为时间
+                timeString = lastPart
+                // Remove first part (message type)
+                let contentParts = firstParts[1..<(firstParts.count - 2)]
+                content = contentParts.joined(separator: ",").trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            else {
+                timeString = ""
+            }
+        } 
+         
+        // 第二部分包含发送人信息
+        let secondPart = parts[2].trimmingCharacters(in: .whitespacesAndNewlines)
+        if isSent {
+            // 发送消息：Sent to [联系人]
+            senderName = "You"
+        } else {
+            // 接收消息：Received from [联系人]
+            if let range = secondPart.range(of: "Received from ") {
+                senderName = String(secondPart[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        } 
+         
         
-        return (standardDate, standardTime)
+        // 解析标准化的日期和时间
+        let timestamp = parseStandardDateTime(rawDateTime: timeString, language: "en")  
+        Logger.debug("English parsed: Content='\(content)', Sender='\(senderName)', Time='\(timestamp)'")  
+        
+        return ChatMessage(
+            messageType: messageType,
+            content: content,
+            sender: senderName,
+            timestamp: timestamp,
+            isFromMe: isSent
+        )
+    }
+    
+    // 解析并转换为标准化的日期和时间 YYYY-MM-DD HH:MM:SS
+    private func parseStandardDateTime(rawDateTime: String, language: String) -> String {
+        // 解析日期：支持英文和中文格式
+        var standardDateTime = ""
+
+        if rawDateTime.isEmpty {
+            return ""
+        }
+
+        switch language {
+        case "en":
+            // English date format: convert "July30,at16:23" to "2025-07-30 16:23:00"
+            // Assumes current year if year is not present 
+            let englishDatePattern = #"(?i)(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s?(\d{1,2})"# // e.g. July30 or July 30
+            let timePattern = #"at?(\d{1,2}):(\d{2})"# // e.g. at16:23 or 16:23
+
+            var year = Calendar.current.component(.year, from: Date())
+            var month = 1
+            var day = 1
+            var hour = 0
+            var minute = 0
+
+            // 解析月份和日期
+            if let regex = try? NSRegularExpression(pattern: englishDatePattern, options: []),
+               let match = regex.firstMatch(in: rawDateTime, options: [], range: NSRange(location: 0, length: rawDateTime.utf16.count)) {
+                let monthStrRange = Range(match.range(at: 1), in: rawDateTime)!
+                let dayRange = Range(match.range(at: 2), in: rawDateTime)!
+                let monthStr = String(rawDateTime[monthStrRange]).lowercased()
+                let dayStr = String(rawDateTime[dayRange])
+                let monthMap = [
+                    "january": 1, "jan": 1,
+                    "february": 2, "feb": 2,
+                    "march": 3, "mar": 3,
+                    "april": 4, "apr": 4,
+                    "may": 5,
+                    "june": 6, "jun": 6,
+                    "july": 7, "jul": 7,
+                    "august": 8, "aug": 8,
+                    "september": 9, "sep": 9,
+                    "october": 10, "oct": 10,
+                    "november": 11, "nov": 11,
+                    "december": 12, "dec": 12
+                ]
+                month = monthMap[monthStr] ?? 1
+                day = Int(dayStr) ?? 1
+            }
+
+            // 解析时间
+            if let regex = try? NSRegularExpression(pattern: timePattern, options: []),
+               let match = regex.firstMatch(in: rawDateTime, options: [], range: NSRange(location: 0, length: rawDateTime.utf16.count)) {
+                let hourRange = Range(match.range(at: 1), in: rawDateTime)!
+                let minuteRange = Range(match.range(at: 2), in: rawDateTime)!
+                hour = Int(rawDateTime[hourRange]) ?? 0
+                minute = Int(rawDateTime[minuteRange]) ?? 0
+            }
+
+            // 构造DateComponents并转为ISO8601字符串
+            var components = DateComponents()
+            components.year = year
+            components.month = month
+            components.day = day
+            components.hour = hour
+            components.minute = minute
+            components.second = 0
+
+            let calendar = Calendar(identifier: .gregorian)
+            if let date = calendar.date(from: components) {
+                let formatter = DateFormatter()
+                formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+                standardDateTime = formatter.string(from: date)
+            } else {
+                standardDateTime = ""
+            }
+             
+        case "zh":
+            // 中文日期格式：将 "12:51"或"年8月9日12:51"或"2025年8月9日12:51" 转换为 "2025-08-09 12:51:00" 
+            // Try to match full date and time first: "2025年8月9日12:51"
+            let fullChineseDatePattern = #"(?:(\d{4})年)?(\d{1,2})月(\d{1,2})日(\d{1,2}):(\d{2})"#
+            let onlyTimePattern = #"^(\d{1,2}):(\d{2})$"#
+            var year = ""
+            var month = ""
+            var day = ""
+            var hour = ""
+            var minute = ""
+            if let regex = try? NSRegularExpression(pattern: fullChineseDatePattern, options: []) {
+                let range = NSRange(location: 0, length: rawDateTime.utf16.count)
+                if let match = regex.firstMatch(in: rawDateTime, options: [], range: range) {
+                    // Year (optional)
+                    if let yearRange = Range(match.range(at: 1), in: rawDateTime), match.range(at: 1).length > 0 {
+                        year = String(rawDateTime[yearRange])
+                    } else {
+                        // If year is missing, use current year
+                        let currentYear = Calendar.current.component(.year, from: Date())
+                        year = "\(currentYear)"
+                    }
+                    // Month and day
+                    if let monthRange = Range(match.range(at: 2), in: rawDateTime) {
+                        month = String(format: "%02d", Int(rawDateTime[monthRange]) ?? 1)
+                    }
+                    if let dayRange = Range(match.range(at: 3), in: rawDateTime) {
+                        day = String(format: "%02d", Int(rawDateTime[dayRange]) ?? 1)
+                    }
+                    // Hour and minute
+                    if let hourRange = Range(match.range(at: 4), in: rawDateTime) {
+                        hour = String(format: "%02d", Int(rawDateTime[hourRange]) ?? 0)
+                    }
+                    if let minuteRange = Range(match.range(at: 5), in: rawDateTime) {
+                        minute = String(format: "%02d", Int(rawDateTime[minuteRange]) ?? 0)
+                    }
+                    standardDateTime = "\(year)-\(month)-\(day) \(hour):\(minute):00"
+                } else if let timeRegex = try? NSRegularExpression(pattern: onlyTimePattern, options: []) {
+                    // Only time, e.g. "12:51"
+                    let timeRange = NSRange(location: 0, length: rawDateTime.utf16.count)
+                    if let timeMatch = timeRegex.firstMatch(in: rawDateTime, options: [], range: timeRange) {
+                        // Use today's date
+                        let now = Date()
+                        let calendar = Calendar.current
+                        year = String(calendar.component(.year, from: now))
+                        month = String(format: "%02d", calendar.component(.month, from: now))
+                        day = String(format: "%02d", calendar.component(.day, from: now))
+                        if let hourRange = Range(timeMatch.range(at: 1), in: rawDateTime) {
+                            hour = String(format: "%02d", Int(rawDateTime[hourRange]) ?? 0)
+                        }
+                        if let minuteRange = Range(timeMatch.range(at: 2), in: rawDateTime) {
+                            minute = String(format: "%02d", Int(rawDateTime[minuteRange]) ?? 0)
+                        }
+                        standardDateTime = "\(year)-\(month)-\(day) \(hour):\(minute):00"
+                    }
+                }
+            }
+        default:
+            // Default case for unsupported languages
+            standardDateTime = ""
+        } 
+         
+        return standardDateTime
     }
      
 }
@@ -556,8 +680,7 @@ extension ContentProcessor {
                 Logger.info("  - Content: \(result.content)")
                 Logger.info("  - Sender: \(result.senderDisplayName)")
                 Logger.info("  - Timestamp: \(result.timestamp)")
-                Logger.info("  - Date: \(result.date ?? "N/A")")
-                Logger.info("  - Time: \(result.time ?? "N/A")")
+                Logger.info("  - Timestamp: \(result.timestamp)")
                 Logger.info("  - Is From Me: \(result.isFromMe)")
                 Logger.info("  - Has Valid Content: \(result.hasValidContent)")
             } else {

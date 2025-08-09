@@ -177,4 +177,18 @@ class EnvironmentManager {
         
         return address
     }
+
+        
+    // 获取系统语言
+    func getSystemLanguage() -> String {
+        // Use Locale.preferredLanguages to get the system language code
+        if let preferred = Locale.preferredLanguages.first {
+            let locale = Locale(identifier: preferred)
+            if let langCode = locale.language.languageCode?.identifier {
+                Logger.debug("Detected system language code from preferredLanguages: \(langCode)")
+                return langCode
+            }
+        }
+        return "en"
+    }
 } 
