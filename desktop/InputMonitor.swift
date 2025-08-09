@@ -239,12 +239,23 @@ class InputMonitor {
                             shared.handleTabKey()
                         }
                     }
-                } else if keyCode == 0 && event.flags.contains(.maskCommand) { // Cmd+A 检测
+                } else if keyCode == 0 && event.flags.contains(.maskCommand) && 
+                           !event.flags.contains(.maskShift) && 
+                           !event.flags.contains(.maskAlternate) && 
+                           !event.flags.contains(.maskControl) { // Cmd+A 检测（排除 Shift+Cmd+A、Option+Cmd+A、Ctrl+Cmd+A）
+                    Logger.debug("Pure Cmd+A detected (no additional modifiers)")
                     DispatchQueue.global(qos: .background).async {
                         DispatchQueue.main.async {
                             shared.handleCmdA()
                         }
                     }
+                } else if keyCode == 0 && event.flags.contains(.maskCommand) {
+                    // Log ignored Cmd+A with additional modifiers
+                    var modifiers: [String] = []
+                    if event.flags.contains(.maskShift) { modifiers.append("Shift") }
+                    if event.flags.contains(.maskAlternate) { modifiers.append("Option") }
+                    if event.flags.contains(.maskControl) { modifiers.append("Ctrl") }
+                    Logger.debug("Cmd+A with additional modifiers ignored: \(modifiers.joined(separator: "+"))+Cmd+A")
                 }
             }
             
