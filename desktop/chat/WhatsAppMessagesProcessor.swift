@@ -336,8 +336,10 @@ class WhatsAppMessagesProcessor: ChatMessagesProcessor {
                             }
                         } else {
                             Logger.warn("Failed to parse timestamp for message: '\(chatMessage.timestamp)', including message")
-                            messages.append(chatMessage)
-                            Logger.info("Append parsed message (timestamp parsing failed): \(chatMessage)")
+                            if !chatMessage.content.isEmpty && chatMessage.content != "" {
+                                messages.append(chatMessage)
+                                Logger.info("Append parsed message (timestamp parsing failed): \(chatMessage)")
+                            }
                         }
                     }
                 }
@@ -490,8 +492,10 @@ class WhatsAppMessagesProcessor: ChatMessagesProcessor {
                                 }
                             } else {
                                 Logger.warn("Failed to parse timestamp for message: '\(chatMessage.timestamp)', including message")
-                                messages.append(chatMessage)
-                                Logger.info("Append parsed message (timestamp parsing failed): \(chatMessage)")
+                                if !chatMessage.content.isEmpty && chatMessage.content != "" {
+                                    messages.append(chatMessage)
+                                    Logger.info("Append parsed message (timestamp parsing failed): \(chatMessage)")
+                                }
                             }
                         } else {
                             // No timestamp filter, include all messages
