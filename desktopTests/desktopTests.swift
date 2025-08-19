@@ -368,6 +368,61 @@ struct desktopTests {
         } else {
             #expect(Bool(false), "Failed to parse message with timestamp")
         }
+
+        let messageWithTimestamp2 = "‎消息, Swing freely, 年8月9日上午3:48, ‎从bryan收到"
+        if let result = ContentProcessor.shared.parseWhatsAppMessage(messageWithTimestamp2,language: "zh") {
+            #expect(!result.timestamp.isEmpty, "Timestamp should not be empty") 
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyy"
+            let currentDateString = dateFormatter.string(from: Date())
+            #expect(result.timestamp == "\(currentDateString)-08-09 03:48:00")
+        } else {
+            #expect(Bool(false), "Failed to parse message with timestamp")
+        }
+
+        let messageWithTimestamp3 = "‎消息, Finally fixed this issue, 下午4:50, ‎从bryan收到"
+        if let result = ContentProcessor.shared.parseWhatsAppMessage(messageWithTimestamp3,language: "zh") {
+            #expect(!result.timestamp.isEmpty, "Timestamp should not be empty") 
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyy-MM-dd"
+            let currentDateString = dateFormatter.string(from: Date())
+            #expect(result.timestamp == "\(currentDateString) 16:50:00")
+        } else {
+            #expect(Bool(false), "Failed to parse message with timestamp")
+        }
+
+        let messageWithTimestamp4 = "‎message, Strange project, 4:53 PM, ‎Received from Carlos"
+        if let result = ContentProcessor.shared.parseWhatsAppMessage(messageWithTimestamp4,language: "en") {
+            #expect(!result.timestamp.isEmpty, "Timestamp should not be empty") 
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyy-MM-dd"
+            let currentDateString = dateFormatter.string(from: Date())
+            #expect(result.timestamp == "\(currentDateString) 16:53:00")
+        } else {
+            #expect(Bool(false), "Failed to parse message with timestamp")
+        }
+
+        let messageWithTimestamp5 = "‎message, Let's start, August9,at3:41 AM, ‎Received from Carlos"
+        if let result = ContentProcessor.shared.parseWhatsAppMessage(messageWithTimestamp5,language: "en") {
+            #expect(!result.timestamp.isEmpty, "Timestamp should not be empty") 
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyy"
+            let currentDateString = dateFormatter.string(from: Date())
+            #expect(result.timestamp == "\(currentDateString)-08-09 03:41:00")
+        } else {
+            #expect(Bool(false), "Failed to parse message with timestamp")
+        }
+
+        let messageWithTimestamp6 = "‎message, Let's start, August12,at3:41 PM, ‎Received from Carlos"
+        if let result = ContentProcessor.shared.parseWhatsAppMessage(messageWithTimestamp6,language: "en") {
+            #expect(!result.timestamp.isEmpty, "Timestamp should not be empty") 
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyy"
+            let currentDateString = dateFormatter.string(from: Date())
+            #expect(result.timestamp == "\(currentDateString)-08-12 15:41:00")
+        } else {
+            #expect(Bool(false), "Failed to parse message with timestamp")
+        }
         
         // Test invalid messages
         let invalidMessage = "Invalid format without proper structure"
