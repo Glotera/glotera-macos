@@ -452,7 +452,7 @@ class ContentProcessor {
         // Special handling: if the last part starts with "at" and is a time (e.g., at16:23), merge last two parts as timeString,
         // remove the first part (message type), remove the time, and treat the middle as content.
         if firstParts.count >= 4 {
-            let preContent = String(firstParts[0]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let preContent = firstParts[0].trimmingCharacters(in: .whitespacesAndNewlines)
             if preContent.contains("message from ") {
                 // 接收群消息：‎message from [发送人], [内容], [时间], ‎Received at [群名]
                 let senderRange = preContent.range(of: "message from ")
@@ -463,8 +463,26 @@ class ContentProcessor {
             
             let lastPart = firstParts[firstParts.count - 2].trimmingCharacters(in: .whitespacesAndNewlines)
             let secondLastPart = firstParts[firstParts.count - 3].trimmingCharacters(in: .whitespacesAndNewlines)
-            // Check if last part starts with "at" and is a time (e.g., at16:23)
-            if lastPart.hasPrefix("at") && lastPart.count >= 5 {
+            
+            // Check if last part is a time format (HH:MM, HH:MM AM/PM, or atHH:MM AM/PM)
+            let timeRegex = try? NSRegularExpression(pattern: #"^(at)?(\d{1,2}):(\d{2})(\s*(AM|PM|am|pm))?$"#)
+            if let regex = timeRegex, regex.firstMatch(in: lastPart, options: [], range: NSRange(location: 0, length: lastPart.utf16.count)) != nil {
+                // Last part is a time, check if second last part is a date
+                let dateRegex = try? NSRegularExpression(pattern: #"(?i)(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s?\d{1,2}"#)
+                if let dateRegex = dateRegex, dateRegex.firstMatch(in: secondLastPart, options: [], range: NSRange(location: 0, length: secondLastPart.utf16.count)) != nil {
+                    // Second last part is a date, merge them as timeString
+                    timeString = "\(secondLastPart),\(lastPart)"
+                    // Remove first part (message type) and last two parts (date and time)
+                    let contentParts = firstParts[1..<(firstParts.count - 3)]
+                    content = contentParts.joined(separator: ",").trimmingCharacters(in: .whitespacesAndNewlines)
+                } else {
+                    // Only time, no date
+                    timeString = lastPart
+                    // Remove first part (message type) and last part (time)
+                    let contentParts = firstParts[1..<(firstParts.count - 2)]
+                    content = contentParts.joined(separator: ",").trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+            } else if lastPart.hasPrefix("at") && lastPart.count >= 5 {
                 let timeCandidate = String(lastPart.dropFirst(2))
                 // Check if timeCandidate is in HH:MM format
                 let timeRegex = try? NSRegularExpression(pattern: #"^\d{1,2}:\d{2}$"#)
@@ -476,15 +494,7 @@ class ContentProcessor {
                     let contentParts = firstParts[1..<(firstParts.count - 3)]
                     content = contentParts.joined(separator: ",").trimmingCharacters(in: .whitespacesAndNewlines) 
                 }
-            }
-            else if  lastPart.count == 5 && lastPart.contains(":") {
-                // 如果时间格式不正确，则使用第二部分作为时间
-                timeString = lastPart
-                // Remove first part (message type)
-                let contentParts = firstParts[1..<(firstParts.count - 2)]
-                content = contentParts.joined(separator: ",").trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-            else {
+            } else {
                 timeString = ""
             }
         } 
@@ -529,8 +539,11 @@ class ContentProcessor {
             // English date format: convert "July30,at16:23" to "2025-07-30 16:23:00"
             // Assumes current year if year is not present 
             let englishDatePattern = #"(?i)(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s?(\d{1,2})"# // e.g. July30 or July 30
-            let timePattern = #"at?(\d{1,2}):(\d{2})"# // e.g. at16:23 or 16:23
+            let timePattern = #"at(\d{1,2}):(\d{2})"# // e.g. at16:23
             let onlyTimePattern = #"^(\d{1,2}):(\d{2})$"# // e.g. 16:20
+            // Enhanced 12-hour format patterns
+            let time12HourPattern = #"^(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)"# // e.g. 3:41 PM, 4:53 PM
+            let time12HourWithAtPattern = #"at(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)"# // e.g. at3:41 PM
 
             var year = Calendar.current.component(.year, from: Date())
             var month = 1
@@ -538,7 +551,7 @@ class ContentProcessor {
             var hour = 0
             var minute = 0
 
-            // 首先检查是否只是时间格式（如 "16:20"）
+            // 首先检查是否只是时间格式（如 "16:20" 或 "4:53 PM"）
             if let timeRegex = try? NSRegularExpression(pattern: onlyTimePattern, options: []),
                let timeMatch = timeRegex.firstMatch(in: rawDateTime, options: [], range: NSRange(location: 0, length: rawDateTime.utf16.count)) {
                 // 只有时间，使用今天的日期
@@ -557,6 +570,61 @@ class ContentProcessor {
                 }
                 
                 Logger.debug("Parsed time-only string '\(rawDateTime)' to today's date")
+            } else if let time12HourRegex = try? NSRegularExpression(pattern: time12HourPattern, options: []),
+                      let timeMatch = time12HourRegex.firstMatch(in: rawDateTime, options: [], range: NSRange(location: 0, length: rawDateTime.utf16.count)) {
+                // 12小时制时间格式，使用今天的日期
+                let now = Date()
+                let calendar = Calendar.current
+                year = calendar.component(.year, from: now)
+                month = calendar.component(.month, from: now)
+                day = calendar.component(.day, from: now)
+                
+                // 解析时间
+                if let hourRange = Range(timeMatch.range(at: 1), in: rawDateTime) {
+                    var tempHour = Int(rawDateTime[hourRange]) ?? 0
+                    if let ampmRange = Range(timeMatch.range(at: 3), in: rawDateTime) {
+                        let ampm = String(rawDateTime[ampmRange]).uppercased()
+                        if ampm == "PM" && tempHour != 12 {
+                            tempHour += 12
+                        } else if ampm == "AM" && tempHour == 12 {
+                            tempHour = 0
+                        }
+                    }
+                    hour = tempHour
+                }
+                if let minuteRange = Range(timeMatch.range(at: 2), in: rawDateTime) {
+                    minute = Int(rawDateTime[minuteRange]) ?? 0
+                }
+                
+                Logger.debug("Parsed 12-hour time string '\(rawDateTime)' to today's date")
+            // } 
+            // else if let time12HourWithAtRegex = try? NSRegularExpression(pattern: time12HourWithAtPattern, options: []),
+            //           let timeMatch = time12HourWithAtRegex.firstMatch(in: rawDateTime, options: [], range: NSRange(location: 0, length: rawDateTime.utf16.count)) {
+            //     // 带at的12小时制时间格式，使用今天的日期
+            //     let now = Date()
+            //     let calendar = Calendar.current
+            //     year = calendar.component(.year, from: now)
+            //     month = calendar.component(.month, from: now)
+            //     day = calendar.component(.day, from: now)
+                
+            //     // 解析时间
+            //     if let hourRange = Range(timeMatch.range(at: 1), in: rawDateTime) {
+            //         var tempHour = Int(rawDateTime[hourRange]) ?? 0
+            //         if let ampmRange = Range(timeMatch.range(at: 3), in: rawDateTime) {
+            //             let ampm = String(rawDateTime[ampmRange]).uppercased()
+            //             if ampm == "PM" && tempHour != 12 {
+            //                 tempHour += 12
+            //             } else if ampm == "AM" && tempHour == 12 {
+            //                 tempHour = 0
+            //             }
+            //         }
+            //         hour = tempHour
+            //     }
+            //     if let minuteRange = Range(timeMatch.range(at: 2), in: rawDateTime) {
+            //         minute = Int(rawDateTime[minuteRange]) ?? 0
+            //     }
+                
+            //     Logger.debug("Parsed 12-hour time with 'at' string '\(rawDateTime)' to today's date")
             } else {
                 // 解析月份和日期
                 if let regex = try? NSRegularExpression(pattern: englishDatePattern, options: []),
@@ -583,8 +651,44 @@ class ContentProcessor {
                     day = Int(dayStr) ?? 1
                 }
 
-                // 解析时间
-                if let regex = try? NSRegularExpression(pattern: timePattern, options: []),
+                // 解析时间 - 支持24小时制和12小时制
+                if let time12HourWithAtRegex = try? NSRegularExpression(pattern: time12HourWithAtPattern, options: []),
+                          let timeMatch = time12HourWithAtRegex.firstMatch(in: rawDateTime, options: [], range: NSRange(location: 0, length: rawDateTime.utf16.count)) {
+                    // 带at的12小时制时间格式
+                    if let hourRange = Range(timeMatch.range(at: 1), in: rawDateTime) {
+                        var tempHour = Int(rawDateTime[hourRange]) ?? 0
+                        if let ampmRange = Range(timeMatch.range(at: 3), in: rawDateTime) {
+                            let ampm = String(rawDateTime[ampmRange]).uppercased()
+                            if ampm == "PM" && tempHour != 12 {
+                                tempHour += 12
+                            } else if ampm == "AM" && tempHour == 12 {
+                                tempHour = 0
+                            }
+                        }
+                        hour = tempHour
+                    }
+                    if let minuteRange = Range(timeMatch.range(at: 2), in: rawDateTime) {
+                        minute = Int(rawDateTime[minuteRange]) ?? 0
+                    }
+                }else if let time12HourRegex = try? NSRegularExpression(pattern: time12HourPattern, options: []),
+                          let timeMatch = time12HourRegex.firstMatch(in: rawDateTime, options: [], range: NSRange(location: 0, length: rawDateTime.utf16.count)) {
+                    // 12小时制时间格式
+                    if let hourRange = Range(timeMatch.range(at: 1), in: rawDateTime) {
+                        var tempHour = Int(rawDateTime[hourRange]) ?? 0
+                        if let ampmRange = Range(timeMatch.range(at: 3), in: rawDateTime) {
+                            let ampm = String(rawDateTime[ampmRange]).uppercased()
+                            if ampm == "PM" && tempHour != 12 {
+                                tempHour += 12
+                            } else if ampm == "AM" && tempHour == 12 {
+                                tempHour = 0
+                            }
+                        }
+                        hour = tempHour
+                    }
+                    if let minuteRange = Range(timeMatch.range(at: 2), in: rawDateTime) {
+                        minute = Int(rawDateTime[minuteRange]) ?? 0
+                    }
+                } else if let regex = try? NSRegularExpression(pattern: timePattern, options: []),
                    let match = regex.firstMatch(in: rawDateTime, options: [], range: NSRange(location: 0, length: rawDateTime.utf16.count)) {
                     let hourRange = Range(match.range(at: 1), in: rawDateTime)!
                     let minuteRange = Range(match.range(at: 2), in: rawDateTime)!
@@ -605,6 +709,7 @@ class ContentProcessor {
             let calendar = Calendar(identifier: .gregorian)
             if let date = calendar.date(from: components) {
                 let formatter = DateFormatter()
+                formatter.locale = Locale(identifier: "en_US_POSIX") // 关键设置
                 formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
                 standardDateTime = formatter.string(from: date)
             } else {
@@ -614,14 +719,19 @@ class ContentProcessor {
         case "zh":
             // 中文日期格式：将 "12:51"或"年8月9日12:51"或"2025年8月9日12:51" 转换为 "2025-08-09 12:51:00" 
             // Try to match full date and time first: "2025年8月9日12:51"
-            let fullChineseDatePattern = #"(?:(\d{4})年)?(\d{1,2})月(\d{1,2})日(\d{1,2}):(\d{2})"#
             let onlyTimePattern = #"^(\d{1,2}):(\d{2})$"#
+            // Enhanced Chinese time patterns
+            let chineseTimePattern = #"(上午|下午|晚上)?(\d{1,2}):(\d{2})"# // e.g. 下午3:48, 上午9:30
+            let chineseDateTimePattern = #"(?:(\d{4})年)?(\d{1,2})月(\d{1,2})日(上午|下午|晚上)?(\d{1,2}):(\d{2})"# // e.g. 年8月9日下午3:48
+            
             var year = ""
             var month = ""
             var day = ""
             var hour = ""
             var minute = ""
-            if let regex = try? NSRegularExpression(pattern: fullChineseDatePattern, options: []) {
+            
+            // First try to match the enhanced Chinese date-time pattern
+            if let regex = try? NSRegularExpression(pattern: chineseDateTimePattern, options: []) {
                 let range = NSRange(location: 0, length: rawDateTime.utf16.count)
                 if let match = regex.firstMatch(in: rawDateTime, options: [], range: range) {
                     // Year (optional)
@@ -639,14 +749,62 @@ class ContentProcessor {
                     if let dayRange = Range(match.range(at: 3), in: rawDateTime) {
                         day = String(format: "%02d", Int(rawDateTime[dayRange]) ?? 1)
                     }
-                    // Hour and minute
-                    if let hourRange = Range(match.range(at: 4), in: rawDateTime) {
-                        hour = String(format: "%02d", Int(rawDateTime[hourRange]) ?? 0)
+                    // Time period (上午/下午/晚上)
+                    var timePeriod = ""
+                    if let timePeriodRange = Range(match.range(at: 4), in: rawDateTime), match.range(at: 4).length > 0 {
+                        timePeriod = String(rawDateTime[timePeriodRange])
                     }
-                    if let minuteRange = Range(match.range(at: 5), in: rawDateTime) {
+                    // Hour and minute
+                    if let hourRange = Range(match.range(at: 5), in: rawDateTime) {
+                        var tempHour = Int(rawDateTime[hourRange]) ?? 0
+                        // Convert 12-hour to 24-hour format for Chinese time expressions
+                        if timePeriod == "下午" || timePeriod == "晚上" {
+                            if tempHour != 12 {
+                                tempHour += 12
+                            }
+                        } else if timePeriod == "上午" && tempHour == 12 {
+                            tempHour = 0
+                        }
+                        hour = String(format: "%02d", tempHour)
+                    }
+                    if let minuteRange = Range(match.range(at: 6), in: rawDateTime) {
                         minute = String(format: "%02d", Int(rawDateTime[minuteRange]) ?? 0)
                     }
                     standardDateTime = "\(year)-\(month)-\(day) \(hour):\(minute):00"
+                } else if let timeRegex = try? NSRegularExpression(pattern: chineseTimePattern, options: []) {
+                    // Chinese time pattern with period (上午/下午/晚上)
+                    let timeRange = NSRange(location: 0, length: rawDateTime.utf16.count)
+                    if let timeMatch = timeRegex.firstMatch(in: rawDateTime, options: [], range: timeRange) {
+                        // Use today's date
+                        let now = Date()
+                        let calendar = Calendar.current
+                        year = String(calendar.component(.year, from: now))
+                        month = String(format: "%02d", calendar.component(.month, from: now))
+                        day = String(format: "%02d", calendar.component(.day, from: now))
+                        
+                        // Time period (上午/下午/晚上)
+                        var timePeriod = ""
+                        if let timePeriodRange = Range(timeMatch.range(at: 1), in: rawDateTime), timeMatch.range(at: 1).length > 0 {
+                            timePeriod = String(rawDateTime[timePeriodRange])
+                        }
+                        
+                        if let hourRange = Range(timeMatch.range(at: 2), in: rawDateTime) {
+                            var tempHour = Int(rawDateTime[hourRange]) ?? 0
+                            // Convert 12-hour to 24-hour format for Chinese time expressions
+                            if timePeriod == "下午" || timePeriod == "晚上" {
+                                if tempHour != 12 {
+                                    tempHour += 12
+                                }
+                            } else if timePeriod == "上午" && tempHour == 12 {
+                                tempHour = 0
+                            }
+                            hour = String(format: "%02d", tempHour)
+                        }
+                        if let minuteRange = Range(timeMatch.range(at: 3), in: rawDateTime) {
+                            minute = String(format: "%02d", Int(rawDateTime[minuteRange]) ?? 0)
+                        }
+                        standardDateTime = "\(year)-\(month)-\(day) \(hour):\(minute):00"
+                    }
                 } else if let timeRegex = try? NSRegularExpression(pattern: onlyTimePattern, options: []) {
                     // Only time, e.g. "12:51"
                     let timeRange = NSRange(location: 0, length: rawDateTime.utf16.count)
