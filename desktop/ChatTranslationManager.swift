@@ -31,12 +31,24 @@ class ChatTranslationManager: NSObject {
         setupNotifications()
         setupLogoBarManager()
         
+        // Enable logo bar manager for all users (free users will see upgrade prompt when clicking)
+        logoBarManager.enable()
+        Logger.info("Logo bar manager enabled for all users")
+        
         // Start monitoring only if user has chat translation access
         if SessionManager.shared.hasChatTranslationAccess() {
             startMonitoring()
+            Logger.info("Chat translation monitoring started - user has Pro/Max access")
         } else {
             isEnabled = false
             Logger.info("Chat translation disabled for free user")
+            
+            // Add detailed logging for debugging
+            if let user = SessionManager.shared.getCurrentUser() {
+                Logger.info("Current user: \(user.username) (\(user.email)) - Type: \(user.userType)")
+            } else {
+                Logger.info("No current user found - user not logged in")
+            }
         }
         
         // Listen for user login/logout to update feature access

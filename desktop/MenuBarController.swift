@@ -89,6 +89,11 @@ class MenuBarController: NSObject, NSMenuDelegate {
         printChatElementTreeItem.target = self
         debugMenu.addItem(printChatElementTreeItem)
         
+        // Logo Bar Status Check
+        let logoBarStatusItem = NSMenuItem(title: "Check Logo Bar Status", action: #selector(checkLogoBarStatus), keyEquivalent: "")
+        logoBarStatusItem.target = self
+        debugMenu.addItem(logoBarStatusItem)
+        
         menu.addItem(debugMenuItem)
         #endif
 
@@ -228,6 +233,19 @@ class MenuBarController: NSObject, NSMenuDelegate {
         showNonBlockingNotification(
             title: "Element Tree Printed",
             message: "Complete element tree has been printed to the console. Check the console output for details."
+        )
+    }
+    
+    @objc func checkLogoBarStatus() {
+        Logger.info("Check Logo Bar Status menu clicked")
+        
+        // Call the GloteraLogoBarManager to check logo bar status
+        GloteraLogoBarManager.shared.debugLogoBarStatus()
+        
+        // Show a notification to the user
+        showNonBlockingNotification(
+            title: "Logo Bar Status Checked",
+            message: "Logo bar status has been checked. Check the console output for details."
         )
     }
     #endif

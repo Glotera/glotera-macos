@@ -530,6 +530,7 @@ class ContentProcessor {
             // Assumes current year if year is not present 
             let englishDatePattern = #"(?i)(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s?(\d{1,2})"# // e.g. July30 or July 30
             let timePattern = #"at?(\d{1,2}):(\d{2})"# // e.g. at16:23 or 16:23
+            let onlyTimePattern = #"^(\d{1,2}):(\d{2})$"# // e.g. 16:20
 
             var year = Calendar.current.component(.year, from: Date())
             var month = 1
@@ -537,38 +538,59 @@ class ContentProcessor {
             var hour = 0
             var minute = 0
 
-            // 解析月份和日期
-            if let regex = try? NSRegularExpression(pattern: englishDatePattern, options: []),
-               let match = regex.firstMatch(in: rawDateTime, options: [], range: NSRange(location: 0, length: rawDateTime.utf16.count)) {
-                let monthStrRange = Range(match.range(at: 1), in: rawDateTime)!
-                let dayRange = Range(match.range(at: 2), in: rawDateTime)!
-                let monthStr = String(rawDateTime[monthStrRange]).lowercased()
-                let dayStr = String(rawDateTime[dayRange])
-                let monthMap = [
-                    "january": 1, "jan": 1,
-                    "february": 2, "feb": 2,
-                    "march": 3, "mar": 3,
-                    "april": 4, "apr": 4,
-                    "may": 5,
-                    "june": 6, "jun": 6,
-                    "july": 7, "jul": 7,
-                    "august": 8, "aug": 8,
-                    "september": 9, "sep": 9,
-                    "october": 10, "oct": 10,
-                    "november": 11, "nov": 11,
-                    "december": 12, "dec": 12
-                ]
-                month = monthMap[monthStr] ?? 1
-                day = Int(dayStr) ?? 1
-            }
+            // 首先检查是否只是时间格式（如 "16:20"）
+            if let timeRegex = try? NSRegularExpression(pattern: onlyTimePattern, options: []),
+               let timeMatch = timeRegex.firstMatch(in: rawDateTime, options: [], range: NSRange(location: 0, length: rawDateTime.utf16.count)) {
+                // 只有时间，使用今天的日期
+                let now = Date()
+                let calendar = Calendar.current
+                year = calendar.component(.year, from: now)
+                month = calendar.component(.month, from: now)
+                day = calendar.component(.day, from: now)
+                
+                // 解析时间
+                if let hourRange = Range(timeMatch.range(at: 1), in: rawDateTime) {
+                    hour = Int(rawDateTime[hourRange]) ?? 0
+                }
+                if let minuteRange = Range(timeMatch.range(at: 2), in: rawDateTime) {
+                    minute = Int(rawDateTime[minuteRange]) ?? 0
+                }
+                
+                Logger.debug("Parsed time-only string '\(rawDateTime)' to today's date")
+            } else {
+                // 解析月份和日期
+                if let regex = try? NSRegularExpression(pattern: englishDatePattern, options: []),
+                   let match = regex.firstMatch(in: rawDateTime, options: [], range: NSRange(location: 0, length: rawDateTime.utf16.count)) {
+                    let monthStrRange = Range(match.range(at: 1), in: rawDateTime)!
+                    let dayRange = Range(match.range(at: 2), in: rawDateTime)!
+                    let monthStr = String(rawDateTime[monthStrRange]).lowercased()
+                    let dayStr = String(rawDateTime[dayRange])
+                    let monthMap = [
+                        "january": 1, "jan": 1,
+                        "february": 2, "feb": 2,
+                        "march": 3, "mar": 3,
+                        "april": 4, "apr": 4,
+                        "may": 5,
+                        "june": 6, "jun": 6,
+                        "july": 7, "jul": 7,
+                        "august": 8, "aug": 8,
+                        "september": 9, "sep": 9,
+                        "october": 10, "oct": 10,
+                        "november": 11, "nov": 11,
+                        "december": 12, "dec": 12
+                    ]
+                    month = monthMap[monthStr] ?? 1
+                    day = Int(dayStr) ?? 1
+                }
 
-            // 解析时间
-            if let regex = try? NSRegularExpression(pattern: timePattern, options: []),
-               let match = regex.firstMatch(in: rawDateTime, options: [], range: NSRange(location: 0, length: rawDateTime.utf16.count)) {
-                let hourRange = Range(match.range(at: 1), in: rawDateTime)!
-                let minuteRange = Range(match.range(at: 2), in: rawDateTime)!
-                hour = Int(rawDateTime[hourRange]) ?? 0
-                minute = Int(rawDateTime[minuteRange]) ?? 0
+                // 解析时间
+                if let regex = try? NSRegularExpression(pattern: timePattern, options: []),
+                   let match = regex.firstMatch(in: rawDateTime, options: [], range: NSRange(location: 0, length: rawDateTime.utf16.count)) {
+                    let hourRange = Range(match.range(at: 1), in: rawDateTime)!
+                    let minuteRange = Range(match.range(at: 2), in: rawDateTime)!
+                    hour = Int(rawDateTime[hourRange]) ?? 0
+                    minute = Int(rawDateTime[minuteRange]) ?? 0
+                }
             }
 
             // 构造DateComponents并转为ISO8601字符串

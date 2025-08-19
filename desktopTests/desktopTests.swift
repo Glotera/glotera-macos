@@ -288,7 +288,7 @@ struct desktopTests {
         
         // Test Chinese WhatsApp group messages (群聊)
         let chineseGroupReceivedMessage = "‎Carlos发来的消息, 测试一下群聊, 16:50, ‎在Glotera测试群收到"
-        if let result = ContentProcessor.shared.parseWhatsAppMessage(chineseGroupReceivedMessage) {
+        if let result = ContentProcessor.shared.parseWhatsAppMessage(chineseGroupReceivedMessage,language: "zh") {
             #expect(result.messageType == "text")
             #expect(result.content == "测试一下群聊")
             #expect(result.sender == "Carlos")
@@ -300,7 +300,7 @@ struct desktopTests {
         }
         
         let chineseGroupSentMessage = "‎你的消息, 有什么不一样的地方, 16:51, ‎发送到Glotera测试群, ‎已发送"
-        if let result = ContentProcessor.shared.parseWhatsAppMessage(chineseGroupSentMessage) {
+        if let result = ContentProcessor.shared.parseWhatsAppMessage(chineseGroupSentMessage,language: "zh") {
             #expect(result.messageType == "text")
             #expect(result.content == "有什么不一样的地方")
             #expect(result.sender == "You")
@@ -356,12 +356,15 @@ struct desktopTests {
         }
         
         // Test timestamp parsing
-        let messageWithTimestamp = "‎message, Hello world, July30,at16:20, ‎Received from Test"
+        let messageWithTimestamp = "‎message, Hello world, 16:20, ‎Received from Test"
         if let result = ContentProcessor.shared.parseWhatsAppMessage(messageWithTimestamp,language: "en") {
-            #expect(!result.timestamp.isEmpty, "Timestamp should not be empty")
-            #expect(result.timestamp.contains("2025-07-30"), "Timestamp should contain correct date")
-            #expect(result.timestamp.contains("16:20"), "Timestamp should contain correct time")
-            #expect(result.timestamp == "2025-07-30 16:20:00")
+            #expect(!result.timestamp.isEmpty, "Timestamp should not be empty") 
+            
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyy-MM-dd"
+            let currentDateString = dateFormatter.string(from: Date())
+            print("Current date: \(currentDateString)")
+            #expect(result.timestamp == currentDateString + " 16:20:00")
         } else {
             #expect(Bool(false), "Failed to parse message with timestamp")
         }
