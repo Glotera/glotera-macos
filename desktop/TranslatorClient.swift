@@ -120,6 +120,7 @@ class ConnectionPool {
 // MARK: - Quota Information
 struct QuotaInfo {
     let isFreeUser: Bool
+    let userType: String
     let remainingQuota: Int  // -1 for unlimited
     let isQuotaExceeded: Bool
     let isLowQuota: Bool
@@ -128,6 +129,7 @@ struct QuotaInfo {
     
     init(from json: [String: Any]) {
         self.isFreeUser = json["is_free_user"] as? Bool ?? true
+        self.userType = json["user_type"] as? String ?? "free"
         self.remainingQuota = json["remaining_quota"] as? Int ?? 0
         self.isQuotaExceeded = json["is_quota_exceeded"] as? Bool ?? false
         self.isLowQuota = json["is_low_quota"] as? Bool ?? false
@@ -1074,6 +1076,11 @@ extension TranslatorClient: URLSessionDataDelegate {
                     if let quotaData = json?["quota_info"] as? [String: Any] {
                         let quotaInfo = QuotaInfo(from: quotaData)
                         Logger.info("Quota info fetched successfully: \(quotaInfo.quotaDescription)")
+                        
+                        // Check if response contains updated user info and update local cache
+                        // Only update userType from quotaInfo, as other user info rarely changes
+                        SessionManager.shared.updateUserType(quotaInfo.userType)
+                        
                         completion(.success(quotaInfo))
                     } else {
                         Logger.error("Failed to parse quota info from response")

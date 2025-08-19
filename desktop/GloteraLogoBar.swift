@@ -321,15 +321,10 @@ class GloteraLogoBarManager: NSObject {
     func enable() {
         guard !isEnabled else { return }
         
-        // Check if user has access to chat translation feature
-        guard SessionManager.shared.hasChatTranslationAccess() else {
-            Logger.info("Cannot enable logo bar - user does not have Pro/Max access")
-            return
-        }
-        
+        // Enable logo bar for all users - free users will see upgrade prompt when clicking
         isEnabled = true
         mouseTracker.startTracking()
-        Logger.info("Glotera logo bar manager enabled")
+        Logger.info("Glotera logo bar manager enabled for all users")
     }
     
     /// Disable logo bar functionality
@@ -359,11 +354,7 @@ class GloteraLogoBarManager: NSObject {
     private func showLogoBar(on screen: NSScreen) {
         guard isEnabled else { return }
         
-        // Double-check user has access before showing logo bar
-        guard SessionManager.shared.hasChatTranslationAccess() else {
-            Logger.debug("Skipping logo bar display - user does not have Pro/Max access")
-            return
-        }
+        // Show logo bar for all users - free users will see upgrade prompt when clicking
         
         // Cancel any pending hide timer
         hideTimer?.invalidate()
@@ -412,8 +403,44 @@ class GloteraLogoBarManager: NSObject {
     
     /// Handle logo bar click
     private func handleLogoBarClick() {
-        Logger.info("Logo bar clicked - triggering callback")
-        onLogoBarClick?()
+        Logger.info("Logo bar clicked - checking user access")
+        
+        // Check if user has access to chat translation feature
+        if SessionManager.shared.hasChatTranslationAccess() {
+            // Pro/Max user - proceed with normal functionality
+            Logger.info("Pro/Max user clicked logo bar - triggering callback")
+            onLogoBarClick?()
+        } else {
+            // Free user - show upgrade prompt
+            Logger.info("Free user clicked logo bar - showing upgrade prompt")
+            showUpgradePrompt()
+        }
+    }
+    
+    /// Show upgrade prompt for free users
+    private func showUpgradePrompt() {
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = "Upgrade Required"
+            alert.informativeText = "Chat translation is a Pro/Max feature. Please upgrade your subscription to use this functionality."
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "Learn More")
+            alert.addButton(withTitle: "Cancel")
+            
+            let response = alert.runModal()
+            if response == .alertFirstButtonReturn {
+                // Open upgrade page or pricing page
+                self.openUpgradePage()
+            }
+        }
+    }
+    
+    /// Open upgrade page
+    private func openUpgradePage() {
+        // Open the upgrade/pricing page in default browser
+        if let url = URL(string: "https://glotera.ai/pricing") {
+            NSWorkspace.shared.open(url)
+        }
     }
     
     /// Check if logo bar is currently enabled
@@ -424,5 +451,30 @@ class GloteraLogoBarManager: NSObject {
     /// Check if logo bar is currently visible
     func isLogoBarCurrentlyVisible() -> Bool {
         return isLogoBarVisible
+    }
+    
+    /// Debug method to check logo bar status and manually enable if possible
+    func debugLogoBarStatus() {
+        Logger.info("=== Logo Bar Debug Status ===")
+        Logger.info("Manager enabled: \(isEnabled)")
+        Logger.info("Logo bar visible: \(isLogoBarVisible)")
+        Logger.info("Mouse tracking active: \(mouseTracker.isTrackingActive())")
+        
+        // Check user authentication status
+        if let user = SessionManager.shared.getCurrentUser() {
+            Logger.info("Current user: \(user.username) (\(user.email)) - Type: \(user.userType)")
+            Logger.info("Has chat translation access: \(SessionManager.shared.hasChatTranslationAccess())")
+        } else {
+            Logger.info("No current user found - user not logged in")
+            Logger.info("Has chat translation access: false")
+        }
+        
+        // Try to enable if not already enabled
+        if !isEnabled {
+            Logger.info("Attempting to enable logo bar manager...")
+            enable()
+        }
+        
+        Logger.info("=== End Logo Bar Debug Status ===")
     }
 }

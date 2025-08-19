@@ -408,6 +408,43 @@ class SessionManager {
         return user.userType.lowercased() == "pro" || user.userType.lowercased() == "max"
     }
     
+    /// Update only the userType for the current user
+    func updateUserType(_ userType: String) {
+        guard let currentUser = getCurrentUser() else {
+            Logger.debug("SessionManager: No current user found")
+            return
+        }
+        
+        // Only update if userType is different
+        if let existingUser = getCurrentUser(), existingUser.userType != userType {
+            Logger.info("SessionManager: User type changed from '\(existingUser.userType)' to '\(userType)' - updating UserDefaults cache")
+            
+            // Update UserDefaults cache (long-term storage)
+            UserDefaults.standard.set(userType, forKey: userTypeKey)
+            
+            // Update memory cache: only userType
+            let updatedUser = User(
+                userId: existingUser.userId,
+                email: existingUser.email,
+                username: existingUser.username,
+                userType: userType,
+                accountType: existingUser.accountType
+            )
+             
+            self.currentUser = updatedUser
+            
+            // Clear authentication cache to force refresh
+            authCache.clearCache()
+            
+            Logger.info("SessionManager: User info updated successfully - new type: \(userType)")
+            
+            // Post notification for UI updates
+            NotificationCenter.default.post(name: .userTypeUpdated, object: updatedUser)
+        }
+    }
+    
+
+    
     // MARK: - Private UserDefaults Methods
     
     private func getStoredToken() -> String? {
@@ -430,6 +467,7 @@ extension Notification.Name {
     static let userDidLogin = Notification.Name("userDidLogin")
     static let userDidLogout = Notification.Name("userDidLogout")
     static let quotaInfoUpdated = Notification.Name("quotaInfoUpdated")
+    static let userTypeUpdated = Notification.Name("userTypeUpdated")
 }
 
 // MARK: - JWT Token Utilities
