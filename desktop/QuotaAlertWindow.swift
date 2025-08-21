@@ -73,9 +73,9 @@ class QuotaAlertWindow: NSWindow {
         Glotera requires you to sign in to use translation features.
         
         Choose your plan:
-        • Free Account: 100 translations per month
-        • Pro Account: 500 translations per month for $2.9/month  
-        • Max Account: Unlimited translations for $4.9/month
+        • Free Account: \(QuotaLimits.FREE_MONTHLY_LIMIT) translations per month
+        • Pro Account: \(QuotaLimits.PRO_MONTHLY_LIMIT) translations per month
+        • Max Account: Unlimited translations
         
         Please sign in to continue.
         """
@@ -146,7 +146,7 @@ class QuotaAlertWindow: NSWindow {
         alert.informativeText = """
         You have \(quotaInfo.remainingQuota) translations remaining.
         
-        To ensure continuous translation service, we recommend upgrading to Pro or Max:
+        To ensure continuous translation service, we recommend upgrading to Pro (\(QuotaLimits.PRO_MONTHLY_LIMIT)/month) or Max (unlimited):
         • Unlimited translations
         • Faster translation speed
         • Priority customer support
@@ -183,11 +183,11 @@ class QuotaAlertWindow: NSWindow {
         let alert = NSAlert()
         alert.messageText = "Translation Quota Exceeded"
         alert.informativeText = """
-        Your free translation quota (100 times) for this month has been used up.
+        Your free translation quota (\(QuotaLimits.FREE_MONTHLY_LIMIT) times) for this month has been used up.
         
         Upgrade your plan:
-        • Pro: 500 translations per month for $2.9/month
-        • Max: Unlimited translations for $7.9/month
+        • Pro: \(QuotaLimits.PRO_MONTHLY_LIMIT) translations
+        • Max: Unlimited translations
         • Priority customer support
         • Advanced translation features
         """
@@ -236,8 +236,7 @@ class QuotaAlertWindow: NSWindow {
             alert.informativeText = """
             Please visit the following URL to see pricing:
             \(pricingURL)
-            
-            Pro Plan: $2.9/month for unlimited translations
+             
             
             Contact support for assistance:
             support@glotera.ai

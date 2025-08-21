@@ -817,7 +817,7 @@ class MenuBarController: NSObject, NSMenuDelegate {
             statusItem.isEnabled = false
             menu.addItem(statusItem)
             
-            let helpItem = NSMenuItem(title: "Free: 100/month • Pro: 500/month • Max: Unlimited", action: nil, keyEquivalent: "")
+            let helpItem = NSMenuItem(title: QuotaLimits.getPlanDescription(), action: nil, keyEquivalent: "")
             helpItem.isEnabled = false
             menu.addItem(helpItem)
         }
