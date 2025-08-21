@@ -67,6 +67,7 @@
 		CH4TTR4NSL4T10NW1ND0W123 /* ChatTranslationWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = CH4TTR4NSL4T10NW1ND0W456 /* ChatTranslationWindow.swift */; };
 		DE5KT0P5QL987654321ABCDE /* config/desktop.sql in Resources */ = {isa = PBXBuildFile; fileRef = DE5KT0P5QL123456789ABCDE /* config/desktop.sql */; };
 		QU0TA5AL3RT4W1ND0W567890 /* QuotaAlertWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = QU0TA5AL3RT4W1ND0W123456 /* QuotaAlertWindow.swift */; };
+		QU0T4L1M1TS567890123456 /* QuotaLimits.swift in Sources */ = {isa = PBXBuildFile; fileRef = QU0T4L1M1TS123456789ABCD /* QuotaLimits.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -141,8 +142,9 @@
 		D4E5F67890123456789ABCDE /* LoggerExample.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LoggerExample.swift; sourceTree = "<group>"; };
 		DE5KT0P5QL123456789ABCDE /* config/desktop.sql */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = config/desktop.sql; sourceTree = "<group>"; };
 		FF66A75F38EB4DF48E1475C8 /* PerformanceTelemetry.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PerformanceTelemetry.swift; sourceTree = "<group>"; };
-		QU0TA5AL3RT4W1ND0W123456 /* QuotaAlertWindow.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = QuotaAlertWindow.swift; sourceTree = "<group>"; };
-/* End PBXFileReference section */
+				QU0TA5AL3RT4W1ND0W123456 /* QuotaAlertWindow.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = QuotaAlertWindow.swift; sourceTree = "<group>"; };
+		QU0T4L1M1TS123456789ABCD /* QuotaLimits.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = QuotaLimits.swift; sourceTree = "<group>"; };
+		/* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		9BE4ED3F2E012FC2002AC2AE /* Frameworks */ = {
@@ -255,6 +257,7 @@
 				D4E5F67890123456789ABCDE /* LoggerExample.swift */,
 				9BE4ED722E012FF1002AC2AE /* MenuBarController.swift */,
 				QU0TA5AL3RT4W1ND0W123456 /* QuotaAlertWindow.swift */,
+				QU0T4L1M1TS123456789ABCD /* QuotaLimits.swift */,
 				9BE4ED712E012FF1002AC2AE /* SettingsView.swift */,
 				9BE4ED7D2E012FF1002AC2AE /* TranslateAgent.swift */,
 				9BE4ED742E012FF1002AC2AE /* TranslationMenuWindow.swift */,
@@ -440,6 +443,7 @@
 				C3D4E5F67890123456789ABC /* LoggerExample.swift in Sources */,
 				9BE4ED802E012FF1002AC2AE /* MenuBarController.swift in Sources */,
 				QU0TA5AL3RT4W1ND0W567890 /* QuotaAlertWindow.swift in Sources */,
+				QU0T4L1M1TS567890123456 /* QuotaLimits.swift in Sources */,
 				9BE4ED7F2E012FF1002AC2AE /* SettingsView.swift in Sources */,
 				602693052E2D1CE80046465E /* ContentProcessor.swift in Sources */,
 				9BE4ED852E012FF1002AC2AE /* TranslationResultWindow.swift in Sources */,

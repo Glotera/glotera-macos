@@ -889,8 +889,8 @@ struct ChatTranslationView: View {
                                     .padding(.horizontal, 20)
                                 
                                 VStack(spacing: 8) {
-                                    Text("• Pro: 500 translations/month - $2.9")
-                                    Text("• Max: Unlimited translations - $4.9")
+                                    Text("• Pro: \(QuotaLimits.PRO_MONTHLY_LIMIT) translations/month")
+                                    Text("• Max: Unlimited translations")
                                 }
                                 .font(.caption)
                                 .foregroundColor(.secondary)

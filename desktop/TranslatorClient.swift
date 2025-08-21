@@ -140,13 +140,13 @@ struct QuotaInfo {
     var quotaStatusMessage: String? {
         if isFreeUser {
             if isQuotaExceeded {
-                return "Translation quota exhausted. Please upgrade to Pro (500/month) or Max (unlimited) to continue"
+                return "Translation quota exhausted. Please upgrade to Pro (\(QuotaLimits.PRO_MONTHLY_LIMIT)/month) or Max (unlimited) to continue"
             } else if isLowQuota {
-                return "Translation quota running low. \(remainingQuota) remaining. Consider upgrading to Pro (500/month) or Max (unlimited)"
+                return "Translation quota running low. \(remainingQuota) remaining. Consider upgrading to Pro (\(QuotaLimits.PRO_MONTHLY_LIMIT)/month) or Max (unlimited)"
             }
         } else {
             // Pro users with quota limits
-            if remainingQuota != -1 { // Not unlimited
+            if remainingQuota != QuotaLimits.MAX_MONTHLY_LIMIT { // Not unlimited
                 if isQuotaExceeded {
                     return "Pro quota exhausted. Please upgrade to Max for unlimited translations"
                 } else if isLowQuota {
@@ -160,13 +160,13 @@ struct QuotaInfo {
     var quotaDescription: String {
         if !isFreeUser {
             // Check if it's Max user or Pro user based on remaining quota
-            if remainingQuota == -1 {
+            if remainingQuota == QuotaLimits.MAX_MONTHLY_LIMIT {
                 return "Max - Unlimited"
             } else {
-                return "Pro - \(remainingQuota) / \(monthlyLimit ?? 500)"
+                return "Pro - \(remainingQuota) / \(monthlyLimit ?? QuotaLimits.PRO_MONTHLY_LIMIT)"
             }
         } else {
-            return "Free - \(remainingQuota)/\(monthlyLimit ?? 100)"
+            return "Free - \(remainingQuota)/\(monthlyLimit ?? QuotaLimits.FREE_MONTHLY_LIMIT)"
         }
     }
 }
@@ -910,8 +910,8 @@ extension TranslatorClient: URLSessionDataDelegate {
                                         "remaining_quota": 0,
                                         "is_quota_exceeded": true,
                                         "is_low_quota": false,
-                                        "monthly_usage": 100,
-                                        "monthly_limit": 100
+                                        "monthly_usage": QuotaLimits.FREE_MONTHLY_LIMIT,
+                                        "monthly_limit": QuotaLimits.FREE_MONTHLY_LIMIT
                                     ]
                                     let quotaInfo = QuotaInfo(from: defaultQuotaJson)
                                     Logger.info("Created default quota info for 429 response")
@@ -934,8 +934,8 @@ extension TranslatorClient: URLSessionDataDelegate {
                                     "remaining_quota": 0,
                                     "is_quota_exceeded": true,
                                     "is_low_quota": false,
-                                    "monthly_usage": 100,
-                                    "monthly_limit": 100
+                                    "monthly_usage": QuotaLimits.FREE_MONTHLY_LIMIT,
+                                    "monthly_limit": QuotaLimits.FREE_MONTHLY_LIMIT
                                 ]
                                 let quotaInfo = QuotaInfo(from: defaultQuotaJson)
                                 
@@ -952,8 +952,8 @@ extension TranslatorClient: URLSessionDataDelegate {
                                 "remaining_quota": 0,
                                 "is_quota_exceeded": true,
                                 "is_low_quota": false,
-                                "monthly_usage": 100,
-                                "monthly_limit": 100
+                                "monthly_usage": QuotaLimits.FREE_MONTHLY_LIMIT,
+                                "monthly_limit": QuotaLimits.FREE_MONTHLY_LIMIT
                             ]
                             let quotaInfo = QuotaInfo(from: defaultQuotaJson)
                             
@@ -970,8 +970,8 @@ extension TranslatorClient: URLSessionDataDelegate {
                             "remaining_quota": 0,
                             "is_quota_exceeded": true,
                             "is_low_quota": false,
-                            "monthly_usage": 100,
-                            "monthly_limit": 100
+                            "monthly_usage": QuotaLimits.FREE_MONTHLY_LIMIT,
+                            "monthly_limit": QuotaLimits.FREE_MONTHLY_LIMIT
                         ]
                         let quotaInfo = QuotaInfo(from: defaultQuotaJson)
                         
