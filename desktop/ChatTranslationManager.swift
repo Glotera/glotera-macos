@@ -31,9 +31,10 @@ class ChatTranslationManager: NSObject {
         setupNotifications()
         setupLogoBarManager()
         
+        // disabled by default, only appears for chat apps
         // Enable logo bar manager for all users (free users will see upgrade prompt when clicking)
-        logoBarManager.enable()
-        Logger.info("Logo bar manager enabled for all users")
+        // logoBarManager.enable()
+        // Logger.info("Logo bar manager enabled for all users")
         
         // Start monitoring only if user has chat translation access
         if SessionManager.shared.hasChatTranslationAccess() {
