@@ -25,6 +25,7 @@
 		2369A0760EA64CA18E875A83 /* StreamBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B45302DE637A47119CC26C78 /* StreamBuffer.swift */; };
 		2FA664AEECDE41298DD84A9E /* TriggerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF1783DB55484ACEBCF74A5F /* TriggerManager.swift */; };
 		3D153861DB83474CB7A5CE30 /* ConfigWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15B044BD9B2D441BAF66FA8D /* ConfigWindow.swift */; };
+
 		52E75974376A4A2C80038B26 /* ConfigManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F60848B2C5C4E76B8A270AB /* ConfigManager.swift */; };
 		55ACA3925B5740A49F528A02 /* config/language-iso-639.json in Resources */ = {isa = PBXBuildFile; fileRef = ADA243CF57A742A49C392A18 /* config/language-iso-639.json */; };
 		602693012E2CB9670046465E /* AppleScriptManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 602693002E2CB9660046465E /* AppleScriptManager.swift */; };
@@ -66,8 +67,9 @@
 		CH4TTR4NSL4T10NM4N4G3R789 /* ChatTranslationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CH4TTR4NSL4T10NM4N4G3R012 /* ChatTranslationManager.swift */; };
 		CH4TTR4NSL4T10NW1ND0W123 /* ChatTranslationWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = CH4TTR4NSL4T10NW1ND0W456 /* ChatTranslationWindow.swift */; };
 		DE5KT0P5QL987654321ABCDE /* config/desktop.sql in Resources */ = {isa = PBXBuildFile; fileRef = DE5KT0P5QL123456789ABCDE /* config/desktop.sql */; };
-		QU0TA5AL3RT4W1ND0W567890 /* QuotaAlertWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = QU0TA5AL3RT4W1ND0W123456 /* QuotaAlertWindow.swift */; };
 		QU0T4L1M1TS567890123456 /* QuotaLimits.swift in Sources */ = {isa = PBXBuildFile; fileRef = QU0T4L1M1TS123456789ABCD /* QuotaLimits.swift */; };
+		QU0TA5AL3RT4W1ND0W567890 /* QuotaAlertWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = QU0TA5AL3RT4W1ND0W123456 /* QuotaAlertWindow.swift */; };
+		ed2bfef479fe4bcc89443344 /* ErrorNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = cc719fd545984ccaac0b1c82 /* ErrorNotificationManager.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -112,7 +114,7 @@
 		60B4B7902E0BA3D800A08883 /* UserManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserManager.swift; sourceTree = "<group>"; };
 		60B4B7932E0BA3D800A08884 /* SessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManager.swift; sourceTree = "<group>"; };
 		60B4B7962E0BA3D800A08885 /* DatabaseManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseManager.swift; sourceTree = "<group>"; };
-		9BE4ED422E012FC2002AC2AE /* Glotera.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Glotera.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		9BE4ED422E012FC2002AC2AE /* Glotera-dev.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Glotera-dev.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		9BE4ED532E012FC5002AC2AE /* desktopTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = desktopTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		9BE4ED572E012FC5002AC2AE /* desktopTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = desktopTests.swift; sourceTree = "<group>"; };
 		9BE4ED5D2E012FC5002AC2AE /* desktopUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = desktopUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -142,9 +144,11 @@
 		D4E5F67890123456789ABCDE /* LoggerExample.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LoggerExample.swift; sourceTree = "<group>"; };
 		DE5KT0P5QL123456789ABCDE /* config/desktop.sql */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = config/desktop.sql; sourceTree = "<group>"; };
 		FF66A75F38EB4DF48E1475C8 /* PerformanceTelemetry.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PerformanceTelemetry.swift; sourceTree = "<group>"; };
-				QU0TA5AL3RT4W1ND0W123456 /* QuotaAlertWindow.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = QuotaAlertWindow.swift; sourceTree = "<group>"; };
 		QU0T4L1M1TS123456789ABCD /* QuotaLimits.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = QuotaLimits.swift; sourceTree = "<group>"; };
-		/* End PBXFileReference section */
+		QU0TA5AL3RT4W1ND0W123456 /* QuotaAlertWindow.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = QuotaAlertWindow.swift; sourceTree = "<group>"; };
+		cc719fd545984ccaac0b1c82 /* ErrorNotificationManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ErrorNotificationManager.swift; sourceTree = "<group>"; };
+
+/* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		9BE4ED3F2E012FC2002AC2AE /* Frameworks */ = {
@@ -204,7 +208,7 @@
 		9BE4ED432E012FC2002AC2AE /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				9BE4ED422E012FC2002AC2AE /* Glotera.app */,
+				9BE4ED422E012FC2002AC2AE /* Glotera-dev.app */,
 				9BE4ED532E012FC5002AC2AE /* desktopTests.xctest */,
 				9BE4ED5D2E012FC5002AC2AE /* desktopUITests.xctest */,
 			);
@@ -268,6 +272,7 @@
 				0DE8D9B3826C4050ACD8E820 /* JavaScriptManager.swift */,
 				B45302DE637A47119CC26C78 /* StreamBuffer.swift */,
 				FF66A75F38EB4DF48E1475C8 /* PerformanceTelemetry.swift */,
+				cc719fd545984ccaac0b1c82 /* ErrorNotificationManager.swift */,
 				9BE4ED8F2E012FF1002AC2AE /* UpdateManager.swift */,
 				CH4TTR4NSL4T10NW1ND0W456 /* ChatTranslationWindow.swift */,
 				CH4TTR4NSL4T10NM4N4G3R012 /* ChatTranslationManager.swift */,
@@ -292,7 +297,7 @@
 			);
 			name = desktop;
 			productName = desktop;
-			productReference = 9BE4ED422E012FC2002AC2AE /* Glotera.app */;
+			productReference = 9BE4ED422E012FC2002AC2AE /* Glotera-dev.app */;
 			productType = "com.apple.product-type.application";
 		};
 		9BE4ED522E012FC5002AC2AE /* desktopTests */ = {
@@ -453,6 +458,7 @@
 				699EE3F2FC6540FCA65332A7 /* JavaScriptManager.swift in Sources */,
 				2369A0760EA64CA18E875A83 /* StreamBuffer.swift in Sources */,
 				98AA1C8369C74BEAA4D3EB3B /* PerformanceTelemetry.swift in Sources */,
+				ed2bfef479fe4bcc89443344 /* ErrorNotificationManager.swift in Sources */,
 				9BE4ED822E012FF1002AC2AE /* TranslationMenuWindow.swift in Sources */,
 				9BE4ED8A2E012FF1002AC2AE /* TranslateAgent.swift in Sources */,
 				9BE4ED862E012FF1002AC2AE /* AXController.swift in Sources */,
@@ -646,7 +652,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "$(SRCROOT)/desktop/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = Glotera;
+				INFOPLIST_KEY_CFBundleDisplayName = "Glotera-dev";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_LSUIElement = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -655,8 +661,8 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				MARKETING_VERSION = 0.2.0;
-				PRODUCT_BUNDLE_IDENTIFIER = ai.glotera.desktop;
-				PRODUCT_NAME = Glotera;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.glotera.desktop.dev;
+				PRODUCT_NAME = "Glotera-dev";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -677,7 +683,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "$(SRCROOT)/desktop/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = Glotera;
+				INFOPLIST_KEY_CFBundleDisplayName = "Glotera-dev";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_LSUIElement = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -686,8 +692,8 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				MARKETING_VERSION = 0.2.0;
-				PRODUCT_BUNDLE_IDENTIFIER = ai.glotera.desktop;
-				PRODUCT_NAME = Glotera;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.glotera.desktop.dev;
+				PRODUCT_NAME = "Glotera-dev";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 			};

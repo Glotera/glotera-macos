@@ -228,7 +228,18 @@ class TranslationMenuWindow: NSWindow {
                             SessionManager.shared.clearSession()
                             UserManager.shared.promptLogin(reason: "Your session has expired. Please sign in again.")
                         } else {
-                            TranslationStatusWindow.shared.showFailure()
+                            // Use smart error handling to show friendly reminders
+                            ErrorNotificationManager.shared.showErrorNotification(error)
+                            
+                            // Update status window simultaneously
+                            switch error {
+                            case .networkError:
+                                TranslationStatusWindow.shared.showNetworkError(near: self?.lastMousePosition ?? CGPoint.zero)
+                            case .serverError:
+                                TranslationStatusWindow.shared.showServerError(near: self?.lastMousePosition ?? CGPoint.zero)
+                            default:
+                                TranslationStatusWindow.shared.showFailure()
+                            }
                         }
                         // 翻译失败后也清除缓存的应用信息
                         EnvironmentManager.shared.clearTriggerAppInfo()
