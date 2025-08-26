@@ -14,6 +14,80 @@ class TranslationMenuWindow: NSWindow {
     private var sourceElementPid: pid_t = 0
     private var currentStreamWindow: TranslationResultWindow?
     
+    // Language selection state management (session-only)
+    private var userSelectedLanguage: String? = nil // User's manual selection in current session
+    private var hasUserInteracted: Bool = false // Track if user has made a manual selection in current session
+    
+    // Get the default language for translation menu
+    private func getDefaultLanguage() -> String {
+        // If user has manually selected a language in this session, use that
+        if let selectedLanguage = userSelectedLanguage, hasUserInteracted {
+            Logger.debug("Using user selected language in current session: \(selectedLanguage)")
+            return selectedLanguage
+        }
+        
+        // Otherwise use user's preferred language or system language
+        let preferredLanguage = ConfigManager.shared.getUserPreferredLanguage()
+        Logger.debug("Using preferred/system language: \(preferredLanguage)")
+        
+        // Return the preferred language directly - if it's not in the menu, it will be added dynamically
+        return preferredLanguage
+    }
+    
+    // Update user's language selection for current session only
+    private func updateUserLanguageSelection(_ language: String) {
+        userSelectedLanguage = language
+        hasUserInteracted = true
+        Logger.debug("Updated user language selection for current session: \(language)")
+    }
+    
+    // Get language name from language code using ConfigManager
+    private func getLanguageNativeName(for code: String) -> String {
+        let languageConfigs = ConfigManager.shared.loadLanguageConfigs()
+        if let config = languageConfigs.first(where: { $0.code == code }) {
+            return config.nativeName
+        }
+        
+        // For unknown languages, use the code itself capitalized
+        Logger.debug("Language code '\(code)' not found in configurations, using uppercase code")
+        return code.uppercased()
+    }
+    
+    // Get dynamic language list with default languages + user preferred language if not in default list
+    private func getLanguages() -> [(String, String)] {
+        // Default language list (keep original popular languages)
+        let defaultLanguages = [
+            ("en", "English"),
+            ("zh", "简体中文"),
+            ("ja", "日本語"),
+            ("ko", "한국어"),
+            ("fr", "Français"),
+            ("de", "Deutsch"),
+            ("es", "Español"),
+            ("ru", "Русский"),
+            ("id", "Bahasa"),
+            ("th", "ไทย"),
+            ("vi", "Tiếng Việt"),
+            ("ar", "العربية"),
+            ("hi", "हिन्दी")
+        ]
+        
+        let defaultLanguage = getDefaultLanguage()
+        
+        // Check if the default language is already in the default list
+        if defaultLanguages.contains(where: { $0.0 == defaultLanguage }) {
+            return defaultLanguages
+        }
+        
+        // If not, get the language name from ConfigManager and add it to the beginning
+        let defaultLanguageName = getLanguageNativeName(for: defaultLanguage)
+        var languages = [(defaultLanguage, defaultLanguageName)]
+        languages.append(contentsOf: defaultLanguages)
+        
+        Logger.debug("Added preferred language '\(defaultLanguage)' (\(defaultLanguageName)) to language menu")
+        return languages
+    }
+    
     private init() {
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: 280, height: 40),
@@ -47,8 +121,13 @@ class TranslationMenuWindow: NSWindow {
     
     private func setupContent() {
         let menuView = TranslationMenuView(
+            defaultLanguage: getDefaultLanguage(),
+            languages: getLanguages(),
             onTranslate: { [weak self] language in
                 self?.translateToLanguage(language)
+            },
+            onLanguageSelected: { [weak self] language in
+                self?.updateUserLanguageSelection(language)
             },
             onClose: { [weak self] in
                 self?.hide()
@@ -129,6 +208,8 @@ class TranslationMenuWindow: NSWindow {
             Logger.warn("No frontmost application found")
         }
         
+        // Refresh the content with updated default language before showing
+        setupContent()
         setupEventHandlers()
         
         // 调整窗口位置
@@ -329,41 +410,53 @@ class TranslationMenuWindow: NSWindow {
 }
 
 struct TranslationMenuView: View {
+    let defaultLanguage: String
+    let languages: [(String, String)]
     let onTranslate: (String) -> Void
+    let onLanguageSelected: (String) -> Void
     let onClose: () -> Void
     
-    @State private var selectedLanguage: String = "en"
+    @State private var selectedLanguage: String
     @State private var isDropdownOpen: Bool = false
     
-    private let languages = [
-        ("en", "English"),
-        ("zh", "中文"),
-        ("ja", "日本語"),
-        ("ko", "한국어"),
-        ("fr", "Français"),
-        ("de", "Deutsch"),
-        ("es", "Español"),
-        ("ru", "Русский"),
-        ("id", "Bahasa"),
-        ("th", "ไทย"),
-        ("vi", "Tiếng Việt"),
-        ("ar", "العربية"),
-        ("hi", "हिन्दी") 
-    ]
+    init(defaultLanguage: String, languages: [(String, String)], onTranslate: @escaping (String) -> Void, onLanguageSelected: @escaping (String) -> Void, onClose: @escaping () -> Void) {
+        self.defaultLanguage = defaultLanguage
+        self.languages = languages
+        self.onTranslate = onTranslate
+        self.onLanguageSelected = onLanguageSelected
+        self.onClose = onClose
+        self._selectedLanguage = State(initialValue: defaultLanguage)
+    }
+    
+
+    
+    @State private var isTranslateHovered: Bool = false
     
     var body: some View {
         HStack(spacing: 8) {
-            // "Translate to" 标签 - 可点击
+            // "Translate to" 标签 - 可点击，带动态效果
             Button(action: {
                 // 直接使用当前选中的语言进行翻译
                 onTranslate(selectedLanguage)
             }) {
                 Text("Translate To")
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.primary)
+                    .foregroundColor(isTranslateHovered ? .accentColor : .primary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(isTranslateHovered ? 
+                                  Color.accentColor.opacity(0.1) : 
+                                  Color.clear)
+                            .animation(.easeInOut(duration: 0.15), value: isTranslateHovered)
+                    )
             }
             .buttonStyle(PlainButtonStyle())
             .onHover { isHovered in
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    isTranslateHovered = isHovered
+                }
                 if isHovered {
                     NSCursor.pointingHand.push()
                 } else {
@@ -376,6 +469,8 @@ struct TranslationMenuView: View {
                 ForEach(languages, id: \.0) { code, name in
                     Button(action: {
                         selectedLanguage = code
+                        // Notify parent about user's language selection
+                        onLanguageSelected(code)
                         // 延迟执行翻译，确保菜单有时间关闭
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                             onTranslate(code)
@@ -383,10 +478,12 @@ struct TranslationMenuView: View {
                     }) {
                         HStack {
                             Text(name)
+                                .font(.system(size: 13))
                             if code == selectedLanguage {
                                 Spacer()
                                 Image(systemName: "checkmark")
-                                    .foregroundColor(.blue)
+                                    .foregroundColor(.accentColor)
+                                    .font(.system(size: 12, weight: .semibold))
                             }
                         }
                     }
@@ -397,6 +494,7 @@ struct TranslationMenuView: View {
                     .foregroundColor(.primary)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
+                    .fixedSize(horizontal: true, vertical: false)  // 让文本自动调整宽度
                     .background(
                         RoundedRectangle(cornerRadius: 4)
                             .fill(Color(NSColor.controlBackgroundColor))
@@ -407,7 +505,6 @@ struct TranslationMenuView: View {
                     )
             }
             .menuStyle(BorderlessButtonMenuStyle())
-            .fixedSize()
             
             // 关闭按钮
             Button(action: onClose) {
@@ -424,8 +521,9 @@ struct TranslationMenuView: View {
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .fixedSize()  // 让整个菜单根据内容自动调整大小
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
         .background(
             RoundedRectangle(cornerRadius: 6)
                 .fill(Color(NSColor.windowBackgroundColor))

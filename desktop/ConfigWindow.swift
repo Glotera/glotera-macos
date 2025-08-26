@@ -823,6 +823,7 @@ class LanguageConfigViewModel: ObservableObject {
                 configs[index] = LanguageConfig(
                     code: configs[index].code,
                     name: configs[index].name,
+                    nativeName: configs[index].nativeName,
                     popular: configs[index].popular,
                     triggers: triggers
                 )

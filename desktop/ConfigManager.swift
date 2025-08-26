@@ -5,6 +5,7 @@ import SQLite3
 struct LanguageConfig: Codable, Equatable {
     let code: String
     let name: String
+    let nativeName: String
     let popular: Int
     var triggers: [String]
 }
@@ -120,6 +121,7 @@ class ConfigManager {
                      let config = LanguageConfig(
                          code: code,
                          name: name,
+                         nativeName: name,
                          popular: popular,
                          triggers: triggers
                      )
@@ -216,6 +218,7 @@ class ConfigManager {
                      let config = LanguageConfig(
                          code: code,
                          name: name,
+                         nativeName: name,
                          popular: popular,
                          triggers: triggers
                      )
@@ -527,7 +530,7 @@ class ConfigManager {
         }
         
         let querySQL = """
-            SELECT lang_iso639, lang_name, popular, triggers
+            SELECT lang_iso639, lang_name, lang_native_name, popular, triggers
             FROM language_configs 
             ORDER BY popular ASC, lang_name ASC;
         """
@@ -545,13 +548,15 @@ class ConfigManager {
         while sqlite3_step(statement) == SQLITE_ROW {
             guard let codePtr = sqlite3_column_text(statement, 0),
                   let namePtr = sqlite3_column_text(statement, 1),
-                  let triggersPtr = sqlite3_column_text(statement, 3) else {
+                  let nativeNamePtr = sqlite3_column_text(statement, 2),
+                  let triggersPtr = sqlite3_column_text(statement, 4) else {
                 continue
             }
             
             let code = String(cString: codePtr)
             let name = String(cString: namePtr)
-            let popular = Int(sqlite3_column_int(statement, 2))
+            let nativeName = String(cString: nativeNamePtr)
+            let popular = Int(sqlite3_column_int(statement, 3))
             let triggersStr = String(cString: triggersPtr)
             
             // Parse triggers as comma-separated string
@@ -562,6 +567,7 @@ class ConfigManager {
             let config = LanguageConfig(
                 code: code,
                 name: name,
+                nativeName: nativeName,
                 popular: popular,
                 triggers: triggers
             )
