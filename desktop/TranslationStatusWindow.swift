@@ -98,6 +98,48 @@ class TranslationStatusWindow: NSWindow {
          
     }
     
+    func showNetworkError(near mousePoint: CGPoint) {
+        statusView?.updateStatus(.networkError)
+        
+        // Set position
+        let viewWidth = self.frame.width
+        let viewHeight = self.frame.height
+        let screenFrame = NSScreen.main?.visibleFrame ?? NSRect.zero
+        
+        var statusPoint = mousePoint
+        statusPoint.x = max(screenFrame.minX, min(statusPoint.x, screenFrame.maxX - viewWidth))
+        statusPoint.y = max(screenFrame.minY, min(statusPoint.y, screenFrame.maxY - viewHeight))
+        
+        self.setFrameTopLeftPoint(statusPoint)
+        self.makeKeyAndOrderFront(nil)
+        
+        // Auto hide after 5 seconds (network errors show longer)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+            self.hideStatus()
+        }
+    }
+    
+    func showServerError(near mousePoint: CGPoint) {
+        statusView?.updateStatus(.serverError)
+        
+        // Set position
+        let viewWidth = self.frame.width
+        let viewHeight = self.frame.height
+        let screenFrame = NSScreen.main?.visibleFrame ?? NSRect.zero
+        
+        var statusPoint = mousePoint
+        statusPoint.x = max(screenFrame.minX, min(statusPoint.x, screenFrame.maxX - viewWidth))
+        statusPoint.y = max(screenFrame.minY, min(statusPoint.y, screenFrame.maxY - viewHeight))
+        
+        self.setFrameTopLeftPoint(statusPoint)
+        self.makeKeyAndOrderFront(nil)
+        
+        // Auto hide after 4 seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
+            self.hideStatus()
+        }
+    }
+    
     func hideStatus() {
         self.orderOut(nil)
         
@@ -124,6 +166,8 @@ enum TranslationStatus {
     case translating
     case success
     case failure
+    case networkError
+    case serverError
 }
 
 struct TranslationStatusView: View {
@@ -156,6 +200,16 @@ struct TranslationStatusView: View {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundColor(.red)
                         .frame(width: 24, height: 24)  // 统一大小
+                        
+                case .networkError:
+                    Image(systemName: "wifi.exclamationmark")
+                        .foregroundColor(.orange)
+                        .frame(width: 24, height: 24)
+                        
+                case .serverError:
+                    Image(systemName: "server.rack")
+                        .foregroundColor(.red)
+                        .frame(width: 24, height: 24)
                 }
             }
             .font(.system(size: 18))
@@ -205,6 +259,10 @@ struct TranslationStatusView: View {
             return "Translated!"
         case .failure:
             return "Translation failed"
+        case .networkError:
+            return "Network error"
+        case .serverError:
+            return "Server error"
         }
     }
     

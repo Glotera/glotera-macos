@@ -254,6 +254,9 @@ class TranslatorClient: NSObject {
     // 配额委托
     weak var quotaDelegate: TranslatorQuotaDelegate?
     
+    // 错误通知管理器
+    private let errorNotificationManager = ErrorNotificationManager.shared
+    
     // 使用环境配置
     private let environment = TranslatorEnvironment.current
     
@@ -299,10 +302,18 @@ class TranslatorClient: NSObject {
         #else
         Logger.info("🚀 Release mode: Using production server")
         #endif
+        
+        // 监听重试通知
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleRetryNotification),
+            name: .retryTranslation,
+            object: nil
+        )
     }
 
     // 翻译文本 - 新方法，返回完整结果包含配额信息
-    func translate(text: String, to language: String, completion: @escaping (Result<TranslationResult, TranslationError>) -> Void) {
+    func translate(text: String, to language: String, mousePoint: CGPoint? = nil, completion: @escaping (Result<TranslationResult, TranslationError>) -> Void) {
         Logger.debug("Starting translation: \(text) -> \(language)")
         
         // Record translation attempt
@@ -325,6 +336,12 @@ class TranslatorClient: NSObject {
                     timer.addContext("error_type", String(describing: error))
                     timer.finish(success: false)
                     recordPerformanceCounter("translation.failure")
+                    
+                    // 显示用户友好的错误提醒
+                    self.handleTranslationError(error)
+                    
+                    // 同时更新状态窗口
+                    self.updateStatusWindowForError(error, near: mousePoint)
                 }
                 completion(result)
             }
@@ -491,9 +508,15 @@ class TranslatorClient: NSObject {
         }
     }
     
+    // 向后兼容的translate方法（不带mousePoint）
+    func translate(text: String, to language: String, completion: @escaping (Result<TranslationResult, TranslationError>) -> Void) {
+        translate(text: text, to: language, mousePoint: nil, completion: completion)
+    }
+    
     func translateStream(
         text: String, 
-        to: String, 
+        to: String,
+        mousePoint: CGPoint? = nil,
         onChunk: @escaping (String, String) -> Void,  // (chunk, fullContent)
         onComplete: @escaping (String?, QuotaInfo?) -> Void,      // (finalResult, quotaInfo)
         onError: @escaping (String) -> Void          // errorMessage
@@ -530,6 +553,22 @@ class TranslatorClient: NSObject {
                 onError: { error in
                     timer.finish(success: false)
                     recordPerformanceCounter("translation.stream.failure")
+                    
+                    // Handle stream translation errors, create corresponding TranslationError
+                    let translationError: TranslationError
+                    if error.contains("Network") || error.contains("network") {
+                        translationError = .networkError(error)
+                    } else if error.contains("Server") || error.contains("server") {
+                        translationError = .serverError(500, error)
+                    } else if error.contains("Authentication") || error.contains("authentication") {
+                        translationError = .authenticationRequired(error)
+                    } else {
+                        translationError = .parseError(error)
+                    }
+                    
+                    // Show friendly error reminders
+                    self.handleTranslationError(translationError)
+                    
                     onError(error)
                 })
         }
@@ -688,6 +727,55 @@ class TranslatorClient: NSObject {
                 }
             }
         }
+    }
+    
+    // MARK: - Error Handling
+    
+    /// Handle translation errors and show user-friendly reminders
+    private func handleTranslationError(_ error: TranslationError) {
+        Logger.debug("Handling translation error: \(error.localizedDescription)")
+        
+        // For authentication and quota errors, let existing handling mechanisms handle them
+        switch error {
+        case .authenticationRequired:
+            // Authentication errors are handled by LoginManager and UserManager
+            return
+        case .quotaExceeded:
+            // Quota errors are handled by QuotaAlertWindow
+            return
+        case .networkError, .serverError, .parseError:
+            // Network and server errors show friendly reminders
+            DispatchQueue.main.async {
+                self.errorNotificationManager.showErrorNotification(error)
+            }
+        }
+    }
+    
+    /// Update status window to display error status
+    private func updateStatusWindowForError(_ error: TranslationError, near mousePoint: CGPoint?) {
+        guard let point = mousePoint else { return }
+        
+        DispatchQueue.main.async {
+            switch error {
+            case .networkError:
+                TranslationStatusWindow.shared.showNetworkError(near: point)
+            case .serverError:
+                TranslationStatusWindow.shared.showServerError(near: point)
+            default:
+                TranslationStatusWindow.shared.showFailure()
+            }
+        }
+    }
+    
+    /// Handle retry notification
+    @objc private func handleRetryNotification() {
+        Logger.info("Translation retry requested by user")
+        // Retry mechanism can be implemented here, such as re-initiating the last failed translation request
+        // Currently just logging the user's retry intent
+    }
+    
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
       
     // 异步处理流式数据，避免阻塞delegate队列
@@ -879,6 +967,11 @@ extension TranslatorClient: URLSessionDataDelegate {
         
         if let error = error {
             Logger.error("Stream translation error: \(error.localizedDescription)")
+            
+            // Create corresponding TranslationError and show friendly reminders
+            let translationError = TranslationError.networkError(error.localizedDescription)
+            self.handleTranslationError(translationError)
+            
             DispatchQueue.main.async {
                 self.streamCallbacks?.onError("Network error: \(error.localizedDescription)")
             }
