@@ -25,7 +25,6 @@
 		2369A0760EA64CA18E875A83 /* StreamBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B45302DE637A47119CC26C78 /* StreamBuffer.swift */; };
 		2FA664AEECDE41298DD84A9E /* TriggerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF1783DB55484ACEBCF74A5F /* TriggerManager.swift */; };
 		3D153861DB83474CB7A5CE30 /* ConfigWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15B044BD9B2D441BAF66FA8D /* ConfigWindow.swift */; };
-
 		52E75974376A4A2C80038B26 /* ConfigManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F60848B2C5C4E76B8A270AB /* ConfigManager.swift */; };
 		55ACA3925B5740A49F528A02 /* config/language-iso-639.json in Resources */ = {isa = PBXBuildFile; fileRef = ADA243CF57A742A49C392A18 /* config/language-iso-639.json */; };
 		602693012E2CB9670046465E /* AppleScriptManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 602693002E2CB9660046465E /* AppleScriptManager.swift */; };
@@ -114,7 +113,7 @@
 		60B4B7902E0BA3D800A08883 /* UserManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserManager.swift; sourceTree = "<group>"; };
 		60B4B7932E0BA3D800A08884 /* SessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManager.swift; sourceTree = "<group>"; };
 		60B4B7962E0BA3D800A08885 /* DatabaseManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseManager.swift; sourceTree = "<group>"; };
-		9BE4ED422E012FC2002AC2AE /* Glotera-dev.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Glotera-dev.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		9BE4ED422E012FC2002AC2AE /* Glotera.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Glotera.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		9BE4ED532E012FC5002AC2AE /* desktopTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = desktopTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		9BE4ED572E012FC5002AC2AE /* desktopTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = desktopTests.swift; sourceTree = "<group>"; };
 		9BE4ED5D2E012FC5002AC2AE /* desktopUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = desktopUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -147,7 +146,6 @@
 		QU0T4L1M1TS123456789ABCD /* QuotaLimits.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = QuotaLimits.swift; sourceTree = "<group>"; };
 		QU0TA5AL3RT4W1ND0W123456 /* QuotaAlertWindow.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = QuotaAlertWindow.swift; sourceTree = "<group>"; };
 		cc719fd545984ccaac0b1c82 /* ErrorNotificationManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ErrorNotificationManager.swift; sourceTree = "<group>"; };
-
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -208,7 +206,7 @@
 		9BE4ED432E012FC2002AC2AE /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				9BE4ED422E012FC2002AC2AE /* Glotera-dev.app */,
+				9BE4ED422E012FC2002AC2AE /* Glotera.app */,
 				9BE4ED532E012FC5002AC2AE /* desktopTests.xctest */,
 				9BE4ED5D2E012FC5002AC2AE /* desktopUITests.xctest */,
 			);
@@ -297,7 +295,7 @@
 			);
 			name = desktop;
 			productName = desktop;
-			productReference = 9BE4ED422E012FC2002AC2AE /* Glotera-dev.app */;
+			productReference = 9BE4ED422E012FC2002AC2AE /* Glotera.app */;
 			productType = "com.apple.product-type.application";
 		};
 		9BE4ED522E012FC5002AC2AE /* desktopTests */ = {
@@ -652,7 +650,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "$(SRCROOT)/desktop/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "Glotera-dev";
+				INFOPLIST_KEY_CFBundleDisplayName = Glotera;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_LSUIElement = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -661,8 +659,8 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				MARKETING_VERSION = 0.2.0;
-				PRODUCT_BUNDLE_IDENTIFIER = ai.glotera.desktop.dev;
-				PRODUCT_NAME = "Glotera-dev";
+				PRODUCT_BUNDLE_IDENTIFIER = ai.glotera.desktop;
+				PRODUCT_NAME = Glotera;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -683,7 +681,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "$(SRCROOT)/desktop/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "Glotera-dev";
+				INFOPLIST_KEY_CFBundleDisplayName = Glotera;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_LSUIElement = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -692,8 +690,8 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				MARKETING_VERSION = 0.2.0;
-				PRODUCT_BUNDLE_IDENTIFIER = ai.glotera.desktop.dev;
-				PRODUCT_NAME = "Glotera-dev";
+				PRODUCT_BUNDLE_IDENTIFIER = ai.glotera.desktop;
+				PRODUCT_NAME = Glotera;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 			};
