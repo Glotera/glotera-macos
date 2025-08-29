@@ -223,16 +223,17 @@ struct TranslatorEnvironment {
     let maxRetries: Int
     
     static let current: TranslatorEnvironment = {
+        let serverURL = EnvironmentManager.shared.serverURL
         #if DEBUG
             return TranslatorEnvironment(
-                apiEndpoint: "http://localhost:1145/api/translate",
+                apiEndpoint: serverURL+"/api/translate",
                 isProduction: false,
                 timeoutInterval: 30.0,
                 maxRetries: 2
             )
         #else
             return TranslatorEnvironment(
-                apiEndpoint: "https://api.glotera.ai/translate", 
+                apiEndpoint: serverURL+"/translate", 
                 isProduction: true,
                 timeoutInterval: 30.0,
                 maxRetries: 3
@@ -352,7 +353,7 @@ class TranslatorClient: NSObject {
     private func performTranslation(text: String, to language: String, completion: @escaping (Result<TranslationResult, TranslationError>) -> Void) {
         // Record start time for API call timing
         let startTime = CFAbsoluteTimeGetCurrent()
-        Logger.info("🚀 Starting translation API call at \(Date())")
+        Logger.info("🚀 Starting translation API call to \(endpoint)")
         
         guard let url = URL(string: endpoint) else {
             Logger.error("Invalid API URL")
