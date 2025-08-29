@@ -1,0 +1,15 @@
+{
+    "title": "Glotera Installer",
+    "icon": "../config/resources/glotera.icns",
+    "background": "../config/resources/background.png",
+    "window": {
+      "size": {
+        "width": 500,
+        "height": 300
+      }
+    },
+    "contents": [
+      { "x": 100, "y": 150, "type": "file", "path": "APP_PATH_PLACEHOLDER" },
+      { "x": 350, "y": 150, "type": "link", "path": "/Applications" }
+    ]
+  }

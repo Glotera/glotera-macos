@@ -1,0 +1,7 @@
+build
+release
+.github
+.claude
+.DS_Store
+*/.DS_Store
+eddsa_priv.pem
