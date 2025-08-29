@@ -350,7 +350,9 @@ class TranslatorClient: NSObject {
     
     // Actual translation implementation
     private func performTranslation(text: String, to language: String, completion: @escaping (Result<TranslationResult, TranslationError>) -> Void) {
-        Logger.info("Calling translation API")
+        // Record start time for API call timing
+        let startTime = CFAbsoluteTimeGetCurrent()
+        Logger.info("🚀 Starting translation API call at \(Date())")
         
         guard let url = URL(string: endpoint) else {
             Logger.error("Invalid API URL")
@@ -404,21 +406,24 @@ class TranslatorClient: NSObject {
         // Use connection pool for better performance
         let session = connectionPool.getSession()
         let task = session.dataTask(with: request) { data, response, error in
+            // Calculate API call duration
+            let endTime = CFAbsoluteTimeGetCurrent()
+            let duration = endTime - startTime
 
             if let error = error {
-                Logger.info("Translation API error: \(error.localizedDescription)")
+                Logger.info("❌ Translation API error after \(String(format: "%.3f", duration * 1000))ms: \(error.localizedDescription)")
                 completion(.failure(.networkError(error.localizedDescription)))
                 return
             }
             
             guard let httpResponse = response as? HTTPURLResponse else {
-                Logger.info("Invalid response type")
+                Logger.info("❌ Invalid response type after \(String(format: "%.3f", duration * 1000))ms")
                 completion(.failure(.networkError("Invalid response type")))
                 return
             }
             
             guard let data = data else {
-                Logger.info("No data received from translation API")
+                Logger.info("❌ No data received from translation API after \(String(format: "%.3f", duration * 1000))ms")
                 completion(.failure(.networkError("No data received")))
                 return
             }
@@ -426,6 +431,7 @@ class TranslatorClient: NSObject {
             // 处理HTTP状态码
             if httpResponse.statusCode == 429 {
                 // 配额超限错误
+                Logger.warn("⚠️ Quota exceeded after \(String(format: "%.3f", duration * 1000))ms")
                 do {
                     if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                        let quotaData = json["quota_info"] as? [String: Any] {
@@ -449,7 +455,7 @@ class TranslatorClient: NSObject {
             }
             
             guard httpResponse.statusCode == 200 else {
-                Logger.info("Translation API HTTP error: \(httpResponse.statusCode)")
+                Logger.info("❌ Translation API HTTP error \(httpResponse.statusCode) after \(String(format: "%.3f", duration * 1000))ms")
                 completion(.failure(.serverError(httpResponse.statusCode, "Server error")))
                 return
             }
@@ -457,7 +463,7 @@ class TranslatorClient: NSObject {
             // 解析成功响应
             do {
                 guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                    Logger.info("Failed to parse translation response")
+                    Logger.info("❌ Failed to parse translation response after \(String(format: "%.3f", duration * 1000))ms")
                     completion(.failure(.parseError("Invalid JSON response")))
                     return
                 }
@@ -465,12 +471,12 @@ class TranslatorClient: NSObject {
                 let result = TranslationResult(from: json)
                 
                 if result.translated.isEmpty {
-                    Logger.info("Empty translation result")
+                    Logger.info("❌ Empty translation result after \(String(format: "%.3f", duration * 1000))ms")
                     completion(.failure(.parseError("Empty translation result")))
                     return
                 }
                 
-                Logger.info("Translation successful: \(result.translated)")
+                Logger.info("✅ Translation successful after \(String(format: "%.3f", duration * 1000))ms: \(result.translated)")
                 
                 // 处理配额信息通知
                 if let quotaInfo = result.quotaInfo {
@@ -488,7 +494,7 @@ class TranslatorClient: NSObject {
                 
                 completion(.success(result))
             } catch {
-                Logger.info("Failed to parse JSON response: \(error)")
+                Logger.info("❌ Failed to parse JSON response after \(String(format: "%.3f", duration * 1000))ms: \(error)")
                 completion(.failure(.parseError("JSON parsing failed")))
             }
         }
@@ -581,9 +587,13 @@ class TranslatorClient: NSObject {
         onComplete: @escaping (String?, QuotaInfo?) -> Void,
         onError: @escaping (String) -> Void
     ) {
+        // Record start time for stream translation API call timing
+        let startTime = CFAbsoluteTimeGetCurrent()
+        Logger.info("🚀 Starting stream translation API call at \(Date())")
         
         guard let url = URL(string: endpoint) else { 
-            Logger.info("Invalid URL: \(endpoint)")
+            let duration = CFAbsoluteTimeGetCurrent() - startTime
+            Logger.info("❌ Invalid URL after \(String(format: "%.3f", duration * 1000))ms: \(endpoint)")
             DispatchQueue.main.async {
                 onError("Invalid server URL")
             }
@@ -687,7 +697,11 @@ class TranslatorClient: NSObject {
         
         let task = streamSession!.dataTask(with: request)
         task.resume()
-        Logger.info("Stream translation request started")
+        Logger.info("📡 Stream translation request started - waiting for response...")
+        
+        // Store startTime in the task for later reference in delegate methods
+        // We'll use objc_setAssociatedObject to attach timing info to the task
+        objc_setAssociatedObject(task, "streamStartTime", startTime, .OBJC_ASSOCIATION_RETAIN)
     }
     
     // 便捷方法：流式翻译（向后兼容）
@@ -913,8 +927,12 @@ class TranslatorClient: NSObject {
 extension TranslatorClient: URLSessionDataDelegate {
     
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        // Get timing info if available
+        let startTime = objc_getAssociatedObject(dataTask, "streamStartTime") as? CFAbsoluteTime ?? CFAbsoluteTimeGetCurrent()
+        let duration = CFAbsoluteTimeGetCurrent() - startTime
+        
         guard let httpResponse = response as? HTTPURLResponse else {
-            Logger.info("Invalid stream response type")
+            Logger.info("❌ Invalid stream response type after \(String(format: "%.3f", duration * 1000))ms")
             DispatchQueue.main.async {
                 self.streamCallbacks?.onError("Invalid response format")
             }
@@ -923,7 +941,7 @@ extension TranslatorClient: URLSessionDataDelegate {
         }
         
         if httpResponse.statusCode == 429 {
-            Logger.info("Stream translation quota exceeded: \(httpResponse.statusCode)")
+            Logger.warn("⚠️ Stream translation quota exceeded after \(String(format: "%.3f", duration * 1000))ms: \(httpResponse.statusCode)")
             
             // 对于429错误，需要继续接收数据以解析配额信息
             Logger.info("Allowing data reception to parse quota info from 429 response")
@@ -932,7 +950,7 @@ extension TranslatorClient: URLSessionDataDelegate {
         }
         
         guard httpResponse.statusCode == 200 else {
-            Logger.info("Stream translation API HTTP error: \(httpResponse.statusCode)")
+            Logger.info("❌ Stream translation API HTTP error after \(String(format: "%.3f", duration * 1000))ms: \(httpResponse.statusCode)")
             DispatchQueue.main.async {
                 self.streamCallbacks?.onError("Server error: \(httpResponse.statusCode)")
             }
@@ -940,7 +958,7 @@ extension TranslatorClient: URLSessionDataDelegate {
             return
         }
         
-        Logger.info("Stream response started, status: \(httpResponse.statusCode)")
+        Logger.info("✅ Stream response started after \(String(format: "%.3f", duration * 1000))ms, status: \(httpResponse.statusCode)")
         completionHandler(.allow)
     }
     
@@ -964,9 +982,12 @@ extension TranslatorClient: URLSessionDataDelegate {
     }
     
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) { 
+        // Get timing info if available
+        let startTime = objc_getAssociatedObject(task, "streamStartTime") as? CFAbsoluteTime ?? CFAbsoluteTimeGetCurrent()
+        let duration = CFAbsoluteTimeGetCurrent() - startTime
         
         if let error = error {
-            Logger.error("Stream translation error: \(error.localizedDescription)")
+            Logger.error("❌ Stream translation error after \(String(format: "%.3f", duration * 1000))ms: \(error.localizedDescription)")
             
             // Create corresponding TranslationError and show friendly reminders
             let translationError = TranslationError.networkError(error.localizedDescription)
@@ -1088,7 +1109,7 @@ extension TranslatorClient: URLSessionDataDelegate {
                 var fullContent = ""
                 processStreamLine(streamBuffer, fullContent: &fullContent)
             }
-            Logger.debug("Stream translation completed")
+            Logger.info("✅ Stream translation completed successfully after \(String(format: "%.3f", duration * 1000))ms")
         }
          
         // 清理
