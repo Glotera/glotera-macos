@@ -28,6 +28,22 @@ class EnvironmentManager {
         #endif
     }
 
+    var translateURL: String {
+        #if DEBUG
+            return baseURL+"/api/translate"
+        #else
+            return serverURL+"/translate"
+        #endif
+    }
+
+    var chatURL: String {
+        #if DEBUG
+            return baseURL+"/api/chat"
+        #else
+            return serverURL+"/chat"
+        #endif
+    }
+
     /// Gathers all relevant environment information for API requests.
     func getEnvironmentInfo() -> [String: Any] {
         let info: [String: Any] = [

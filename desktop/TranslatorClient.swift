@@ -223,17 +223,17 @@ struct TranslatorEnvironment {
     let maxRetries: Int
     
     static let current: TranslatorEnvironment = {
-        let serverURL = EnvironmentManager.shared.serverURL
+        let translateURL = EnvironmentManager.shared.translateURL
         #if DEBUG
             return TranslatorEnvironment(
-                apiEndpoint: serverURL+"/api/translate",
+                apiEndpoint: translateURL,
                 isProduction: false,
                 timeoutInterval: 30.0,
                 maxRetries: 2
             )
         #else
             return TranslatorEnvironment(
-                apiEndpoint: serverURL+"/translate", 
+                apiEndpoint: translateURL, 
                 isProduction: true,
                 timeoutInterval: 30.0,
                 maxRetries: 3
@@ -789,136 +789,301 @@ class TranslatorClient: NSObject {
         // Currently just logging the user's retry intent
     }
     
+    // MARK: - Chat Functionality
+    
+    /// Chat with LLM using the /chat endpoint with streaming and markdown support
+    func chat(
+        message: String,
+        originalText: String,
+        translatedText: String,
+        conversationHistory: [(userMessage: String, aiResponse: String)],
+        onStreamUpdate: @escaping (String) -> Void,
+        completion: @escaping (Result<String, TranslationError>) -> Void
+    ) {
+        Logger.debug("Starting chat: message=\(message)")
+        
+        // Create chat endpoint URL
+        let chatEndpoint = EnvironmentManager.shared.chatURL 
+        
+        guard let url = URL(string: chatEndpoint) else {
+            Logger.error("Invalid chat URL: \(chatEndpoint)")
+            completion(.failure(.networkError("Invalid chat URL")))
+            return
+        }
+        
+        // Get authenticated headers
+        AuthenticationHelper.shared.getAuthenticatedHeaders { [weak self] headers in
+            guard let self = self, let headers = headers else {
+                Logger.error("No valid authentication headers available for chat")
+                completion(.failure(.authenticationRequired("Authentication required")))
+                return
+            }
+            
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            
+            // Set headers
+            for (key, value) in headers {
+                request.setValue(value, forHTTPHeaderField: key)
+            }
+            request.timeoutInterval = self.timeoutInterval
+            
+            // Build request body (simplified, no environment info)
+            guard let userId = SessionManager.shared.getCurrentUser()?.userId else {
+                Logger.error("No authenticated user available for chat")
+                completion(.failure(.authenticationRequired("No authenticated user")))
+                return
+            }
+            
+            // Build conversation history for context
+            var conversationPairs: [[String: String]] = []
+            for (userMsg, aiResp) in conversationHistory {
+                conversationPairs.append([
+                    "user_message": userMsg,
+                    "ai_response": aiResp
+                ])
+            }
+            
+            let requestBody: [String: Any] = [
+                "message": message,
+                "original_text": originalText,
+                "translated_text": translatedText,
+                "conversation_history": conversationPairs,
+                "user_id": userId
+            ]
+            
+            // Log the complete request for debugging
+            do {
+                let requestJsonData = try JSONSerialization.data(withJSONObject: requestBody, options: .prettyPrinted)
+                if let requestJsonString = String(data: requestJsonData, encoding: .utf8) {
+                    print("=== CHAT API REQUEST ===")
+                    print("URL: \(chatEndpoint)")
+                    print("Method: POST")
+                    print("Headers: \(headers)")
+                    print("Body:")
+                    print(requestJsonString)
+                    print("========================")
+                }
+            } catch {
+                Logger.error("Failed to serialize request body for logging: \(error)")
+            }
+            
+            do {
+                request.httpBody = try JSONSerialization.data(withJSONObject: requestBody, options: [])
+            } catch {
+                Logger.error("Failed to serialize chat request body: \(error)")
+                completion(.failure(.parseError("Failed to serialize request")))
+                return
+            }
+            
+            // Create streaming delegate for real-time data processing
+            let streamingDelegate = ChatStreamingDelegate(
+                onStreamUpdate: onStreamUpdate,
+                onCompletion: completion
+            )
+            
+            // Create custom URLSession with streaming delegate
+            let streamingSession = URLSession(
+                configuration: .default,
+                delegate: streamingDelegate,
+                delegateQueue: nil
+            )
+            
+            print("=== CHAT STREAMING REQUEST ===")
+            print("Starting streaming request to: \(chatEndpoint)")
+            print("==============================")
+            
+            let streamingTask = streamingSession.dataTask(with: request)
+            streamingDelegate.task = streamingTask
+            streamingTask.resume()
+        }
+    }
+    
     deinit {
         NotificationCenter.default.removeObserver(self)
     }
-      
-    // 异步处理流式数据，避免阻塞delegate队列
-    private func processStreamData(_ dataString: String) {
-        // Use StreamBatchProcessor for optimized processing
-        if let processor = streamProcessor {
-            processor.addRawData(dataString)
-            
-            // Log performance statistics periodically
-            let stats = processor.getPerformanceStats()
-            if stats.processed > 0 && stats.processed % 10 == 0 {
-                Logger.debug("Stream processing stats: processed=\(stats.processed), dropped=\(stats.dropped), buffer=\(String(format: "%.1f", stats.bufferUtilization * 100))%, avgTime=\(String(format: "%.3f", stats.avgProcessingTime * 1000))ms")
-            }
-        } else {
-            // Fallback to legacy processing if processor not available
-            processStreamDataLegacy(dataString)
-        }
+}
+
+// MARK: - Chat Streaming Delegate
+class ChatStreamingDelegate: NSObject, URLSessionDataDelegate {
+    private let onStreamUpdate: (String) -> Void
+    private let onCompletion: (Result<String, TranslationError>) -> Void
+    private var completeResponse = ""
+    private var buffer = ""
+    
+    weak var task: URLSessionDataTask?
+    
+    init(onStreamUpdate: @escaping (String) -> Void, onCompletion: @escaping (Result<String, TranslationError>) -> Void) {
+        self.onStreamUpdate = onStreamUpdate
+        self.onCompletion = onCompletion
+        super.init()
     }
     
-    // Legacy stream processing for fallback
-    private func processStreamDataLegacy(_ dataString: String) {
-        // 线程安全地更新缓冲区
-        objc_sync_enter(self)
-        streamBuffer += dataString
-        let lines = streamBuffer.components(separatedBy: .newlines)
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        guard let httpResponse = response as? HTTPURLResponse else {
+            DispatchQueue.main.async {
+                self.onCompletion(.failure(.networkError("Invalid response type")))
+            }
+            completionHandler(.cancel)
+            return
+        }
         
-        if lines.count > 1 {
-            streamBuffer = lines.last ?? ""
-            let linesToProcess = Array(lines.dropLast())
-            objc_sync_exit(self)
-            
-            // 处理完整的行
-            var fullContent = ""
-            for line in linesToProcess {
-                processStreamLine(line, fullContent: &fullContent)
+        print("=== CHAT RESPONSE HEADERS ===")
+        print("Status Code: \(httpResponse.statusCode)")
+        print("Headers: \(httpResponse.allHeaderFields)")
+        print("=============================")
+        
+        if httpResponse.statusCode == 401 {
+            DispatchQueue.main.async {
+                self.onCompletion(.failure(.authenticationRequired("Authentication required")))
             }
-        } else {
-            objc_sync_exit(self)
+            completionHandler(.cancel)
+            return
+        }
+        
+        if httpResponse.statusCode == 429 {
+            DispatchQueue.main.async {
+                self.onCompletion(.failure(.serverError(429, "Chat quota exceeded")))
+            }
+            completionHandler(.cancel)
+            return
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            DispatchQueue.main.async {
+                self.onCompletion(.failure(.serverError(httpResponse.statusCode, "Server error")))
+            }
+            completionHandler(.cancel)
+            return
+        }
+        
+        completionHandler(.allow)
+    }
+    
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        guard let responseString = String(data: data, encoding: .utf8) else {
+            return
+        }
+        
+        print("=== STREAMING CHUNK ===")
+        print("Raw data: \(responseString)")
+        print("=======================")
+        
+        // Add to buffer for processing
+        buffer += responseString
+        
+        // Process complete lines
+        let lines = buffer.components(separatedBy: .newlines)
+        
+        // Keep the last incomplete line in buffer
+        if lines.count > 1 {
+            buffer = lines.last ?? ""
+            
+            // Process complete lines
+            for line in lines.dropLast() {
+                processStreamLine(line)
+            }
         }
     }
     
-    private func processStreamLine(_ line: String, fullContent: inout String) {
+    private func processStreamLine(_ line: String) {
         let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
         
-        if trimmedLine.isEmpty || trimmedLine == "data: [DONE]" {
-            Logger.debug("Skipping empty line or DONE marker")
+        if trimmedLine.isEmpty {
+            return
+        }
+        
+        if trimmedLine == "data: [DONE]" {
+            print("=== CHAT STREAM DONE SIGNAL ===")
+            print("Received [DONE] signal from server")
+            print("==============================")
+            DispatchQueue.main.async {
+                self.onCompletion(.success(self.completeResponse))
+            }
             return
         }
         
         if trimmedLine.hasPrefix("data: ") {
             let jsonString = String(trimmedLine.dropFirst(6))
             
-            do {
-                guard let jsonData = jsonString.data(using: .utf8),
-                      let json = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-                      let type = json["type"] as? String else {
-                    Logger.error("Failed to parse stream JSON: \(jsonString)")
-                    return
-                }
+            if let jsonData = jsonString.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
                 
-                switch type {
-                case "connected", "heartbeat":
-                    Logger.debug("Received \(type) event")
-                    return
-                    
-                case "chunk":
-                    if let content = json["content"] as? String,
-                       let fullContentFromResponse = json["fullContent"] as? String {
-                        fullContent = fullContentFromResponse
-                        Logger.info("Stream chunk: '\(content)'")
-                        
-                        // 立即回调UI更新
+                // Check for completion signal first
+                if let type = json["type"] as? String {
+                    switch type {
+                    case "end", "complete", "done":
+                        print("=== CHAT STREAM END SIGNAL ===")
+                        print("Received end signal from server")
+                        print("==============================")
                         DispatchQueue.main.async {
-                            self.streamCallbacks?.onChunk(content, fullContentFromResponse)
+                            self.onCompletion(.success(self.completeResponse))
                         }
-                    } else {
-                        Logger.error("Missing content or fullContent in chunk event")
-                    }
-                    
-                case "end":
-                    Logger.info("Processing end event")
-                    let capturedCallbacks = self.streamCallbacks
-                    let capturedFullContent = fullContent // 捕获值而非引用
-                    
-                    // 解析配额信息
-                    var quotaInfo: QuotaInfo?
-                    if let quotaData = json["quota_info"] as? [String: Any] {
-                        quotaInfo = QuotaInfo(from: quotaData)
-                        Logger.info("Stream quota info: \(quotaInfo!.quotaDescription)")
-                        
-                        // 通知配额委托
-                        DispatchQueue.main.async {
-                            self.quotaDelegate?.didReceiveQuotaUpdate(quotaInfo!)
-                            
-                            // 如果配额较低，发送警告
-                            if quotaInfo!.isLowQuota {
-                                self.quotaDelegate?.didReceiveQuotaWarning(quotaInfo!)
+                        return
+                    case "error":
+                        if let errorMessage = json["error"] as? String {
+                            print("=== CHAT STREAM ERROR ===")
+                            print("Error: \(errorMessage)")
+                            print("========================")
+                            DispatchQueue.main.async {
+                                self.onCompletion(.failure(.serverError(500, errorMessage)))
                             }
                         }
-                    }
-                    
-                    if let result = json["result"] as? [String: Any],
-                       let translated = result["translated"] as? String {
-                        DispatchQueue.main.async {
-                            capturedCallbacks?.onComplete(translated, quotaInfo)
+                        return
+                    case "chunk":
+                        // Handle structured chunk with type
+                        if let content = json["content"] as? String {
+                            completeResponse += content
+                            DispatchQueue.main.async {
+                                self.onStreamUpdate(self.completeResponse)
+                            }
                         }
-                    } else {
-                        DispatchQueue.main.async {
-                            capturedCallbacks?.onComplete(capturedFullContent.isEmpty ? nil : capturedFullContent, quotaInfo)
-                        }
+                        return
+                    default:
+                        break
                     }
-                    return
-                    
-                case "error":
-                    if let errorMessage = json["error"] as? String {
-                        Logger.error("Stream translation error: \(errorMessage)")
-                        DispatchQueue.main.async {
-                            self.streamCallbacks?.onError(errorMessage)
-                        }
-                    }
-                    return
-                    
-                default:
-                    Logger.error("Unknown stream event type: \(type)")
                 }
                 
-            } catch {
-                Logger.error("Failed to parse stream JSON: \(error)")
+                // For chat streaming, we expect content in the response
+                if let content = json["content"] as? String {
+                    print("Chat chunk: '\(content)' (newlines: \(content.contains("\n") ? "YES" : "NO"))")
+                    completeResponse += content
+                    print("Complete chat response newlines: \(completeResponse.contains("\n") ? "YES" : "NO")")
+                    DispatchQueue.main.async {
+                        self.onStreamUpdate(self.completeResponse)
+                    }
+                } else if let delta = json["delta"] as? [String: Any],
+                          let content = delta["content"] as? String {
+                    // Handle OpenAI-style delta format
+                    print("Chat delta: '\(content)' (newlines: \(content.contains("\n") ? "YES" : "NO"))")
+                    completeResponse += content
+                    DispatchQueue.main.async {
+                        self.onStreamUpdate(self.completeResponse)
+                    }
+                }
+            }
+        }
+    }
+    
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didCompleteWithError error: Error?) {
+        // Process any remaining buffer content
+        if !buffer.isEmpty {
+            processStreamLine(buffer)
+        }
+        
+        if let error = error {
+            print("=== STREAMING ERROR ===")
+            print("Error: \(error.localizedDescription)")
+            print("======================")
+            DispatchQueue.main.async {
+                self.onCompletion(.failure(.networkError(error.localizedDescription)))
+            }
+        } else {
+            print("=== STREAMING COMPLETED ===")
+            print("Final response: \(completeResponse)")
+            print("===========================")
+            DispatchQueue.main.async {
+                self.onCompletion(.success(self.completeResponse))
             }
         }
     }
@@ -1107,8 +1272,7 @@ extension TranslatorClient: URLSessionDataDelegate {
             
             // 处理缓冲区中剩余的数据
             if !streamBuffer.isEmpty {
-                var fullContent = ""
-                processStreamLine(streamBuffer, fullContent: &fullContent)
+                processStreamLine(streamBuffer)
             }
             Logger.info("✅ Stream translation completed successfully after \(String(format: "%.3f", duration * 1000))ms")
         }
@@ -1121,7 +1285,113 @@ extension TranslatorClient: URLSessionDataDelegate {
         streamBuffer = "" 
     }
     
-    // MARK: - Quota Information
+    private func processStreamData(_ dataString: String) {
+        // Add to buffer for processing
+        streamBuffer += dataString
+        
+        // Process complete lines
+        let lines = streamBuffer.components(separatedBy: .newlines)
+        
+        // Keep the last incomplete line in buffer
+        if lines.count > 1 {
+            streamBuffer = lines.last ?? ""
+            
+            // Process complete lines
+            for line in lines.dropLast() {
+                processStreamLine(line)
+            }
+        }
+    }
+    
+    private func processStreamLine(_ line: String) {
+        let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        if trimmedLine.isEmpty || trimmedLine == "data: [DONE]" {
+            Logger.debug("Skipping empty line or DONE marker")
+            return
+        }
+        
+        if trimmedLine.hasPrefix("data: ") {
+            let jsonString = String(trimmedLine.dropFirst(6))
+            
+            do {
+                guard let jsonData = jsonString.data(using: .utf8),
+                      let json = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+                      let type = json["type"] as? String else {
+                    Logger.error("Failed to parse stream JSON: \(jsonString)")
+                    return
+                }
+                
+                switch type {
+                case "connected", "heartbeat":
+                    Logger.debug("Received \(type) event")
+                    return
+                    
+                case "chunk":
+                    if let content = json["content"] as? String,
+                       let fullContentFromResponse = json["fullContent"] as? String {
+                        Logger.info("Stream chunk: '\(content)' (newlines: \(content.contains("\n") ? "YES" : "NO"))")
+                        Logger.info("Full content newlines: \(fullContentFromResponse.contains("\n") ? "YES" : "NO")")
+                        
+                        DispatchQueue.main.async {
+                            self.streamCallbacks?.onChunk(content, fullContentFromResponse)
+                        }
+                    } else {
+                        Logger.error("Missing content or fullContent in chunk event")
+                    }
+                    
+                case "end":
+                    Logger.info("Processing end event")
+                    let capturedCallbacks = self.streamCallbacks
+                    
+                    var quotaInfo: QuotaInfo?
+                    if let quotaData = json["quota_info"] as? [String: Any] {
+                        quotaInfo = QuotaInfo(from: quotaData)
+                        Logger.info("Stream quota info: \(quotaInfo!.quotaDescription)")
+                        
+                        DispatchQueue.main.async {
+                            self.quotaDelegate?.didReceiveQuotaUpdate(quotaInfo!)
+                            
+                            if quotaInfo!.isLowQuota {
+                                self.quotaDelegate?.didReceiveQuotaWarning(quotaInfo!)
+                            }
+                        }
+                    }
+                    
+                    if let result = json["result"] as? [String: Any],
+                       let translated = result["translated"] as? String {
+                        DispatchQueue.main.async {
+                            capturedCallbacks?.onComplete(translated, quotaInfo)
+                        }
+                    } else if let fullContent = json["fullContent"] as? String {
+                        DispatchQueue.main.async {
+                            capturedCallbacks?.onComplete(fullContent.isEmpty ? nil : fullContent, quotaInfo)
+                        }
+                    }
+                    return
+                    
+                case "error":
+                    if let errorMessage = json["error"] as? String {
+                        Logger.error("Stream translation error: \(errorMessage)")
+                        DispatchQueue.main.async {
+                            self.streamCallbacks?.onError(errorMessage)
+                        }
+                    }
+                    return
+                    
+                default:
+                    Logger.error("Unknown stream event type: \(type)")
+                }
+                
+            } catch {
+                Logger.error("Failed to parse stream JSON: \(error)")
+            }
+        }
+    }
+}
+
+// MARK: - Quota Information
+extension TranslatorClient {
     
     /// Fetch current quota information without consuming usage
     func fetchQuotaInfo(completion: @escaping (Result<QuotaInfo, TranslationError>) -> Void) {

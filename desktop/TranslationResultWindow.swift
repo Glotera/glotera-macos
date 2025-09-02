@@ -75,11 +75,61 @@ class TranslationResultWindow: NSWindow {
             }
         )
         
+        // Set up chat toggle callback
+        resultView?.viewModel.onChatToggle = { [weak self] in
+            self?.handleChatToggle()
+        }
+        
         hostingView = NSHostingView(rootView: resultView!)
         self.contentView = hostingView
         
         // 开始流式翻译
         startStreamTranslation(original: original, to: targetLanguage)
+    }
+    
+    private func handleChatToggle() {
+        guard let resultView = self.resultView else { return }
+        
+        let newSize = Self.calculateWindowSize(
+            original: resultView.original,
+            translated: resultView.viewModel.translated,
+            showingChat: resultView.viewModel.showingChat
+        )
+        
+        let currentFrame = self.frame
+        let screen = NSScreen.main ?? NSScreen.screens.first!
+        let screenFrame = screen.visibleFrame
+        
+        // Calculate new position - expand upward to keep bottom visible
+        var newY: CGFloat
+        if resultView.viewModel.showingChat {
+            // When enabling chat, expand upward
+            newY = currentFrame.origin.y + currentFrame.height - newSize.height
+            // Ensure the window doesn't go above screen bounds
+            if newY < screenFrame.origin.y {
+                newY = screenFrame.origin.y
+            }
+        } else {
+            // When disabling chat, keep the top position and shrink downward
+            newY = currentFrame.origin.y
+            // Make sure the window fits on screen
+            if newY + newSize.height > screenFrame.origin.y + screenFrame.height {
+                newY = screenFrame.origin.y + screenFrame.height - newSize.height
+            }
+        }
+        
+        let newFrame = NSRect(
+            x: currentFrame.origin.x,
+            y: newY,
+            width: newSize.width,
+            height: newSize.height
+        )
+        
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.3
+            context.allowsImplicitAnimation = true
+            self.setFrame(newFrame, display: true, animate: true)
+        }
     }
     
     private func startStreamTranslation(original: String, to: String) {
@@ -158,18 +208,32 @@ class TranslationResultWindow: NSWindow {
             resultView.viewModel.updateTranslation(content, isStreaming: true)
             
             // 根据内容动态调整窗口大小，使用优化的调整逻辑
-            let newSize = Self.calculateWindowSize(original: resultView.original, translated: content)
+            let newSize = Self.calculateWindowSize(
+                original: resultView.original, 
+                translated: content,
+                showingChat: resultView.viewModel.showingChat
+            )
             let currentFrame = self.frame
             
             // 只有在尺寸有显著变化时才调整窗口（避免频繁调整）
             let sizeThreshold: CGFloat = 20
             if abs(newSize.height - currentFrame.height) > sizeThreshold {
+                let screen = NSScreen.main ?? NSScreen.screens.first!
+                let screenFrame = screen.visibleFrame
+                
+                // Smart positioning to keep window on screen
+                var newY = currentFrame.origin.y + currentFrame.height - newSize.height
+                if newY < screenFrame.origin.y {
+                    newY = screenFrame.origin.y
+                }
+                
                 let newFrame = NSRect(
                     x: currentFrame.origin.x,
-                    y: currentFrame.origin.y + currentFrame.height - newSize.height, // 保持顶部位置
+                    y: newY,
                     width: newSize.width,
                     height: newSize.height
                 )
+                
                 // 使用更平滑的动画
                 NSAnimationContext.runAnimationGroup { context in
                     context.duration = 0.2
@@ -195,11 +259,24 @@ class TranslationResultWindow: NSWindow {
             resultView.viewModel.updateTranslation(finalResult, isStreaming: false)
             
             // 完成时进行最终的窗口大小调整以适应完整的翻译内容
-            let finalSize = Self.calculateWindowSize(original: resultView.original, translated: finalResult)
+            let finalSize = Self.calculateWindowSize(
+                original: resultView.original, 
+                translated: finalResult,
+                showingChat: resultView.viewModel.showingChat
+            )
             let currentFrame = self.frame
+            let screen = NSScreen.main ?? NSScreen.screens.first!
+            let screenFrame = screen.visibleFrame
+            
+            // Smart positioning for final adjustment
+            var newY = currentFrame.origin.y + currentFrame.height - finalSize.height
+            if newY < screenFrame.origin.y {
+                newY = screenFrame.origin.y
+            }
+            
             let finalFrame = NSRect(
                 x: currentFrame.origin.x,
-                y: currentFrame.origin.y + currentFrame.height - finalSize.height, // 保持顶部位置
+                y: newY,
                 width: finalSize.width,
                 height: finalSize.height
             )
@@ -408,8 +485,16 @@ class TranslationResultWindow: NSWindow {
     }
     
     // 计算窗口大小以适应内容
-    private static func calculateWindowSize(original: String, translated: String) -> NSSize {
-        let maxWidth: CGFloat = 450 
+    private static func calculateWindowSize(original: String, translated: String, showingChat: Bool = false) -> NSSize {
+        let maxWidth: CGFloat = 520
+        
+        if showingChat {
+            // When chat is active, use a larger fixed proportional layout
+            // Total height: 600px (1:2 ratio - 200px for translation, 400px for chat)
+            return NSSize(width: maxWidth, height: 600)
+        }
+        
+        // Original dynamic calculation for translation-only view
         let padding: CGFloat = 24 
         let verticalSpacing: CGFloat = 80 
         
@@ -436,11 +521,11 @@ class TranslationResultWindow: NSWindow {
         let finalOriginalHeight = min(max(originalHeight + 15, minTextHeight), 120) // 原文保持较小高度
         let finalTranslatedHeight = min(max(translatedHeight + 15, minTextHeight), maxTextHeight)
         
-        // 计算总高度：固定元素 + 两个文本框的高度 + 额外间距
-        let totalHeight = verticalSpacing + finalOriginalHeight + finalTranslatedHeight + 30 
+        // 计算基础翻译内容的高度
+        let translationHeight = verticalSpacing + finalOriginalHeight + finalTranslatedHeight + 30 
         
         // 增加最大高度限制以适应长翻译
-        let maxHeight: CGFloat = min(totalHeight, 600) // 从500增加到600
+        let maxHeight: CGFloat = min(translationHeight, 600)
         let finalHeight = max(maxHeight, 150) 
         
         return NSSize(width: maxWidth, height: finalHeight)
@@ -459,18 +544,44 @@ class TranslationResultWindow: NSWindow {
             }
         )
         
+        // Set up chat toggle callback
+        resultView.viewModel.onChatToggle = { [weak self] in
+            self?.handleChatToggle()
+        }
+        
         hostingView = NSHostingView(rootView: resultView)
         self.contentView = hostingView
+        self.resultView = resultView
+    }
+}
+
+// MARK: - Chat Models
+struct ChatBubbleMessage: Identifiable {
+    let id = UUID()
+    let content: String
+    let isFromUser: Bool
+    let timestamp: Date
+    
+    init(content: String, isFromUser: Bool) {
+        self.content = content
+        self.isFromUser = isFromUser
+        self.timestamp = Date()
     }
 }
 
 class TranslationResultViewModel: ObservableObject {
     @Published var translated: String
     @Published var isStreaming: Bool
+    @Published var chatMessages: [ChatBubbleMessage] = []
+    @Published var showingChat: Bool = false
+    @Published var isChatLoading: Bool = false
     
-    init(translated: String, isStreaming: Bool) {
+    private let originalText: String
+    
+    init(translated: String, isStreaming: Bool, originalText: String = "") {
         self.translated = translated
         self.isStreaming = isStreaming
+        self.originalText = originalText
         Logger.info("TranslationResultViewModel initialized with isStreaming: \(isStreaming)")
     }
     
@@ -486,6 +597,94 @@ class TranslationResultViewModel: ObservableObject {
             }
         }
     }
+    
+    var onChatToggle: (() -> Void)?
+    
+    func toggleChat() {
+        showingChat.toggle()
+        onChatToggle?()
+    }
+    
+    func sendChatMessage(_ message: String) {
+        // Add user message
+        let userMessage = ChatBubbleMessage(content: message, isFromUser: true)
+        chatMessages.append(userMessage)
+        
+        // Set loading state
+        isChatLoading = true
+        
+        // Build conversation history from existing messages
+        var conversationHistory: [(userMessage: String, aiResponse: String)] = []
+        
+        // Group messages into conversation pairs
+        var i = 0
+        while i < chatMessages.count - 1 { // Exclude the message we just added
+            let currentMessage = chatMessages[i]
+            if currentMessage.isFromUser && i + 1 < chatMessages.count {
+                let nextMessage = chatMessages[i + 1]
+                if !nextMessage.isFromUser {
+                    // Found a user-AI pair
+                    conversationHistory.append((
+                        userMessage: currentMessage.content,
+                        aiResponse: nextMessage.content
+                    ))
+                    i += 2 // Skip both messages
+                } else {
+                    i += 1 // Skip lone user message
+                }
+            } else {
+                i += 1 // Skip AI message or continue
+            }
+        }
+        
+        // Add temporary AI message for streaming updates
+        let aiMessage = ChatBubbleMessage(content: "", isFromUser: false)
+        chatMessages.append(aiMessage)
+        let aiMessageIndex = chatMessages.count - 1
+        
+        // Send to chat API with streaming support
+        TranslatorClient.shared.chat(
+            message: message,
+            originalText: originalText,
+            translatedText: translated,
+            conversationHistory: conversationHistory,
+            onStreamUpdate: { [weak self] streamContent in
+                DispatchQueue.main.async {
+                    // Update the AI message content with streaming data
+                    if let strongSelf = self, aiMessageIndex < strongSelf.chatMessages.count {
+                        strongSelf.chatMessages[aiMessageIndex] = ChatBubbleMessage(
+                            content: streamContent,
+                            isFromUser: false
+                        )
+                    }
+                }
+            },
+            completion: { [weak self] result in
+                DispatchQueue.main.async {
+                    self?.isChatLoading = false
+                    
+                    switch result {
+                    case .success(let finalResponse):
+                        // Update with final response if different
+                        if let strongSelf = self, aiMessageIndex < strongSelf.chatMessages.count {
+                            strongSelf.chatMessages[aiMessageIndex] = ChatBubbleMessage(
+                                content: finalResponse,
+                                isFromUser: false
+                            )
+                        }
+                    case .failure(let error):
+                        // Replace the empty AI message with error message
+                        if let strongSelf = self, aiMessageIndex < strongSelf.chatMessages.count {
+                            strongSelf.chatMessages[aiMessageIndex] = ChatBubbleMessage(
+                                content: "Error: \(error.localizedDescription)",
+                                isFromUser: false
+                            )
+                        }
+                    }
+                }
+            }
+        )
+    }
 }
 
 struct TranslationResultView: View {
@@ -498,7 +697,7 @@ struct TranslationResultView: View {
     
     init(original: String, translated: String, isStreaming: Bool, onCopy: @escaping (String) -> Void, onClose: @escaping () -> Void) {
         self.original = original
-        self.viewModel = TranslationResultViewModel(translated: translated, isStreaming: isStreaming)
+        self.viewModel = TranslationResultViewModel(translated: translated, isStreaming: isStreaming, originalText: original)
         self.onCopy = onCopy
         self.onClose = onClose
     }
@@ -512,11 +711,29 @@ struct TranslationResultView: View {
                     .foregroundColor(.secondary.opacity(0.6))
                     .help("Drag to move window")
                 
-                Text("Translation Result")
+                Text(viewModel.showingChat ? "Translation Chat" : "Translation Result")
                     .font(.headline)
                     .foregroundColor(.primary)
                 
                 Spacer()
+                
+                // Chat toggle button
+                Button(action: {
+                    viewModel.toggleChat()
+                }) {
+                    Image(systemName: viewModel.showingChat ? "text.bubble.fill" : "text.bubble")
+                        .font(.system(size: 14))
+                        .foregroundColor(.blue)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .help("Toggle chat")
+                .onHover { isHovered in
+                    if isHovered {
+                        NSCursor.pointingHand.push()
+                    } else {
+                        NSCursor.pop()
+                    }
+                }
                 
                 // 复制按钮
                 Button(action: {
@@ -560,68 +777,24 @@ struct TranslationResultView: View {
                 }
             }
             
-            // 原文 - 只保留blockquote引用线，去掉背景框
-            VStack(alignment: .leading, spacing: 4) {
-                // blockquote风格的原文显示
-                HStack(alignment: .center, spacing: 12) {
-                    // 左侧引用线 - 只保持一行高
-                    Rectangle()
-                        .fill(Color.secondary.opacity(0.3))
-                        .frame(width: 3, height: 20)
-                        .cornerRadius(1.5)
+            // Main content area with proportional layout when chat is active
+            if viewModel.showingChat {
+                // When chat is active: 1:2 ratio (translation:chat) in 600px window
+                VStack(spacing: 0) {
+                    // Translation content (200px out of 600px = 1/3 of total window)
+                    TranslationContentView(original: original, viewModel: viewModel)
+                        .frame(height: 200) // Fixed height for consistent 1:2 ratio
                     
-                    // 原文内容 - 只显示一行
-                    Text(original)
-                        .font(.system(size: 13))
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
+                    Divider()
+                        .padding(.vertical, 4)
+                    
+                    // Chat section (400px out of 600px = 2/3 of total window) 
+                    ExpandedChatSection(viewModel: viewModel)
+                        .frame(maxHeight: .infinity) // Takes remaining space (~396px after divider)
                 }
-                .padding(.vertical, 4)
-                .padding(.horizontal, 12)
-            }
-            
-            // 译文 - 去掉背景框
-            VStack(alignment: .leading, spacing: 4) {
-                ScrollView {
-                    HStack {
-                        Text(viewModel.translated)
-                            .font(.system(size: 14))
-                            .foregroundColor(.primary)
-                            .lineSpacing(4)
-                            .multilineTextAlignment(.leading)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .textSelection(.enabled)
-                            .padding(.horizontal, 4)
-                        
-                        // 流式翻译指示器
-                        if viewModel.isStreaming {
-                            Text("|")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(.blue)
-                                .opacity(0.8)
-                                .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: viewModel.isStreaming)
-                        }
-                    }
-                }
-                .frame(minHeight: 30, maxHeight: 400)
-                
-                // 流式状态指示
-                if viewModel.isStreaming {
-                    HStack {
-                        ProgressView()
-                            .scaleEffect(0.6)
-                        Text("Translating...")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                    }
-                    .padding(.horizontal, 4)
-                    .padding(.top, 2)
-                }
+            } else {
+                // When chat is inactive: full space for translation
+                TranslationContentView(original: original, viewModel: viewModel)
             }
         }
         .padding(12)
@@ -661,5 +834,460 @@ struct TranslationResultView: View {
             showingCopySuccess = false
         }
     }
+}
 
-} 
+// MARK: - Translation Content View
+struct TranslationContentView: View {
+    let original: String
+    @ObservedObject var viewModel: TranslationResultViewModel
+    
+    // Process translation text to handle newlines and basic formatting without markdown rendering
+    private func processedTranslationText(_ text: String) -> String {
+        var result = text
+        
+        // Handle escaped newlines if they exist
+        if result.contains("\\n") {
+            result = result.replacingOccurrences(of: "\\n", with: "\n")
+        }
+        
+        // Normalize different line break formats to standard \n
+        result = result.replacingOccurrences(of: "\r\n", with: "\n")
+        result = result.replacingOccurrences(of: "\r", with: "\n")
+        
+        // Normalize smart quotes to standard quotes
+        result = result.replacingOccurrences(of: "\u{201C}", with: "\"") // Left double quotation mark
+        result = result.replacingOccurrences(of: "\u{201D}", with: "\"") // Right double quotation mark
+        result = result.replacingOccurrences(of: "\u{2018}", with: "'")  // Left single quotation mark
+        result = result.replacingOccurrences(of: "\u{2019}", with: "'")  // Right single quotation mark
+        
+        // Clean up excessive consecutive newlines but preserve intentional spacing
+        result = result.replacingOccurrences(of: "\n\n\n+", with: "\n\n", options: .regularExpression)
+        
+        return result
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // 原文 - blockquote风格
+            HStack(alignment: .center, spacing: 12) {
+                // 左侧引用线
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.3))
+                    .frame(width: 3, height: 20)
+                    .cornerRadius(1.5)
+                
+                // 原文内容 - 只显示一行作为参考
+                Text(original)
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1) // Always show only first line
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+            }
+            .padding(.vertical, 4)
+            .padding(.horizontal, 10)
+            
+            // 译文
+            VStack(alignment: .leading, spacing: 4) {
+                ScrollView {
+                    HStack(alignment: .top) {
+                        Text(processedTranslationText(viewModel.translated))
+                            .font(.system(size: 14))
+                            .foregroundColor(.primary)
+                            .lineSpacing(6) // Increased line spacing for better readability
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4) // Add vertical padding for better visual separation
+                        
+                        // 流式翻译指示器
+                        if viewModel.isStreaming {
+                            Text("|")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.blue)
+                                .opacity(0.8)
+                                .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: viewModel.isStreaming)
+                                .padding(.top, 4) // Align with text content
+                        }
+                    }
+                }
+                .frame(minHeight: 30, maxHeight: viewModel.showingChat ? 180 : 400) // More space when chat is active
+                
+                // 流式状态指示
+                if viewModel.isStreaming {
+                    HStack {
+                        ProgressView()
+                            .scaleEffect(0.6)
+                        Text("Translating...")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 4)
+                    .padding(.top, 2)
+                }
+            }
+        }
+        .frame(maxHeight: viewModel.showingChat ? 200 : .infinity) // Increased height for 1:2 ratio (200px out of 600px)
+    }
+}
+
+// MARK: - Chat Input Section (shows below translation)
+struct ChatInputSection: View {
+    @ObservedObject var viewModel: TranslationResultViewModel
+    @State private var inputText: String = ""
+    @FocusState private var isInputFocused: Bool
+    
+    var body: some View {
+        VStack(spacing: 8) {
+            Divider()
+                .padding(.top, 8)
+            
+            // Chat messages (compact view - only recent messages)
+            if !viewModel.chatMessages.isEmpty {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 8) {
+                            ForEach(viewModel.chatMessages.suffix(2)) { message in
+                                CompactChatMessageView(message: message)
+                            }
+                            
+                            // Loading indicator
+                            if viewModel.isChatLoading {
+                                HStack {
+                                    ProgressView()
+                                        .scaleEffect(0.7)
+                                    Text("AI is thinking...")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 8)
+                                .id("loading")
+                            }
+                            
+                            // Bottom anchor
+                            Color.clear
+                                .frame(height: 1)
+                                .id("bottom")
+                        }
+                        .padding(.horizontal, 4)
+                    }
+                    .frame(maxHeight: 120) // Compact height to show only recent messages
+                    .onChange(of: viewModel.chatMessages.count) { _ in
+                        withAnimation(.easeOut(duration: 0.3)) {
+                            proxy.scrollTo("bottom", anchor: .bottom)
+                        }
+                    }
+                    .onChange(of: viewModel.isChatLoading) { isLoading in
+                        if isLoading {
+                            withAnimation(.easeOut(duration: 0.3)) {
+                                proxy.scrollTo("loading", anchor: .bottom)
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Input area
+            HStack(spacing: 8) {
+                TextField("Ask about this translation...", text: $inputText)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .focused($isInputFocused)
+                    .onSubmit {
+                        sendMessage()
+                    }
+                
+                Button("Send") {
+                    sendMessage()
+                }
+                .disabled(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isChatLoading)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+            .padding(.horizontal, 4)
+        }
+        .onAppear {
+            isInputFocused = true
+        }
+    }
+    
+    private func sendMessage() {
+        let message = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !message.isEmpty && !viewModel.isChatLoading else { return }
+        
+        inputText = ""
+        viewModel.sendChatMessage(message)
+    }
+}
+
+// MARK: - Expanded Chat Section (2/3 of window space)
+struct ExpandedChatSection: View {
+    @ObservedObject var viewModel: TranslationResultViewModel
+    @State private var inputText: String = ""
+    @FocusState private var isInputFocused: Bool
+    
+    var body: some View {
+        VStack(spacing: 8) {
+            // Chat messages (expanded view - shows all messages)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 10) {
+                        ForEach(viewModel.chatMessages) { message in
+                            ChatMessageView(message: message)
+                        }
+                        
+                        // Loading indicator
+                        if viewModel.isChatLoading {
+                            HStack {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                                Text("AI is thinking...")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                            }
+                            .padding(.horizontal, 12)
+                            .id("loading")
+                        }
+                        
+                        // Bottom anchor
+                        Color.clear
+                            .frame(height: 1)
+                            .id("bottom")
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity) // Take all available space
+                .onChange(of: viewModel.chatMessages.count) { _ in
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        proxy.scrollTo("bottom", anchor: .bottom)
+                    }
+                }
+                .onChange(of: viewModel.isChatLoading) { isLoading in
+                    if isLoading {
+                        withAnimation(.easeOut(duration: 0.3)) {
+                            proxy.scrollTo("loading", anchor: .bottom)
+                        }
+                    }
+                }
+            }
+            
+            Divider()
+                .padding(.horizontal, 8)
+            
+            // Input area (fixed at bottom)
+            HStack(spacing: 10) {
+                TextField("Ask about this translation...", text: $inputText)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .focused($isInputFocused)
+                    .onSubmit {
+                        sendMessage()
+                    }
+                
+                Button("Send") {
+                    sendMessage()
+                }
+                .disabled(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isChatLoading)
+                .buttonStyle(.borderedProminent)
+            }
+            .padding(.horizontal, 8)
+            .padding(.bottom, 4)
+        }
+        .frame(maxHeight: .infinity) // Fill available space
+        .onAppear {
+            isInputFocused = true
+        }
+    }
+    
+    private func sendMessage() {
+        let message = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !message.isEmpty && !viewModel.isChatLoading else { return }
+        
+        inputText = ""
+        viewModel.sendChatMessage(message)
+    }
+}
+
+// MARK: - Compact Chat Message View (for input section)
+struct CompactChatMessageView: View {
+    let message: ChatBubbleMessage
+    
+    var body: some View {
+        HStack {
+            if message.isFromUser {
+                Spacer()
+            }
+            
+            VStack(alignment: message.isFromUser ? .trailing : .leading, spacing: 2) {
+                if message.isFromUser {
+                    // User messages - handle newlines properly
+                    Text(message.content)
+                        .font(.system(size: 11))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color.blue)
+                        )
+                        .textSelection(.enabled)
+                        .lineLimit(3) // Limit lines for compact view
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    // AI messages - markdown rendering
+                    MarkdownText(markdown: message.content)
+                        .font(.system(size: 11))
+                        .foregroundColor(.primary)
+                        .lineSpacing(3) // Increased line spacing for better readability
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color(NSColor.controlBackgroundColor))
+                        )
+                        .textSelection(.enabled)
+                        // Remove lineLimit to allow full content display
+                }
+                
+                Text(formatTime(message.timestamp))
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .opacity(0.6)
+                    .padding(.horizontal, 2)
+            }
+            .frame(maxWidth: 260, alignment: message.isFromUser ? .trailing : .leading)
+            
+            if !message.isFromUser {
+                Spacer()
+            }
+        }
+        .padding(.vertical, 2)
+    }
+    
+    private func formatTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+}
+
+// MARK: - Chat Message View
+struct ChatMessageView: View {
+    let message: ChatBubbleMessage
+    
+    var body: some View {
+        HStack {
+            if message.isFromUser {
+                Spacer()
+            }
+            
+            VStack(alignment: message.isFromUser ? .trailing : .leading, spacing: 4) {
+                if message.isFromUser {
+                    // User messages - handle newlines properly
+                    Text(message.content)
+                        .font(.system(size: 13))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(Color.blue)
+                        )
+                        .textSelection(.enabled)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    // AI messages - markdown rendering
+                    MarkdownText(markdown: message.content)
+                        .font(.system(size: 13))
+                        .foregroundColor(.primary)
+                        .lineSpacing(3) // Add line spacing for better readability
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(Color(NSColor.controlBackgroundColor))
+                        )
+                        .textSelection(.enabled)
+                }
+                
+                Text(formatTime(message.timestamp))
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .opacity(0.7)
+                    .padding(.horizontal, 4)
+            }
+            .frame(maxWidth: 340, alignment: message.isFromUser ? .trailing : .leading)
+            
+            if !message.isFromUser {
+                Spacer()
+            }
+        }
+    }
+    
+    private func formatTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+}
+
+// MARK: - Markdown Text Renderer (Optimized for better formatting)
+struct MarkdownText: View {
+    let markdown: String
+    
+    // Preprocess content to handle newlines and basic markdown properly
+    private var processedMarkdown: String {
+        var result = markdown
+        
+        // Handle escaped newlines if they exist
+        if result.contains("\\n") {
+            result = result.replacingOccurrences(of: "\\n", with: "\n")
+        }
+        
+        // Normalize different line break formats to standard \n
+        result = result.replacingOccurrences(of: "\r\n", with: "\n")
+        result = result.replacingOccurrences(of: "\r", with: "\n")
+        
+        // Normalize smart quotes to standard quotes for better markdown compatibility
+        result = result.replacingOccurrences(of: "\u{201C}", with: "\"") // Left double quotation mark
+        result = result.replacingOccurrences(of: "\u{201D}", with: "\"") // Right double quotation mark
+        result = result.replacingOccurrences(of: "\u{2018}", with: "'")  // Left single quotation mark
+        result = result.replacingOccurrences(of: "\u{2019}", with: "'")  // Right single quotation mark
+        
+        // Clean up excessive consecutive newlines but preserve intentional spacing
+        result = result.replacingOccurrences(of: "\n\n\n+", with: "\n\n", options: .regularExpression)
+        
+        // Ensure proper spacing around horizontal rules (---)
+        result = result.replacingOccurrences(of: "\n---\n", with: "\n\n---\n\n", options: .literal)
+        result = result.replacingOccurrences(of: "\n\n\n---\n\n\n", with: "\n\n---\n\n", options: .literal)
+        
+        return result
+    }
+    
+    var body: some View {
+        if #available(macOS 12.0, *) {
+            // Use native AttributedString with Markdown on macOS 12+
+            if let attributedString = try? AttributedString(markdown: processedMarkdown) {
+                Text(attributedString)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                // Fallback to plain text if markdown parsing fails
+                Text(processedMarkdown)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } else {
+            // Fallback for older macOS versions
+            Text(processedMarkdown)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
