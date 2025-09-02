@@ -157,16 +157,26 @@ class TranslationResultWindow: NSWindow {
         if Thread.isMainThread {
             resultView.viewModel.updateTranslation(content, isStreaming: true)
             
-            // 根据内容动态调整窗口大小
+            // 根据内容动态调整窗口大小，使用优化的调整逻辑
             let newSize = Self.calculateWindowSize(original: resultView.original, translated: content)
             let currentFrame = self.frame
-            let newFrame = NSRect(
-                x: currentFrame.origin.x,
-                y: currentFrame.origin.y + currentFrame.height - newSize.height, // 保持顶部位置
-                width: newSize.width,
-                height: newSize.height
-            )
-            self.setFrame(newFrame, display: true, animate: true)
+            
+            // 只有在尺寸有显著变化时才调整窗口（避免频繁调整）
+            let sizeThreshold: CGFloat = 20
+            if abs(newSize.height - currentFrame.height) > sizeThreshold {
+                let newFrame = NSRect(
+                    x: currentFrame.origin.x,
+                    y: currentFrame.origin.y + currentFrame.height - newSize.height, // 保持顶部位置
+                    width: newSize.width,
+                    height: newSize.height
+                )
+                // 使用更平滑的动画
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.2
+                    context.allowsImplicitAnimation = true
+                    self.setFrame(newFrame, display: true, animate: true)
+                }
+            }
         } else {
             DispatchQueue.main.async { [weak self] in
                 self?.updateStreamContent(content)
@@ -183,6 +193,24 @@ class TranslationResultWindow: NSWindow {
         // 确保在主线程更新UI
         if Thread.isMainThread { 
             resultView.viewModel.updateTranslation(finalResult, isStreaming: false)
+            
+            // 完成时进行最终的窗口大小调整以适应完整的翻译内容
+            let finalSize = Self.calculateWindowSize(original: resultView.original, translated: finalResult)
+            let currentFrame = self.frame
+            let finalFrame = NSRect(
+                x: currentFrame.origin.x,
+                y: currentFrame.origin.y + currentFrame.height - finalSize.height, // 保持顶部位置
+                width: finalSize.width,
+                height: finalSize.height
+            )
+            
+            // 使用稍慢的动画来完成最终调整
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.3
+                context.allowsImplicitAnimation = true
+                self.setFrame(finalFrame, display: true, animate: true)
+            }
+            
             // 流式翻译完成后清除缓存的应用信息
             EnvironmentManager.shared.clearTriggerAppInfo()
         } else {
@@ -381,10 +409,9 @@ class TranslationResultWindow: NSWindow {
     
     // 计算窗口大小以适应内容
     private static func calculateWindowSize(original: String, translated: String) -> NSSize {
-        let maxWidth: CGFloat = 450 // 从500减少到450
-        let minWidth: CGFloat = 300 // 从350减少到300
-        let padding: CGFloat = 24 // 从32减少到24
-        let verticalSpacing: CGFloat = 80 // 从120减少到80
+        let maxWidth: CGFloat = 450 
+        let padding: CGFloat = 24 
+        let verticalSpacing: CGFloat = 80 
         
         // 计算文本所需的高度
         let font = NSFont.systemFont(ofSize: 13)
@@ -403,19 +430,20 @@ class TranslationResultWindow: NSWindow {
         ).height
         
         // 确保每个文本框至少有合适的高度，并为ScrollView预留空间
-        let minTextHeight: CGFloat = 25 // 从30减少到25
-        let maxTextHeight: CGFloat = 120 // 从150减少到120
-        let finalOriginalHeight = min(max(originalHeight + 15, minTextHeight), maxTextHeight) // 从20减少到15
+        let minTextHeight: CGFloat = 25 
+        // 增加最大文本高度以适应长翻译，特别是在流式模式下
+        let maxTextHeight: CGFloat = max(200, min(translatedHeight + 20, 400)) // 动态调整最大高度
+        let finalOriginalHeight = min(max(originalHeight + 15, minTextHeight), 120) // 原文保持较小高度
         let finalTranslatedHeight = min(max(translatedHeight + 15, minTextHeight), maxTextHeight)
         
         // 计算总高度：固定元素 + 两个文本框的高度 + 额外间距
-        let totalHeight = verticalSpacing + finalOriginalHeight + finalTranslatedHeight + 30 // 从50减少到30
+        let totalHeight = verticalSpacing + finalOriginalHeight + finalTranslatedHeight + 30 
         
-        // 限制最大高度，但提供更多空间
-        let maxHeight: CGFloat = 500 // 从600减少到500
-        let finalHeight = min(totalHeight, maxHeight)
+        // 增加最大高度限制以适应长翻译
+        let maxHeight: CGFloat = min(totalHeight, 600) // 从500增加到600
+        let finalHeight = max(maxHeight, 150) 
         
-        return NSSize(width: maxWidth, height: max(finalHeight, 150)) // 从200减少到150
+        return NSSize(width: maxWidth, height: finalHeight)
     }
     
     private func setupContent(original: String, translated: String) {
@@ -579,7 +607,7 @@ struct TranslationResultView: View {
                         }
                     }
                 }
-                .frame(minHeight: 30, maxHeight: 120)
+                .frame(minHeight: 30, maxHeight: 400)
                 
                 // 流式状态指示
                 if viewModel.isStreaming {
