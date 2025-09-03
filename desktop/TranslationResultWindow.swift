@@ -486,7 +486,7 @@ class TranslationResultWindow: NSWindow {
     
     // 计算窗口大小以适应内容
     private static func calculateWindowSize(original: String, translated: String, showingChat: Bool = false) -> NSSize {
-        let maxWidth: CGFloat = 520
+        let maxWidth: CGFloat = 620
         
         if showingChat {
             // When chat is active, use a larger fixed proportional layout
@@ -1160,7 +1160,7 @@ struct CompactChatMessageView: View {
                     .opacity(0.6)
                     .padding(.horizontal, 2)
             }
-            .frame(maxWidth: 260, alignment: message.isFromUser ? .trailing : .leading)
+            .frame(maxWidth: 340, alignment: message.isFromUser ? .trailing : .leading)
             
             if !message.isFromUser {
                 Spacer()
@@ -1222,7 +1222,7 @@ struct ChatMessageView: View {
                     .opacity(0.7)
                     .padding(.horizontal, 4)
             }
-            .frame(maxWidth: 340, alignment: message.isFromUser ? .trailing : .leading)
+            .frame(maxWidth: 480, alignment: message.isFromUser ? .trailing : .leading)
             
             if !message.isFromUser {
                 Spacer()
@@ -1241,8 +1241,8 @@ struct ChatMessageView: View {
 struct MarkdownText: View {
     let markdown: String
     
-    // Preprocess content to handle newlines and basic markdown properly
-    private var processedMarkdown: String {
+    // Preprocess content to handle newlines properly
+    private var processedText: String {
         var result = markdown
         
         // Handle escaped newlines if they exist
@@ -1254,40 +1254,96 @@ struct MarkdownText: View {
         result = result.replacingOccurrences(of: "\r\n", with: "\n")
         result = result.replacingOccurrences(of: "\r", with: "\n")
         
-        // Normalize smart quotes to standard quotes for better markdown compatibility
-        result = result.replacingOccurrences(of: "\u{201C}", with: "\"") // Left double quotation mark
-        result = result.replacingOccurrences(of: "\u{201D}", with: "\"") // Right double quotation mark
-        result = result.replacingOccurrences(of: "\u{2018}", with: "'")  // Left single quotation mark
-        result = result.replacingOccurrences(of: "\u{2019}", with: "'")  // Right single quotation mark
-        
-        // Clean up excessive consecutive newlines but preserve intentional spacing
-        result = result.replacingOccurrences(of: "\n\n\n+", with: "\n\n", options: .regularExpression)
-        
-        // Ensure proper spacing around horizontal rules (---)
-        result = result.replacingOccurrences(of: "\n---\n", with: "\n\n---\n\n", options: .literal)
-        result = result.replacingOccurrences(of: "\n\n\n---\n\n\n", with: "\n\n---\n\n", options: .literal)
+        // Normalize smart quotes to standard quotes
+        result = result.replacingOccurrences(of: "\u{201C}", with: "\"")
+        result = result.replacingOccurrences(of: "\u{201D}", with: "\"")
+        result = result.replacingOccurrences(of: "\u{2018}", with: "'")
+        result = result.replacingOccurrences(of: "\u{2019}", with: "'")
         
         return result
     }
     
     var body: some View {
-        if #available(macOS 12.0, *) {
-            // Use native AttributedString with Markdown on macOS 12+
-            if let attributedString = try? AttributedString(markdown: processedMarkdown) {
-                Text(attributedString)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                // Fallback to plain text if markdown parsing fails
-                Text(processedMarkdown)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
+        // Use custom rendering that properly handles newlines
+        renderTextWithNewlines(processedText)
+    }
+    
+    // Custom text renderer that properly handles \n and \n\n
+    private func renderTextWithNewlines(_ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(parseTextBlocks(text).enumerated()), id: \.offset) { index, block in
+                switch block.type {
+                case .paragraph:
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(Array(block.lines.enumerated()), id: \.offset) { lineIndex, line in
+                            if !line.trimmingCharacters(in: .whitespaces).isEmpty {
+                                if #available(macOS 12.0, *) {
+                                    // Try to render with markdown for formatting
+                                    if let attributedString = try? AttributedString(markdown: line) {
+                                        Text(attributedString)
+                                            .multilineTextAlignment(.leading)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    } else {
+                                        Text(line)
+                                            .multilineTextAlignment(.leading)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                } else {
+                                    Text(line)
+                                        .multilineTextAlignment(.leading)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                    }
+                    .padding(.bottom, block.isLastParagraph ? 0 : 8) // Add spacing between paragraphs
+                    
+                case .separator:
+                    Divider()
+                        .padding(.vertical, 8)
+                }
             }
-        } else {
-            // Fallback for older macOS versions
-            Text(processedMarkdown)
-                .multilineTextAlignment(.leading)
-                .fixedSize(horizontal: false, vertical: true)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    
+    // Parse text into blocks handling \n and \n\n correctly
+    private func parseTextBlocks(_ text: String) -> [TextBlock] {
+        var blocks: [TextBlock] = []
+        
+        // Split by double newlines to get paragraphs
+        let paragraphs = text.components(separatedBy: "\n\n")
+        
+        for (index, paragraph) in paragraphs.enumerated() {
+            let trimmedParagraph = paragraph.trimmingCharacters(in: .whitespaces)
+            
+            if trimmedParagraph.isEmpty {
+                continue
+            }
+            
+            // Check if it's a horizontal rule
+            if trimmedParagraph == "---" {
+                blocks.append(TextBlock(type: .separator, lines: [], isLastParagraph: false))
+            } else {
+                // Split paragraph by single newlines to get lines
+                let lines = paragraph.components(separatedBy: "\n")
+                let isLast = (index == paragraphs.count - 1)
+                blocks.append(TextBlock(type: .paragraph, lines: lines, isLastParagraph: isLast))
+            }
+        }
+        
+        return blocks
+    }
+    
+    // Helper structures for text parsing
+    private struct TextBlock {
+        enum BlockType {
+            case paragraph
+            case separator
+        }
+        
+        let type: BlockType
+        let lines: [String]
+        let isLastParagraph: Bool
     }
 }
