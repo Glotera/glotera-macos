@@ -329,8 +329,8 @@ class ChatTranslationWindow: NSWindow {
     
     /// Start monitoring WhatsApp messages
     private func startMessageMonitoring() {
-        // Start a timer to periodically check for new messages
-        messageUpdateTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+        // Start a timer to periodically check for new messages (reduced frequency to minimize flicker)
+        messageUpdateTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
             self?.fetchChatMessages()
         }
         
@@ -500,10 +500,13 @@ class ChatTranslationWindow: NSWindow {
         
         // If messages array is empty and we're processing new messages, show loading state
         let isInitialLoad = messages.isEmpty && !newMessages.isEmpty
-        if isInitialLoad {
-            await MainActor.run { self.chatTranslationData?.isLoadingHistory = true }
-        } else if shouldShowIndicator {
-            await MainActor.run { self.chatTranslationData?.setTranslating(true) }
+        // Combine initial state updates to avoid multiple UI refreshes
+        await MainActor.run {
+            if isInitialLoad {
+                self.chatTranslationData?.isLoadingHistory = true
+            } else if shouldShowIndicator {
+                self.chatTranslationData?.setTranslating(true)
+            }
         }
         
         for message in newMessages {
@@ -569,42 +572,62 @@ class ChatTranslationWindow: NSWindow {
                         
                         // Translate to user's preferred language
                         let targetLanguage = ConfigManager.shared.getUserPreferredLanguage()
-                finalTranslationLanguage = targetLanguage
-                
-                // Record the current app info before translation for environment info
-                EnvironmentManager.shared.recordTriggerApp()
-                
-                // Translate message using non-streaming mode
-                do {
-                    let translationResult = try await translateMessage(message.content, to: targetLanguage) 
+                        finalTranslationLanguage = targetLanguage
+                        
+                        // Record the current app info before translation for environment info
+                        EnvironmentManager.shared.recordTriggerApp()
+                        
+                        // Translate message using non-streaming mode
+                        do {
+                            let translationResult = try await translateMessage(message.content, to: targetLanguage) 
                             finalLanguage = translationResult.fromLanguage ?? ""
                             finalTranslation = translationResult.translated
-                    
-                    Logger.info("Translated message: \(message.content.prefix(30))... -> \(translationResult.translated.prefix(30))...")
-                            Logger.info("Detected source language: \(finalLanguage ?? "unknown")")
-                
-                    // Save to database
-                    let timestamp = ChatMessagesUtil.parseTimestamp(message.timestamp) ?? Date()
-                    let messageRecord = MessageRecord(
-                        sender: message.sender,
-                        content: message.content,
-                        contentHash: contentHash,
-                                contentLanguage: finalLanguage ?? "",
-                                contentTranslation: finalTranslation ?? "",
-                        contentTranslationLanguage: targetLanguage,
-                        contentTimestamp: timestamp,
-                        chatApp: "WhatsApp",
-                        sessionId: currentSessionId
-                    )
-                    
-                    _ = dbManager.insertMessage(messageRecord)
                             
+                            Logger.info("Translated message: \(message.content.prefix(30))... -> \(translationResult.translated.prefix(30))...")
+                            Logger.info("Detected source language: \(finalLanguage ?? "unknown")")
+                        
+                            // Save to database
+                            let timestamp = ChatMessagesUtil.parseTimestamp(message.timestamp) ?? Date()
+                            let messageRecord = MessageRecord(
+                                sender: message.sender,
+                                content: message.content,
+                                contentHash: contentHash,
+                                        contentLanguage: finalLanguage ?? "",
+                                        contentTranslation: finalTranslation ?? "",
+                                contentTranslationLanguage: targetLanguage,
+                                contentTimestamp: timestamp,
+                                chatApp: "WhatsApp",
+                                sessionId: currentSessionId
+                            )
+                            
+                            _ = dbManager.insertMessage(messageRecord)
+                                    
                             // Update lastMessageTimestamp after successful insertion
                             lastMessageTimestamp = timestamp
                             Logger.debug("Updated lastMessageTimestamp to: \(timestamp)")
-                } catch {
-                    Logger.error("Failed to translate message: \(error)")
-                    finalTranslation = "[Translation failed]"
+                        } catch {
+                            Logger.error("Failed to translate message: \(error)")
+                            finalTranslation = "[Translation failed]"
+                            
+                            // Even if translation fails, save the message to database to prevent reprocessing
+                            let timestamp = ChatMessagesUtil.parseTimestamp(message.timestamp) ?? Date()
+                            let messageRecord = MessageRecord(
+                                sender: message.sender,
+                                content: message.content,
+                                contentHash: contentHash,
+                                contentLanguage: finalLanguage ?? "",
+                                contentTranslation: "[Translation failed]",
+                                contentTranslationLanguage: targetLanguage,
+                                contentTimestamp: timestamp,
+                                chatApp: "WhatsApp",
+                                sessionId: currentSessionId
+                            )
+                            
+                            _ = dbManager.insertMessage(messageRecord)
+                            
+                            // Update lastMessageTimestamp to prevent reprocessing this message
+                            lastMessageTimestamp = timestamp
+                            Logger.debug("Updated lastMessageTimestamp after translation failure: \(timestamp)")
                         }
                         
                         // Clear trigger app info after translation is complete
@@ -656,10 +679,16 @@ class ChatTranslationWindow: NSWindow {
                 contentHash: contentHash
             )
 
-            // Add only if content is not empty
+            // Add only if content is not empty and not already processed
             if !processedMessage.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                // Add to messages array maintaining chronological order
-                messages.append(processedMessage)
+                // Check if message already exists to prevent duplicates
+                if !messageHashes.contains(processedMessage.messageHash) {
+                    // Add to messages array maintaining chronological order
+                    messages.append(processedMessage)
+                    messageHashes.insert(processedMessage.messageHash)
+                } else {
+                    Logger.debug("Skipping duplicate message: \(processedMessage.content.prefix(30))...")
+                }
             }
             
             // Keep messages within limit
@@ -671,12 +700,15 @@ class ChatTranslationWindow: NSWindow {
     }
     
         // Single UI update after all messages are processed to minimize flicker
-        await MainActor.run { self.updateChatTranslationView() }
-        if shouldShowIndicator {
-            await MainActor.run { self.chatTranslationData?.setTranslating(false) }
-        }
-        if isInitialLoad {
-            await MainActor.run { self.chatTranslationData?.isLoadingHistory = false }
+        await MainActor.run { 
+            self.updateChatTranslationView()
+            // Update all states in a single MainActor call to avoid multiple UI refreshes
+            if shouldShowIndicator {
+                self.chatTranslationData?.setTranslating(false)
+            }
+            if isInitialLoad {
+                self.chatTranslationData?.isLoadingHistory = false
+            }
         }
     }
  
@@ -785,9 +817,33 @@ class ChatTranslationData: ObservableObject {
     @Published var isLoadingHistory: Bool = false // Track initial history loading state
     
     func updateData(appName: String, sessionId: String, messages: [ChatMessage]) {
-        self.appName = appName
-        self.sessionId = sessionId
-        self.messages = messages
+        // Only update if data has actually changed to prevent unnecessary UI refreshes
+        if self.appName != appName {
+            self.appName = appName
+        }
+        if self.sessionId != sessionId {
+            self.sessionId = sessionId
+        }
+        // For messages, check if the count and content have changed
+        if self.messages.count != messages.count || !messagesAreEqual(self.messages, messages) {
+            self.messages = messages
+        }
+    }
+    
+    // Helper function to compare message arrays efficiently
+    private func messagesAreEqual(_ lhs: [ChatMessage], _ rhs: [ChatMessage]) -> Bool {
+        guard lhs.count == rhs.count else { return false }
+        // Compare just the last few messages for efficiency (most changes happen at the end)
+        let compareCount = min(5, lhs.count)
+        let lhsLast = lhs.suffix(compareCount)
+        let rhsLast = rhs.suffix(compareCount)
+        
+        for (left, right) in zip(lhsLast, rhsLast) {
+            if left.id != right.id || left.content != right.content || left.contentTranslation != right.contentTranslation {
+                return false
+            }
+        }
+        return true
     }
     
     func appendMessage(_ message: ChatMessage) {

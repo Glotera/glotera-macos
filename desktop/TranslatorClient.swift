@@ -315,14 +315,23 @@ class TranslatorClient: NSObject {
 
     // 翻译文本 - 新方法，返回完整结果包含配额信息
     func translate(text: String, to language: String, mousePoint: CGPoint? = nil, completion: @escaping (Result<TranslationResult, TranslationError>) -> Void) {
+        // Validate input text is not empty
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedText.isEmpty {
+            Logger.error("Translation attempted with empty text, ignoring API call")
+            recordPerformanceCounter("translation.empty_text_rejected")
+            completion(.failure(.parseError("Empty text cannot be translated")))
+            return
+        }
+        
         Logger.debug("Starting translation: \(text) -> \(language)")
         
         // Record translation attempt
         recordPerformanceCounter("translation.attempt")
-        recordPerformanceCounter("translation.text_length", value: Double(text.count))
+        recordPerformanceCounter("translation.text_length", value: Double(trimmedText.count))
         
         let timer = PerformanceTelemetry.shared.startTiming("translation.total")
-        timer.addContext("text_length", text.count)
+        timer.addContext("text_length", trimmedText.count)
         timer.addContext("target_language", language)
         
         // Use rate limiter instead of blocking semaphore
@@ -505,6 +514,7 @@ class TranslatorClient: NSObject {
     
     // 便捷方法：只返回翻译文本（向后兼容）
     func translateText(text: String, to language: String, completion: @escaping (Result<String, Error>) -> Void) {
+        // Empty text validation is handled by the main translate method
         translate(text: text, to: language) { result in
             switch result {
             case .success(let translationResult):
@@ -528,14 +538,25 @@ class TranslatorClient: NSObject {
         onComplete: @escaping (String?, QuotaInfo?) -> Void,      // (finalResult, quotaInfo)
         onError: @escaping (String) -> Void          // errorMessage
     ) {
+        // Validate input text is not empty
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedText.isEmpty {
+            Logger.error("Stream translation attempted with empty text, ignoring API call")
+            recordPerformanceCounter("translation.stream.empty_text_rejected")
+            DispatchQueue.main.async {
+                onError("Empty text cannot be translated")
+            }
+            return
+        }
+        
         Logger.info("Starting stream translation: text=\(text), to=\(to)")
         
         // Record stream translation attempt
         recordPerformanceCounter("translation.stream.attempt")
-        recordPerformanceCounter("translation.stream.text_length", value: Double(text.count))
+        recordPerformanceCounter("translation.stream.text_length", value: Double(trimmedText.count))
         
         let timer = PerformanceTelemetry.shared.startTiming("translation.stream.total")
-        timer.addContext("text_length", text.count)
+        timer.addContext("text_length", trimmedText.count)
         timer.addContext("target_language", to)
         
         // Check authentication first using cached validation
@@ -713,6 +734,7 @@ class TranslatorClient: NSObject {
         onComplete: @escaping (String?) -> Void,
         onError: @escaping (String) -> Void
     ) {
+        // Empty text validation is handled by the main translateStream method
         translateStream(text: text, to: to, onChunk: onChunk) { result, quotaInfo in
             onComplete(result)
         } onError: { error in

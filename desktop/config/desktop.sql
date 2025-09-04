@@ -12,6 +12,9 @@ CREATE TABLE IF NOT EXISTS messages (
     content_translation_language TEXT NOT NULL,
     content_timestamp TIMESTAMP NOT NULL, -- received or sent time
     chat_app TEXT NOT NULL, -- whatsapp, telegram, etc.
+    process_status INTEGER NOT NULL DEFAULT 0, -- 0: success, 1: failed, 2: pending
+    failure_reason TEXT DEFAULT NULL, -- reason for processing failure
+    failure_count INTEGER NOT NULL DEFAULT 0, -- number of times processing has failed
     created_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -21,6 +24,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages (sender);
 CREATE INDEX IF NOT EXISTS idx_messages_content_hash ON messages (content_hash);  
 CREATE INDEX IF NOT EXISTS idx_messages_content_timestamp ON messages (content_timestamp);
 CREATE INDEX IF NOT EXISTS idx_messages_chat_app ON messages (chat_app);
+CREATE INDEX IF NOT EXISTS idx_messages_process_status ON messages (process_status);
 
 -- language config table
 CREATE TABLE IF NOT EXISTS language_configs (

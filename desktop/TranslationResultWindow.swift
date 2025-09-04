@@ -39,8 +39,8 @@ class TranslationResultWindow: NSWindow {
     }
     
     init(originalText: String, targetLanguage: String) {
-        // 初始窗口大小，会根据内容动态调整
-        let initialSize = NSSize(width: 450, height: 200)
+        // 初始窗口大小，宽度固定600px，高度会根据内容动态调整
+        let initialSize = NSSize(width: 600, height: 200)
         
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: initialSize.width, height: initialSize.height),
@@ -72,6 +72,9 @@ class TranslationResultWindow: NSWindow {
             },
             onClose: { [weak self] in
                 self?.hide()
+            },
+            onUpgradePrompt: { [weak self] in
+                self?.showFollowupQuestionUpgradePrompt()
             }
         )
         
@@ -121,7 +124,7 @@ class TranslationResultWindow: NSWindow {
         let newFrame = NSRect(
             x: currentFrame.origin.x,
             y: newY,
-            width: newSize.width,
+            width: currentFrame.width,  // 保持当前宽度不变
             height: newSize.height
         )
         
@@ -215,7 +218,7 @@ class TranslationResultWindow: NSWindow {
             )
             let currentFrame = self.frame
             
-            // 只有在尺寸有显著变化时才调整窗口（避免频繁调整）
+            // 只有在高度有显著变化时才调整窗口（避免频繁调整）
             let sizeThreshold: CGFloat = 20
             if abs(newSize.height - currentFrame.height) > sizeThreshold {
                 let screen = NSScreen.main ?? NSScreen.screens.first!
@@ -230,8 +233,8 @@ class TranslationResultWindow: NSWindow {
                 let newFrame = NSRect(
                     x: currentFrame.origin.x,
                     y: newY,
-                    width: newSize.width,
-                    height: newSize.height
+                    width: currentFrame.width,  // 保持当前宽度不变
+                    height: newSize.height     // 只调整高度
                 )
                 
                 // 使用更平滑的动画
@@ -448,6 +451,28 @@ class TranslationResultWindow: NSWindow {
         self.hide()
     }
     
+    private func showFollowupQuestionUpgradePrompt() {
+        let alert = NSAlert()
+        alert.messageText = "Follow-up Question"
+        alert.informativeText = "Follow-up Question feature is only available for Pro and Max users."
+        alert.alertStyle = .informational
+        
+        // Add buttons
+        alert.addButton(withTitle: "Upgrade Now")
+        alert.addButton(withTitle: "Cancel")
+        
+        // Set the window as parent for the alert
+        alert.beginSheetModal(for: self) { response in
+            if response == .alertFirstButtonReturn {
+                // User clicked "Upgrade Now"
+                if let url = URL(string: "https://glotera.ai/pricing") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+            // User clicked "Cancel" or closed the dialog - do nothing
+        }
+    }
+    
     override var canBecomeKey: Bool {
         return true
     }
@@ -486,12 +511,12 @@ class TranslationResultWindow: NSWindow {
     
     // 计算窗口大小以适应内容
     private static func calculateWindowSize(original: String, translated: String, showingChat: Bool = false) -> NSSize {
-        let maxWidth: CGFloat = 620
+        let fixedWidth: CGFloat = 600  // 固定宽度600px
         
         if showingChat {
             // When chat is active, use a larger fixed proportional layout
             // Total height: 600px (1:2 ratio - 200px for translation, 400px for chat)
-            return NSSize(width: maxWidth, height: 600)
+            return NSSize(width: fixedWidth, height: 600)
         }
         
         // Original dynamic calculation for translation-only view
@@ -500,7 +525,7 @@ class TranslationResultWindow: NSWindow {
         
         // 计算文本所需的高度
         let font = NSFont.systemFont(ofSize: 13)
-        let textWidth = maxWidth - padding - 16 // 减去文本框内部padding
+        let textWidth = fixedWidth - padding - 16 // 减去文本框内部padding
         
         let originalHeight = original.boundingRect(
             with: NSSize(width: textWidth, height: CGFloat.greatestFiniteMagnitude),
@@ -528,7 +553,7 @@ class TranslationResultWindow: NSWindow {
         let maxHeight: CGFloat = min(translationHeight, 600)
         let finalHeight = max(maxHeight, 150) 
         
-        return NSSize(width: maxWidth, height: finalHeight)
+        return NSSize(width: fixedWidth, height: finalHeight)
     }
     
     private func setupContent(original: String, translated: String) {
@@ -541,6 +566,9 @@ class TranslationResultWindow: NSWindow {
             },
             onClose: { [weak self] in
                 self?.hide()
+            },
+            onUpgradePrompt: { [weak self] in
+                self?.showFollowupQuestionUpgradePrompt()
             }
         )
         
@@ -601,11 +629,23 @@ class TranslationResultViewModel: ObservableObject {
     var onChatToggle: (() -> Void)?
     
     func toggleChat() {
+        // Only allow Follow-up Question toggle for Pro/Max users
+        guard SessionManager.shared.hasFollowupQuestionAccess() else {
+            Logger.info("Follow-up Question toggle blocked - user doesn't have Follow-up Question access")
+            return
+        }
+        
         showingChat.toggle()
         onChatToggle?()
     }
     
     func sendChatMessage(_ message: String) {
+        // Only allow Follow-up Question messages for Pro/Max users
+        guard SessionManager.shared.hasFollowupQuestionAccess() else {
+            Logger.info("Follow-up Question message blocked - user doesn't have Follow-up Question access")
+            return
+        }
+        
         // Add user message
         let userMessage = ChatBubbleMessage(content: message, isFromUser: true)
         chatMessages.append(userMessage)
@@ -692,14 +732,16 @@ struct TranslationResultView: View {
     @ObservedObject var viewModel: TranslationResultViewModel
     let onCopy: (String) -> Void
     let onClose: () -> Void
+    let onUpgradePrompt: () -> Void
     
     @State private var showingCopySuccess = false
     
-    init(original: String, translated: String, isStreaming: Bool, onCopy: @escaping (String) -> Void, onClose: @escaping () -> Void) {
+    init(original: String, translated: String, isStreaming: Bool, onCopy: @escaping (String) -> Void, onClose: @escaping () -> Void, onUpgradePrompt: @escaping () -> Void) {
         self.original = original
         self.viewModel = TranslationResultViewModel(translated: translated, isStreaming: isStreaming, originalText: original)
         self.onCopy = onCopy
         self.onClose = onClose
+        self.onUpgradePrompt = onUpgradePrompt
     }
     
     var body: some View {
@@ -711,27 +753,47 @@ struct TranslationResultView: View {
                     .foregroundColor(.secondary.opacity(0.6))
                     .help("Drag to move window")
                 
-                Text(viewModel.showingChat ? "Translation Chat" : "Translation Result")
+                Text(viewModel.showingChat ? "Follow-up Question" : "Translation Result")
                     .font(.headline)
                     .foregroundColor(.primary)
                 
                 Spacer()
                 
-                // Chat toggle button
-                Button(action: {
-                    viewModel.toggleChat()
-                }) {
-                    Image(systemName: viewModel.showingChat ? "text.bubble.fill" : "text.bubble")
-                        .font(.system(size: 14))
-                        .foregroundColor(.blue)
-                }
-                .buttonStyle(PlainButtonStyle())
-                .help("Toggle chat")
-                .onHover { isHovered in
-                    if isHovered {
-                        NSCursor.pointingHand.push()
-                    } else {
-                        NSCursor.pop()
+                // Follow-up Question toggle button (Pro/Max only)
+                if SessionManager.shared.hasFollowupQuestionAccess() {
+                    Button(action: {
+                        viewModel.toggleChat()
+                    }) {
+                        Image(systemName: viewModel.showingChat ? "text.bubble.fill" : "text.bubble")
+                            .font(.system(size: 14))
+                            .foregroundColor(.blue)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .help("Toggle Follow-up Question")
+                    .onHover { isHovered in
+                        if isHovered {
+                            NSCursor.pointingHand.push()
+                        } else {
+                            NSCursor.pop()
+                        }
+                    }
+                } else {
+                    // Show upgrade hint for free users
+                    Button(action: {
+                        onUpgradePrompt()
+                    }) {
+                        Image(systemName: "text.bubble")
+                            .font(.system(size: 14))
+                            .foregroundColor(.secondary.opacity(0.6))
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .help("Follow-up Question (Pro/Max feature) - Click to upgrade")
+                    .onHover { isHovered in
+                        if isHovered {
+                            NSCursor.pointingHand.push()
+                        } else {
+                            NSCursor.pop()
+                        }
                     }
                 }
                 
@@ -778,8 +840,8 @@ struct TranslationResultView: View {
             }
             
             // Main content area with proportional layout when chat is active
-            if viewModel.showingChat {
-                // When chat is active: 1:2 ratio (translation:chat) in 600px window
+            if viewModel.showingChat && SessionManager.shared.hasFollowupQuestionAccess() {
+                // When chat is active and user has access: 1:2 ratio (translation:chat) in 600px window
                 VStack(spacing: 0) {
                     // Translation content (200px out of 600px = 1/3 of total window)
                     TranslationContentView(original: original, viewModel: viewModel)
@@ -793,7 +855,7 @@ struct TranslationResultView: View {
                         .frame(maxHeight: .infinity) // Takes remaining space (~396px after divider)
                 }
             } else {
-                // When chat is inactive: full space for translation
+                // When chat is inactive or user doesn't have access: full space for translation
                 TranslationContentView(original: original, viewModel: viewModel)
             }
         }
@@ -993,7 +1055,7 @@ struct ChatInputSection: View {
             
             // Input area
             HStack(spacing: 8) {
-                TextField("Ask about this translation...", text: $inputText)
+                TextField("Ask follow-up questions about this translation...", text: $inputText)
                     .textFieldStyle(RoundedBorderTextFieldStyle())
                     .focused($isInputFocused)
                     .onSubmit {
@@ -1081,7 +1143,7 @@ struct ExpandedChatSection: View {
             
             // Input area (fixed at bottom)
             HStack(spacing: 10) {
-                TextField("Ask about this translation...", text: $inputText)
+                TextField("Ask follow-up questions about this translation...", text: $inputText)
                     .textFieldStyle(RoundedBorderTextFieldStyle())
                     .focused($isInputFocused)
                     .onSubmit {

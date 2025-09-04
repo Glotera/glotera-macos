@@ -338,7 +338,7 @@ class SelectEventManager {
 
       
 
-    // 获取当前选中的文本 - 智能缓存版本
+    // 获取当前选中的文本 - 智能缓存版本，改进重试逻辑
     func getSelectedText(checkSpecialApps: Bool = true) -> (text: String, element: AXUIElement)? {
         let appManager = AppDetectionManager.shared
         
@@ -349,10 +349,24 @@ class SelectEventManager {
             return nil
         }
         
-        // Try accessibility first for unknown/working apps
-        guard let focused = getCachedFocusedElement() else {
-            Logger.info("No focused element via accessibility, recording failure")
-            //appManager.recordAccessibilityFailure()
+        // Try accessibility first with improved retry logic
+        var focused: AXUIElement?
+        
+        // Retry accessibility API up to 2 times with short delays
+        for attempt in 0..<2 {
+            focused = getCachedFocusedElement()
+            if focused != nil {
+                break
+            }
+            
+            if attempt < 1 { // Only sleep on first attempt
+                Logger.debug("Accessibility failed on attempt \(attempt + 1), retrying...")
+                Thread.sleep(forTimeInterval: 0.05) // Brief 50ms delay
+            }
+        }
+        
+        guard let focusedElement = focused else {
+            Logger.info("No focused element via accessibility after retries, will try clipboard as fallback")
             // Return nil to trigger async clipboard method
             return nil
         }
@@ -360,10 +374,10 @@ class SelectEventManager {
         // 先处理特殊应用
         if checkSpecialApps {
             // 对于Wechat、Whatsapp特殊应用，首先使用标准方式获取，因为用户有可能选中的是输入框，而不是历史消息内容
-            if let selectedText = getSelectedTextAttribute(of: focused) {
+            if let selectedText = getSelectedTextAttribute(of: focusedElement) {
                 if !selectedText.isEmpty {
                     Logger.debug("Returning selected text from AX API for special apps")
-                    return (text: selectedText, element: focused)
+                    return (text: selectedText, element: focusedElement)
                 }  
             } 
 
@@ -393,14 +407,14 @@ class SelectEventManager {
         }
         
         // 再尝试通过AX API标准方法获取选中文本
-        if let selectedText = getSelectedTextAttribute(of: focused) {
+        if let selectedText = getSelectedTextAttribute(of: focusedElement) {
             Logger.debug("getSelectedTextAttribute returned: '\(selectedText)' (length: \(selectedText.count), isEmpty: \(selectedText.isEmpty))")
             if !selectedText.isEmpty {
                 Logger.debug("Returning selected text from AX API")
-                return (text: selectedText, element: focused)
+                return (text: selectedText, element: focusedElement)
             } else {
                 Logger.debug("Selected text is empty, false trigger, finish!")
-                return (text: "false_trigger", element: focused)
+                return (text: "false_trigger", element: focusedElement)
             }
         } else {
             Logger.debug("getSelectedTextAttribute returned nil")
@@ -410,7 +424,7 @@ class SelectEventManager {
         if AppDetectionManager.shared.isWebEnvironment() {
             if let selectedText = AppleScriptManager.shared.getWebSelectedText(), !selectedText.isEmpty {
                 Logger.info("Got selected text via Web: '\(selectedText)'")
-                return (text: selectedText, element: focused)
+                return (text: selectedText, element: focusedElement)
             }
         }
         
@@ -424,55 +438,142 @@ class SelectEventManager {
     }
     
     
-    // Async clipboard selection method for force clipboard mode
+    // Async clipboard selection method for force clipboard mode - improved version
     private func tryClipboardSelectionAsync(selectionType: String, startTime: Date) {
         let pasteboard = NSPasteboard.general
+        
+        // Store original clipboard content and change count for integrity check
         let originalContent = pasteboard.string(forType: .string)
+        let originalChangeCount = pasteboard.changeCount
         
-        // Clear and copy current selection
-        pasteboard.clearContents()
-        InputManager.shared.postCopy()
-        
-        // Schedule clipboard reading after allowing event processing time
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+        // Add delay before clipboard manipulation to avoid interfering with user operations
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
             guard let self = self else { return }
             
-            guard let selectedText = pasteboard.string(forType: .string),
-                  !selectedText.isEmpty,
-                  selectedText.trimmingCharacters(in: .whitespacesAndNewlines).count >= 3 else {
-                
-                // Restore original clipboard
-                if let originalContent = originalContent {
-                    pasteboard.clearContents()
-                    pasteboard.setString(originalContent, forType: .string)
-                }
-                
-                // Hide menu if no selection found
-                if !self.lastSelectedText.isEmpty {
-                    Logger.info("Hiding menu - no clipboard selection found")
-                    TranslationMenuWindow.shared.hide()
-                    self.lastSelectedText = ""
-                    self.isMenuShowing = false
-                    self.isWhatsAppMessageSelected = false
-                    self.isWeChatMessageSelected = false
-                    self.lastWhatsAppSelectedText = ""
-                }
-                
-                let processingTime = Date().timeIntervalSince(startTime)
-                if processingTime > 0.2 {
-                    Logger.warn("checkSelectedTextAndShowMenu (\(selectionType)) clipboard took \(String(format: "%.3f", processingTime))s - performance warning")
-                }
+            // Check if user has performed clipboard operations in the meantime
+            if pasteboard.changeCount != originalChangeCount {
+                Logger.info("Clipboard changed during delay, skipping automated selection")
                 return
             }
             
-            // Restore original clipboard
-            if let originalContent = originalContent {
-                pasteboard.clearContents()
-                pasteboard.setString(originalContent, forType: .string)
-            }
+            // Clear and copy current selection with safer approach
+            let preClipboardChangeCount = pasteboard.changeCount
+            pasteboard.clearContents()
             
-            // Process the selected text
-            self.processSelectedText(selectedText, selectionType: selectionType, startTime: startTime)
+            // Use a more reliable copy command
+            InputManager.shared.postCopy()
+            
+            // Use progressive delay checking to ensure copy operation completes
+            self.waitForClipboardChange(
+                originalChangeCount: preClipboardChangeCount + 1, // +1 for clearContents
+                originalContent: originalContent,
+                selectionType: selectionType,
+                startTime: startTime,
+                attempts: 0
+            )
+        }
+    }
+    
+    // Progressive clipboard change detection to avoid timing issues
+    private func waitForClipboardChange(
+        originalChangeCount: Int,
+        originalContent: String?,
+        selectionType: String,
+        startTime: Date,
+        attempts: Int
+    ) {
+        let pasteboard = NSPasteboard.general
+        let maxAttempts = 5
+        let baseDelay = 0.05 // Start with 50ms
+        
+        // Check if clipboard has changed (indicating copy completed)
+        if pasteboard.changeCount > originalChangeCount {
+            // Copy operation completed, process the result
+            self.processClipboardSelection(
+                originalContent: originalContent,
+                selectionType: selectionType,
+                startTime: startTime
+            )
+            return
+        }
+        
+        // If we've reached max attempts, give up
+        guard attempts < maxAttempts else {
+            Logger.info("Clipboard selection timeout after \(maxAttempts) attempts")
+            self.restoreClipboardAndCleanup(originalContent: originalContent)
+            return
+        }
+        
+        // Progressive delay: 50ms, 100ms, 150ms, 200ms, 250ms
+        let delay = baseDelay * Double(attempts + 1)
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.waitForClipboardChange(
+                originalChangeCount: originalChangeCount,
+                originalContent: originalContent,
+                selectionType: selectionType,
+                startTime: startTime,
+                attempts: attempts + 1
+            )
+        }
+    }
+    
+    // Process clipboard selection result
+    private func processClipboardSelection(
+        originalContent: String?,
+        selectionType: String,
+        startTime: Date
+    ) {
+        let pasteboard = NSPasteboard.general
+        
+        guard let selectedText = pasteboard.string(forType: .string),
+              !selectedText.isEmpty,
+              selectedText.trimmingCharacters(in: .whitespacesAndNewlines).count >= 1 else {
+            
+            Logger.info("No valid selection found in clipboard")
+            self.restoreClipboardAndCleanup(originalContent: originalContent)
+            return
+        }
+        
+        // Verify this isn't the original clipboard content being restored
+        if let original = originalContent, selectedText == original {
+            Logger.info("Clipboard selection matches original content, likely no selection")
+            self.restoreClipboardAndCleanup(originalContent: originalContent)
+            return
+        }
+        
+        // Restore original clipboard immediately to minimize interference
+        self.restoreClipboardAndCleanup(originalContent: originalContent)
+        
+        // Process the selected text
+        let processingTime = Date().timeIntervalSince(startTime)
+        if processingTime > 0.3 {
+            Logger.warn("Clipboard selection took \(String(format: "%.3f", processingTime))s - performance warning")
+        }
+        
+        self.processSelectedText(selectedText, selectionType: selectionType, startTime: startTime)
+    }
+    
+    // Restore clipboard and cleanup state
+    private func restoreClipboardAndCleanup(originalContent: String?) {
+        let pasteboard = NSPasteboard.general
+        
+        // Restore original clipboard content if it existed
+        if let originalContent = originalContent {
+            pasteboard.clearContents()
+            pasteboard.setString(originalContent, forType: .string)
+            Logger.debug("Restored original clipboard content")
+        }
+        
+        // Hide menu if no selection found
+        if !self.lastSelectedText.isEmpty {
+            Logger.info("Hiding menu - no clipboard selection found")
+            TranslationMenuWindow.shared.hide()
+            self.lastSelectedText = ""
+            self.isMenuShowing = false
+            self.isWhatsAppMessageSelected = false
+            self.isWeChatMessageSelected = false
+            self.lastWhatsAppSelectedText = ""
         }
     }
     

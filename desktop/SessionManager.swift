@@ -408,6 +408,16 @@ class SessionManager {
         return user.userType.lowercased() == "pro" || user.userType.lowercased() == "max"
     }
     
+    /// Check if current user has access to Follow-up Question feature (Pro/Max only)
+    func hasFollowupQuestionAccess() -> Bool {
+        guard let user = getCurrentUser() else {
+            return false
+        }
+        
+        // Allow access for pro and enterprise (max) users only
+        return user.userType.lowercased() == "pro" || user.userType.lowercased() == "max"
+    }
+    
     /// Update only the userType for the current user
     func updateUserType(_ userType: String) {
         guard let currentUser = getCurrentUser() else {

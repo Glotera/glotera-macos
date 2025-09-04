@@ -24,6 +24,7 @@ class DatabaseManager {
         
         openDatabase()
         initializeDatabase()
+        performDatabaseMigrations()
     }
     
     deinit {
@@ -213,6 +214,9 @@ class DatabaseManager {
                 content_translation_language TEXT NOT NULL,
                 content_timestamp TIMESTAMP NOT NULL,
                 chat_app TEXT NOT NULL,
+                process_status INTEGER NOT NULL DEFAULT 0,
+                failure_reason TEXT DEFAULT NULL,
+                failure_count INTEGER NOT NULL DEFAULT 0,
                 created_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
@@ -222,6 +226,7 @@ class DatabaseManager {
             CREATE INDEX IF NOT EXISTS idx_messages_content_hash ON messages (content_hash);
             CREATE INDEX IF NOT EXISTS idx_messages_content_timestamp ON messages (content_timestamp);
             CREATE INDEX IF NOT EXISTS idx_messages_chat_app ON messages (chat_app);
+            CREATE INDEX IF NOT EXISTS idx_messages_process_status ON messages (process_status);
             
             CREATE TABLE IF NOT EXISTS language_configs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -250,6 +255,73 @@ class DatabaseManager {
         } else {
             let errorMsg = String(cString: sqlite3_errmsg(db))
             Logger.error("Failed to create fallback tables: \(errorMsg) (code: \(result))")
+        }
+    }
+    
+    /// Perform database migrations to add new columns to existing tables
+    private func performDatabaseMigrations() {
+        Logger.info("Checking for database migrations...")
+        
+        // Check if messages table needs new columns
+        migrateMessagesTable()
+        
+        Logger.info("Database migrations completed")
+    }
+    
+    /// Migrate messages table to add new failure tracking columns
+    private func migrateMessagesTable() {
+        // Get current table schema
+        let pragmaSQL = "PRAGMA table_info(messages);"
+        var statement: OpaquePointer?
+        var existingColumns: Set<String> = []
+        
+        guard sqlite3_prepare_v2(db, pragmaSQL, -1, &statement, nil) == SQLITE_OK else {
+            Logger.error("Failed to prepare table info query")
+            return
+        }
+        
+        defer { sqlite3_finalize(statement) }
+        
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let columnNamePtr = sqlite3_column_text(statement, 1) {
+                let columnName = String(cString: columnNamePtr)
+                existingColumns.insert(columnName)
+            }
+        }
+        
+        Logger.info("Existing columns in messages table: \(existingColumns)")
+        
+        // Define new columns to add
+        let newColumns = [
+            ("process_status", "INTEGER NOT NULL DEFAULT 0"),
+            ("failure_reason", "TEXT DEFAULT NULL"),
+            ("failure_count", "INTEGER NOT NULL DEFAULT 0")
+        ]
+        
+        // Add missing columns
+        for (columnName, columnDefinition) in newColumns {
+            if !existingColumns.contains(columnName) {
+                let alterSQL = "ALTER TABLE messages ADD COLUMN \(columnName) \(columnDefinition);"
+                let result = sqlite3_exec(db, alterSQL, nil, nil, nil)
+                
+                if result == SQLITE_OK {
+                    Logger.info("Successfully added column '\(columnName)' to messages table")
+                } else {
+                    let errorMsg = String(cString: sqlite3_errmsg(db))
+                    Logger.error("Failed to add column '\(columnName)': \(errorMsg)")
+                }
+            }
+        }
+        
+        // Create new index if it doesn't exist
+        let createIndexSQL = "CREATE INDEX IF NOT EXISTS idx_messages_process_status ON messages (process_status);"
+        let indexResult = sqlite3_exec(db, createIndexSQL, nil, nil, nil)
+        
+        if indexResult == SQLITE_OK {
+            Logger.info("Successfully created/verified index for process_status")
+        } else {
+            let errorMsg = String(cString: sqlite3_errmsg(db))
+            Logger.error("Failed to create index for process_status: \(errorMsg)")
         }
     }
     
@@ -287,7 +359,10 @@ class DatabaseManager {
         let querySQL = """
             SELECT id, sender, content, content_hash, content_language, 
                    content_translation, content_translation_language, 
-                   content_timestamp, chat_app, created_time, updated_time
+                   content_timestamp, chat_app, session_id,
+                   COALESCE(process_status, 0) as process_status,
+                   failure_reason, COALESCE(failure_count, 0) as failure_count,
+                   created_time, updated_time
             FROM messages WHERE content_hash = ?;
         """
         
@@ -314,8 +389,10 @@ class DatabaseManager {
         let insertSQL = """
             INSERT INTO messages (sender, content, content_hash, content_language,
                                 content_translation, content_translation_language,
-                                content_timestamp, chat_app, session_id, created_time, updated_time)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                                content_timestamp, chat_app, session_id,
+                                process_status, failure_reason, failure_count,
+                                created_time, updated_time)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """
         
         var statement: OpaquePointer?
@@ -337,8 +414,15 @@ class DatabaseManager {
         sqlite3_bind_text(statement, 7, (message.contentTimestamp.ISO8601Format() as NSString).utf8String, -1, nil)
         sqlite3_bind_text(statement, 8, (message.chatApp as NSString).utf8String, -1, nil)
         sqlite3_bind_text(statement, 9, (message.sessionId as NSString).utf8String, -1, nil)
-        sqlite3_bind_text(statement, 10, (message.createdTime.ISO8601Format() as NSString).utf8String, -1, nil)
-        sqlite3_bind_text(statement, 11, (message.updatedTime.ISO8601Format() as NSString).utf8String, -1, nil)
+        sqlite3_bind_int(statement, 10, Int32(message.processStatus.rawValue))
+        if let failureReason = message.failureReason {
+            sqlite3_bind_text(statement, 11, (failureReason as NSString).utf8String, -1, nil)
+        } else {
+            sqlite3_bind_null(statement, 11)
+        }
+        sqlite3_bind_int(statement, 12, Int32(message.failureCount))
+        sqlite3_bind_text(statement, 13, (message.createdTime.ISO8601Format() as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(statement, 14, (message.updatedTime.ISO8601Format() as NSString).utf8String, -1, nil)
         
         let result = sqlite3_step(statement)
         if result == SQLITE_DONE {
@@ -361,7 +445,10 @@ class DatabaseManager {
         let querySQL = """
             SELECT id, sender, content, content_hash, content_language,
                    content_translation, content_translation_language,
-                   content_timestamp, chat_app, session_id, created_time, updated_time
+                   content_timestamp, chat_app, session_id,
+                   COALESCE(process_status, 0) as process_status,
+                   failure_reason, COALESCE(failure_count, 0) as failure_count,
+                   created_time, updated_time
             FROM messages 
             WHERE chat_app = ? AND session_id = ?
             ORDER BY content_timestamp DESC, created_time DESC
@@ -495,6 +582,114 @@ class DatabaseManager {
         return nil
     }
     
+    /// Mark message as failed with reason
+    func markMessageAsFailed(contentHash: String, failureReason: String) -> Bool {
+        let updateSQL = """
+            UPDATE messages 
+            SET process_status = ?, failure_reason = ?, 
+                failure_count = failure_count + 1, updated_time = ?
+            WHERE content_hash = ?;
+        """
+        
+        var statement: OpaquePointer?
+        
+        guard sqlite3_prepare_v2(db, updateSQL, -1, &statement, nil) == SQLITE_OK else {
+            Logger.error("Failed to prepare mark as failed statement")
+            return false
+        }
+        
+        defer { sqlite3_finalize(statement) }
+        
+        sqlite3_bind_int(statement, 1, Int32(ProcessStatus.failed.rawValue))
+        sqlite3_bind_text(statement, 2, (failureReason as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(statement, 3, (Date().ISO8601Format() as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(statement, 4, (contentHash as NSString).utf8String, -1, nil)
+        
+        let result = sqlite3_step(statement)
+        if result == SQLITE_DONE {
+            Logger.info("Message marked as failed: \(contentHash.prefix(10))...")
+            return true
+        } else {
+            let errorMsg = String(cString: sqlite3_errmsg(db))
+            Logger.error("Failed to mark message as failed: \(errorMsg)")
+            return false
+        }
+    }
+    
+    /// Check if message with content hash has failed recently (within retry window)
+    func hasMessageFailedRecently(contentHash: String, retryWindowMinutes: Int = 30) -> Bool {
+        let cutoffTime = Date().addingTimeInterval(-Double(retryWindowMinutes * 60))
+        
+        let querySQL = """
+            SELECT COUNT(*) FROM messages 
+            WHERE content_hash = ? AND process_status = ? AND updated_time >= ?;
+        """
+        
+        var statement: OpaquePointer?
+        
+        guard sqlite3_prepare_v2(db, querySQL, -1, &statement, nil) == SQLITE_OK else {
+            Logger.error("Failed to prepare recent failure check query")
+            return false
+        }
+        
+        defer { sqlite3_finalize(statement) }
+        
+        sqlite3_bind_text(statement, 1, (contentHash as NSString).utf8String, -1, nil)
+        sqlite3_bind_int(statement, 2, Int32(ProcessStatus.failed.rawValue))
+        sqlite3_bind_text(statement, 3, (cutoffTime.ISO8601Format() as NSString).utf8String, -1, nil)
+        
+        if sqlite3_step(statement) == SQLITE_ROW {
+            let count = sqlite3_column_int(statement, 0)
+            return count > 0
+        }
+        
+        return false
+    }
+    
+    /// Get failed messages that can be retried (exponential backoff)
+    func getRetryableFailedMessages(forApp appName: String, sessionId: String) -> [MessageRecord] {
+        let querySQL = """
+            SELECT id, sender, content, content_hash, content_language,
+                   content_translation, content_translation_language,
+                   content_timestamp, chat_app, session_id,
+                   COALESCE(process_status, 0) as process_status,
+                   failure_reason, COALESCE(failure_count, 0) as failure_count,
+                   created_time, updated_time
+            FROM messages 
+            WHERE chat_app = ? AND session_id = ? AND process_status = ?
+            ORDER BY updated_time ASC;
+        """
+        
+        var statement: OpaquePointer?
+        var messages: [MessageRecord] = []
+        
+        guard sqlite3_prepare_v2(db, querySQL, -1, &statement, nil) == SQLITE_OK else {
+            Logger.error("Failed to prepare retryable failed messages query")
+            return messages
+        }
+        
+        defer { sqlite3_finalize(statement) }
+        
+        sqlite3_bind_text(statement, 1, (appName as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(statement, 2, (sessionId as NSString).utf8String, -1, nil)
+        sqlite3_bind_int(statement, 3, Int32(ProcessStatus.failed.rawValue))
+        
+        let now = Date()
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let message = extractMessageRecord(from: statement) {
+                // Calculate exponential backoff: 2^failureCount minutes
+                let backoffMinutes = min(pow(2.0, Double(message.failureCount)), 60.0) // Max 60 minutes
+                let retryTime = message.updatedTime.addingTimeInterval(backoffMinutes * 60)
+                
+                if now >= retryTime {
+                    messages.append(message)
+                }
+            }
+        }
+        
+        return messages
+    }
+    
     /// Test database functionality
     func testDatabase() {
         Logger.info("Testing database functionality...")
@@ -551,10 +746,18 @@ class DatabaseManager {
               let contentTimestampStr = sqlite3_column_text(statement, 7),
               let chatApp = sqlite3_column_text(statement, 8),
               let sessionId = sqlite3_column_text(statement, 9),
-              let createdTimeStr = sqlite3_column_text(statement, 10),
-              let updatedTimeStr = sqlite3_column_text(statement, 11) else {
+              let createdTimeStr = sqlite3_column_text(statement, 13),
+              let updatedTimeStr = sqlite3_column_text(statement, 14) else {
             return nil
         }
+        
+        let processStatusRaw = sqlite3_column_int(statement, 10)
+        let processStatus = ProcessStatus(rawValue: Int(processStatusRaw)) ?? .success
+        
+        let failureReasonPtr = sqlite3_column_text(statement, 11)
+        let failureReason = failureReasonPtr != nil ? String(cString: failureReasonPtr!) : nil
+        
+        let failureCount = Int(sqlite3_column_int(statement, 12))
         
         let dateFormatter = ISO8601DateFormatter()
         
@@ -569,6 +772,9 @@ class DatabaseManager {
             contentTimestamp: dateFormatter.date(from: String(cString: contentTimestampStr)) ?? Date(),
             chatApp: String(cString: chatApp),
             sessionId: String(cString: sessionId),
+            processStatus: processStatus,
+            failureReason: failureReason,
+            failureCount: failureCount,
             createdTime: dateFormatter.date(from: String(cString: createdTimeStr)) ?? Date(),
             updatedTime: dateFormatter.date(from: String(cString: updatedTimeStr)) ?? Date()
         )
@@ -587,6 +793,9 @@ struct MessageRecord {
     let contentTimestamp: Date
     let chatApp: String
     let sessionId: String
+    let processStatus: ProcessStatus
+    let failureReason: String?
+    let failureCount: Int
     let createdTime: Date
     let updatedTime: Date
     
@@ -600,6 +809,9 @@ struct MessageRecord {
          contentTimestamp: Date,
          chatApp: String,
          sessionId: String,
+         processStatus: ProcessStatus = .success,
+         failureReason: String? = nil,
+         failureCount: Int = 0,
          createdTime: Date = Date(),
          updatedTime: Date = Date()) {
         self.id = id
@@ -612,8 +824,25 @@ struct MessageRecord {
         self.contentTimestamp = contentTimestamp
         self.chatApp = chatApp
         self.sessionId = sessionId
+        self.processStatus = processStatus
+        self.failureReason = failureReason
+        self.failureCount = failureCount
         self.createdTime = createdTime
         self.updatedTime = updatedTime
     }
+}
+
+/// Process status enumeration
+enum ProcessStatus: Int, CaseIterable {
+    case success = 0
+    case failed = 1
+    case pending = 2
     
+    var description: String {
+        switch self {
+        case .success: return "success"
+        case .failed: return "failed"
+        case .pending: return "pending"
+        }
+    }
 }
