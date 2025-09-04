@@ -878,13 +878,8 @@ class TranslatorClient: NSObject {
             do {
                 let requestJsonData = try JSONSerialization.data(withJSONObject: requestBody, options: .prettyPrinted)
                 if let requestJsonString = String(data: requestJsonData, encoding: .utf8) {
-                    print("=== CHAT API REQUEST ===")
-                    print("URL: \(chatEndpoint)")
-                    print("Method: POST")
-                    print("Headers: \(headers)")
-                    print("Body:")
-                    print(requestJsonString)
-                    print("========================")
+                    // Simplified chat API request log
+                    Logger.debug("Chat API Request: POST \(chatEndpoint)")
                 }
             } catch {
                 Logger.error("Failed to serialize request body for logging: \(error)")
@@ -909,11 +904,7 @@ class TranslatorClient: NSObject {
                 configuration: .default,
                 delegate: streamingDelegate,
                 delegateQueue: nil
-            )
-            
-            print("=== CHAT STREAMING REQUEST ===")
-            print("Starting streaming request to: \(chatEndpoint)")
-            print("==============================")
+            ) 
             
             let streamingTask = streamingSession.dataTask(with: request)
             streamingDelegate.task = streamingTask
@@ -950,10 +941,6 @@ class ChatStreamingDelegate: NSObject, URLSessionDataDelegate {
             return
         }
         
-        print("=== CHAT RESPONSE HEADERS ===")
-        print("Status Code: \(httpResponse.statusCode)")
-        print("Headers: \(httpResponse.allHeaderFields)")
-        print("=============================")
         
         if httpResponse.statusCode == 401 {
             DispatchQueue.main.async {
@@ -985,11 +972,7 @@ class ChatStreamingDelegate: NSObject, URLSessionDataDelegate {
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         guard let responseString = String(data: data, encoding: .utf8) else {
             return
-        }
-        
-        print("=== STREAMING CHUNK ===")
-        print("Raw data: \(responseString)")
-        print("=======================")
+        } 
         
         // Add to buffer for processing
         buffer += responseString
@@ -1016,9 +999,6 @@ class ChatStreamingDelegate: NSObject, URLSessionDataDelegate {
         }
         
         if trimmedLine == "data: [DONE]" {
-            print("=== CHAT STREAM DONE SIGNAL ===")
-            print("Received [DONE] signal from server")
-            print("==============================")
             DispatchQueue.main.async {
                 self.onCompletion(.success(self.completeResponse))
             }
@@ -1035,18 +1015,12 @@ class ChatStreamingDelegate: NSObject, URLSessionDataDelegate {
                 if let type = json["type"] as? String {
                     switch type {
                     case "end", "complete", "done":
-                        print("=== CHAT STREAM END SIGNAL ===")
-                        print("Received end signal from server")
-                        print("==============================")
                         DispatchQueue.main.async {
                             self.onCompletion(.success(self.completeResponse))
                         }
                         return
                     case "error":
                         if let errorMessage = json["error"] as? String {
-                            print("=== CHAT STREAM ERROR ===")
-                            print("Error: \(errorMessage)")
-                            print("========================")
                             DispatchQueue.main.async {
                                 self.onCompletion(.failure(.serverError(500, errorMessage)))
                             }
@@ -1068,16 +1042,13 @@ class ChatStreamingDelegate: NSObject, URLSessionDataDelegate {
                 
                 // For chat streaming, we expect content in the response
                 if let content = json["content"] as? String {
-                    print("Chat chunk: '\(content)' (newlines: \(content.contains("\n") ? "YES" : "NO"))")
                     completeResponse += content
-                    print("Complete chat response newlines: \(completeResponse.contains("\n") ? "YES" : "NO")")
                     DispatchQueue.main.async {
                         self.onStreamUpdate(self.completeResponse)
                     }
                 } else if let delta = json["delta"] as? [String: Any],
                           let content = delta["content"] as? String {
                     // Handle OpenAI-style delta format
-                    print("Chat delta: '\(content)' (newlines: \(content.contains("\n") ? "YES" : "NO"))")
                     completeResponse += content
                     DispatchQueue.main.async {
                         self.onStreamUpdate(self.completeResponse)
@@ -1094,16 +1065,10 @@ class ChatStreamingDelegate: NSObject, URLSessionDataDelegate {
         }
         
         if let error = error {
-            print("=== STREAMING ERROR ===")
-            print("Error: \(error.localizedDescription)")
-            print("======================")
             DispatchQueue.main.async {
                 self.onCompletion(.failure(.networkError(error.localizedDescription)))
             }
         } else {
-            print("=== STREAMING COMPLETED ===")
-            print("Final response: \(completeResponse)")
-            print("===========================")
             DispatchQueue.main.async {
                 self.onCompletion(.success(self.completeResponse))
             }
@@ -1352,8 +1317,8 @@ extension TranslatorClient: URLSessionDataDelegate {
                 case "chunk":
                     if let content = json["content"] as? String,
                        let fullContentFromResponse = json["fullContent"] as? String {
-                        Logger.info("Stream chunk: '\(content)' (newlines: \(content.contains("\n") ? "YES" : "NO"))")
-                        Logger.info("Full content newlines: \(fullContentFromResponse.contains("\n") ? "YES" : "NO")")
+                        Logger.debug("Stream chunk: '\(content)' (newlines: \(content.contains("\n") ? "YES" : "NO"))")
+                        Logger.debug("Full content newlines: \(fullContentFromResponse.contains("\n") ? "YES" : "NO")")
                         
                         DispatchQueue.main.async {
                             self.streamCallbacks?.onChunk(content, fullContentFromResponse)
