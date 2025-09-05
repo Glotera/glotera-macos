@@ -169,6 +169,10 @@ struct QuotaInfo {
             return "Free - \(remainingQuota)/\(monthlyLimit ?? QuotaLimits.FREE_MONTHLY_LIMIT)"
         }
     }
+    
+    var isUnlimitedUser: Bool{
+        return "max" == userType.lowercased()
+    }
 }
 
 // MARK: - Translation Result
@@ -254,6 +258,13 @@ class TranslatorClient: NSObject {
     
     // 配额委托
     weak var quotaDelegate: TranslatorQuotaDelegate?
+    
+    // Track last known quota info for client-side validation
+    private var lastKnownQuotaInfo: QuotaInfo?
+    private let quotaCacheQueue = DispatchQueue(label: "quotaCache", attributes: .concurrent)
+    
+    // Track recent quota dialog to prevent duplicates within same request
+    private var recentQuotaDialogTime: Date?
     
     // 错误通知管理器
     private let errorNotificationManager = ErrorNotificationManager.shared
@@ -360,6 +371,22 @@ class TranslatorClient: NSObject {
     
     // Actual translation implementation
     private func performTranslation(text: String, to language: String, completion: @escaping (Result<TranslationResult, TranslationError>) -> Void) {
+        // Client-side quota validation with server verification before making API call
+        validateQuotaBeforeTranslation { [weak self] quotaError in
+            if let quotaError = quotaError {
+                Logger.info("Translation blocked by quota validation (cache + server verified)")
+                completion(.failure(quotaError))
+                return
+            }
+            
+            // Quota validation passed, proceed with translation
+            self?.performActualTranslation(text: text, to: language, completion: completion)
+        }
+    }
+    
+    // Separated actual translation logic to be called after quota validation
+    private func performActualTranslation(text: String, to language: String, completion: @escaping (Result<TranslationResult, TranslationError>) -> Void) {
+        
         // Record start time for API call timing
         let startTime = CFAbsoluteTimeGetCurrent()
         Logger.info("🚀 Starting translation API call to \(endpoint)")
@@ -448,9 +475,24 @@ class TranslatorClient: NSObject {
                         let quotaInfo = QuotaInfo(from: quotaData)
                         Logger.warn("Quota exceeded for user")
                         
-                        // 通知配额委托
+                        // Update cached quota info for client-side validation
+                        self.updateCachedQuotaInfo(quotaInfo)
+                        
+                        // 通知配额委托 (only if we haven't shown dialog recently)
+                        let shouldShowDialog: Bool
+                        if let lastDialogTime = self.recentQuotaDialogTime {
+                            shouldShowDialog = Date().timeIntervalSince(lastDialogTime) > 3.0
+                        } else {
+                            shouldShowDialog = true
+                        }
+                        
                         DispatchQueue.main.async {
-                            self.quotaDelegate?.didReceiveQuotaExceededError(quotaInfo)
+                            if shouldShowDialog {
+                                self.quotaDelegate?.didReceiveQuotaExceededError(quotaInfo)
+                                self.recentQuotaDialogTime = Date()
+                            } else {
+                                Logger.info("Quota dialog recently shown, skipping duplicate from API response")
+                            }
                             TranslationStatusWindow.shared.hideStatus()
                         }
                         
@@ -490,6 +532,9 @@ class TranslatorClient: NSObject {
                 
                 // 处理配额信息通知
                 if let quotaInfo = result.quotaInfo {
+                    // Update cached quota info for client-side validation
+                    self.updateCachedQuotaInfo(quotaInfo)
+                    
                     DispatchQueue.main.async {
                         self.quotaDelegate?.didReceiveQuotaUpdate(quotaInfo)
                         
@@ -548,6 +593,42 @@ class TranslatorClient: NSObject {
             }
             return
         }
+        
+        // Client-side quota validation with server verification before making API call
+        validateQuotaBeforeTranslation { [weak self] quotaError in
+            if let quotaError = quotaError {
+                Logger.info("Stream translation blocked by quota validation (cache + server verified)")
+                
+                // Show immediate status feedback
+                DispatchQueue.main.async {
+                    TranslationStatusWindow.shared.showFailure()
+                }
+                
+                DispatchQueue.main.async {
+                    if case .quotaExceeded(let quotaInfo) = quotaError {
+                        onError(quotaInfo.quotaStatusMessage ?? "Translation quota exceeded - please upgrade")
+                    } else {
+                        onError("Translation quota exceeded - please upgrade")
+                    }
+                }
+                return
+            }
+            
+            // Quota validation passed, proceed with stream translation
+            self?.performActualStreamTranslation(text: text, to: to, mousePoint: mousePoint, onChunk: onChunk, onComplete: onComplete, onError: onError)
+        }
+    }
+    
+    // Separated actual stream translation logic to be called after quota validation
+    private func performActualStreamTranslation(
+        text: String, 
+        to: String,
+        mousePoint: CGPoint?,
+        onChunk: @escaping (String, String) -> Void,
+        onComplete: @escaping (String?, QuotaInfo?) -> Void,
+        onError: @escaping (String) -> Void
+    ) {
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         
         Logger.info("Starting stream translation: text=\(text), to=\(to)")
         
@@ -777,8 +858,15 @@ class TranslatorClient: NSObject {
         case .authenticationRequired:
             // Authentication errors are handled by LoginManager and UserManager
             return
-        case .quotaExceeded:
-            // Quota errors are handled by QuotaAlertWindow
+        case .quotaExceeded(let quotaInfo):
+            // Quota errors are handled by QuotaAlertWindow, but also show immediate feedback
+            DispatchQueue.main.async {
+                // Note: Don't call quotaDelegate here as it may have already been called during validation
+                // The QuotaAlertWindow has cooldown logic to prevent duplicate dialogs
+                
+                // Show brief status message for immediate user feedback
+                TranslationStatusWindow.shared.showFailure()
+            }
             return
         case .networkError, .serverError, .parseError:
             // Network and server errors show friendly reminders
@@ -823,6 +911,29 @@ class TranslatorClient: NSObject {
         completion: @escaping (Result<String, TranslationError>) -> Void
     ) {
         Logger.debug("Starting chat: message=\(message)")
+        
+        // Client-side quota validation with server verification before making API call
+        validateQuotaBeforeTranslation { [weak self] quotaError in
+            if let quotaError = quotaError {
+                Logger.info("Chat blocked by quota validation (cache + server verified)")
+                completion(.failure(quotaError))
+                return
+            }
+            
+            // Quota validation passed, proceed with chat
+            self?.performActualChat(message: message, originalText: originalText, translatedText: translatedText, conversationHistory: conversationHistory, onStreamUpdate: onStreamUpdate, completion: completion)
+        }
+    }
+    
+    // Separated actual chat logic to be called after quota validation
+    private func performActualChat(
+        message: String,
+        originalText: String,
+        translatedText: String,
+        conversationHistory: [(userMessage: String, aiResponse: String)],
+        onStreamUpdate: @escaping (String) -> Void,
+        completion: @escaping (Result<String, TranslationError>) -> Void
+    ) {
         
         // Create chat endpoint URL
         let chatEndpoint = EnvironmentManager.shared.chatURL 
@@ -914,6 +1025,80 @@ class TranslatorClient: NSObject {
     
     deinit {
         NotificationCenter.default.removeObserver(self)
+    }
+    
+    // MARK: - Quota Cache Management
+    
+    private func updateCachedQuotaInfo(_ quotaInfo: QuotaInfo) {
+        quotaCacheQueue.async(flags: .barrier) {
+            self.lastKnownQuotaInfo = quotaInfo
+            Logger.debug("Updated cached quota info: \(quotaInfo.quotaDescription)")
+        }
+    }
+    
+    private func getCachedQuotaInfo() -> QuotaInfo? {
+        return quotaCacheQueue.sync {
+            return lastKnownQuotaInfo
+        }
+    }
+    
+    private func validateQuotaBeforeTranslation(completion: @escaping (TranslationError?) -> Void) {
+        guard let cachedQuota = getCachedQuotaInfo() else {
+            // No cached quota info, allow translation (server will handle quota validation)
+            Logger.debug("No cached quota info, allowing translation")
+            completion(nil)
+            return
+        }
+        
+        // Check if cached quota shows exhaustion
+        // Quota is exhausted if: server explicitly says so OR (remaining is 0 AND user is not Max/unlimited)
+        let cachedQuotaExhausted = cachedQuota.isQuotaExceeded || 
+        (cachedQuota.remainingQuota == 0 && !cachedQuota.isUnlimitedUser)
+        
+        if cachedQuotaExhausted {
+            Logger.info("Cached quota shows exhaustion (remaining: \(cachedQuota.remainingQuota)), verifying with server...")
+            
+            // Double-check with server to ensure quota is actually exhausted
+            self.fetchQuotaInfo { [weak self] result in
+                switch result {
+                case .success(let serverQuota):
+                    // Update cache with fresh server data
+                    self?.updateCachedQuotaInfo(serverQuota)
+                    
+                    let serverQuotaExhausted = serverQuota.isQuotaExceeded || 
+                    (serverQuota.remainingQuota == 0 && !serverQuota.isUnlimitedUser)
+                    
+                    if serverQuotaExhausted {
+                        Logger.info("Server confirmed quota exhaustion (remaining: \(serverQuota.remainingQuota))")
+                        
+                        // Trigger quota exceeded dialog and mark recent dialog time
+                        DispatchQueue.main.async {
+                            self?.quotaDelegate?.didReceiveQuotaExceededError(serverQuota)
+                        }
+                        self?.recentQuotaDialogTime = Date()
+                        
+                        completion(.quotaExceeded(serverQuota))
+                    } else {
+                        Logger.info("Server shows quota available (remaining: \(serverQuota.remainingQuota)), cached data was stale")
+                        completion(nil)
+                    }
+                    
+                case .failure(let error):
+                    Logger.warn("Failed to verify quota with server: \(error), using cached data as fallback")
+                    
+                    // If server check fails, use cached data as fallback
+                    DispatchQueue.main.async {
+                        self?.quotaDelegate?.didReceiveQuotaExceededError(cachedQuota)
+                    }
+                    self?.recentQuotaDialogTime = Date()
+                    
+                    completion(.quotaExceeded(cachedQuota))
+                }
+            }
+        } else {
+            Logger.debug("Client-side quota validation passed (remaining: \(cachedQuota.remainingQuota))")
+            completion(nil)
+        }
     }
 }
 
@@ -1336,6 +1521,9 @@ extension TranslatorClient: URLSessionDataDelegate {
                         quotaInfo = QuotaInfo(from: quotaData)
                         Logger.info("Stream quota info: \(quotaInfo!.quotaDescription)")
                         
+                        // Update cached quota info for client-side validation
+                        self.updateCachedQuotaInfo(quotaInfo!)
+                        
                         DispatchQueue.main.async {
                             self.quotaDelegate?.didReceiveQuotaUpdate(quotaInfo!)
                             
@@ -1448,6 +1636,9 @@ extension TranslatorClient {
                     if let quotaData = json?["quota_info"] as? [String: Any] {
                         let quotaInfo = QuotaInfo(from: quotaData)
                         Logger.info("Quota info fetched successfully: \(quotaInfo.quotaDescription)")
+                        
+                        // Update cached quota info for client-side validation
+                        self.updateCachedQuotaInfo(quotaInfo)
                         
                         // Check if response contains updated user info and update local cache
                         // Only update userType from quotaInfo, as other user info rarely changes

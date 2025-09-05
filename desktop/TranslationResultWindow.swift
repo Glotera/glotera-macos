@@ -465,9 +465,7 @@ class TranslationResultWindow: NSWindow {
         alert.beginSheetModal(for: self) { response in
             if response == .alertFirstButtonReturn {
                 // User clicked "Upgrade Now"
-                if let url = URL(string: "https://glotera.ai/pricing") {
-                    NSWorkspace.shared.open(url)
-                }
+                EnvironmentManager.shared.openUpgradePage()
             }
             // User clicked "Cancel" or closed the dialog - do nothing
         }

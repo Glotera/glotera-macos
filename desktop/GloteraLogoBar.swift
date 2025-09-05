@@ -421,27 +421,19 @@ class GloteraLogoBarManager: NSObject {
     private func showUpgradePrompt() {
         DispatchQueue.main.async {
             let alert = NSAlert()
-            alert.messageText = "Upgrade Required"
-            alert.informativeText = "Chat translation is a Pro/Max feature. Please upgrade your subscription to use this functionality."
+            alert.messageText = "Translation Copilot"
+            alert.informativeText = "Translation Copilot for Chat is a Pro/Max feature. Please upgrade your subscription to use this functionality."
             alert.alertStyle = .informational
-            alert.addButton(withTitle: "Learn More")
+            alert.addButton(withTitle: "Upgrade Now")
             alert.addButton(withTitle: "Cancel")
             
             let response = alert.runModal()
             if response == .alertFirstButtonReturn {
                 // Open upgrade page or pricing page
-                self.openUpgradePage()
+                EnvironmentManager.shared.openUpgradePage()
             }
         }
-    }
-    
-    /// Open upgrade page
-    private func openUpgradePage() {
-        // Open the upgrade/pricing page in default browser
-        if let url = URL(string: "https://glotera.ai/pricing") {
-            NSWorkspace.shared.open(url)
-        }
-    }
+    } 
     
     /// Check if logo bar is currently enabled
     func isLogoBarEnabled() -> Bool {

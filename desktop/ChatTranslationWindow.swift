@@ -938,7 +938,7 @@ struct ChatTranslationView: View {
                                     .foregroundColor(.primary)
                                     .multilineTextAlignment(.center)
                                 
-                                Text("Chat translation is available for Pro and Max users")
+                                Text("Translation Copilot for Chat is available for Pro and Max users")
                                     .font(.body)
                                     .foregroundColor(.secondary)
                                     .multilineTextAlignment(.center)
@@ -954,9 +954,7 @@ struct ChatTranslationView: View {
                                 
                                 Button(action: {
                                     // Open upgrade page
-                                    if let url = URL(string: "https://glotera.ai/pricing") {
-                                        NSWorkspace.shared.open(url)
-                                    }
+                                    EnvironmentManager.shared.openUpgradePage()
                                 }) {
                                     Text("Upgrade Now")
                                         .font(.body)
