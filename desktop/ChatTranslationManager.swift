@@ -36,13 +36,16 @@ class ChatTranslationManager: NSObject {
         // logoBarManager.enable()
         // Logger.info("Logo bar manager enabled for all users")
         
-        // Start monitoring only if user has chat translation access
+        // Start monitoring for all users to enable logo bar detection
+        startMonitoring()
+        
+        // Set enabled status based on user access
         if SessionManager.shared.hasChatTranslationAccess() {
-            startMonitoring()
+            isEnabled = true
             Logger.info("Chat translation monitoring started - user has Pro/Max access")
         } else {
             isEnabled = false
-            Logger.info("Chat translation disabled for free user")
+            Logger.info("Chat translation monitoring started - free user (logo bar enabled, translation requires upgrade)")
             
             // Add detailed logging for debugging
             if let user = SessionManager.shared.getCurrentUser() {
@@ -630,8 +633,7 @@ class ChatTranslationManager: NSObject {
     }
     
     private func checkCurrentActiveApp() {
-        guard isEnabled else { return }
-        
+        // Always check for chat apps to enable logo bar, regardless of user access level
         if let activeApp = NSWorkspace.shared.frontmostApplication {
             checkAndHandleAppActivation(activeApp)
         }
@@ -642,17 +644,17 @@ class ChatTranslationManager: NSObject {
         // Store current app info for later use when logo bar is clicked
         currentActiveApp = appInfo
         
-        // Enable logo bar manager to show logo bar on screen edge hover (only if not already enabled)
+        // Always enable logo bar manager for all users (free users will see upgrade prompt when clicking)
         if !logoBarManager.isLogoBarEnabled() {
             logoBarManager.enable()
-            Logger.info("Logo bar enabled for chat app: \(appInfo.appName)")
+            Logger.info("Logo bar enabled for chat app: \(appInfo.appName) (all users)")
         } else {
             Logger.debug("Logo bar already enabled for chat app: \(appInfo.appName)")
         }
         
-        // If user has requested window, re-show it when chat app is activated
-        if isUserRequestedWindow {
-            Logger.info("User has requested window - re-showing translation window for chat app: \(appInfo.appName)")
+        // Only show translation window if user has access and requested it
+        if isEnabled && isUserRequestedWindow {
+            Logger.info("User has access and requested window - re-showing translation window for chat app: \(appInfo.appName)")
             showTranslationWindow()
         }
     }

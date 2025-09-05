@@ -207,4 +207,29 @@ class EnvironmentManager {
         }
         return "en"
     }
+
+    func openUpgradePage() { 
+        let pricingURL = "\(baseURL)/pricing"
+        
+        if let url = URL(string: pricingURL) {
+            NSWorkspace.shared.open(url)
+            Logger.info("Opening pricing page: \(pricingURL)")
+        } else {
+            Logger.error("Invalid pricing URL: \(pricingURL)")
+            
+            // Backup plan - Show pricing information
+            let alert = NSAlert()
+            alert.messageText = "Pricing Information"
+            alert.informativeText = """
+            Please visit the following URL to see pricing:
+            \(pricingURL)
+             
+            
+            Contact support for assistance:
+            support@glotera.ai
+            """
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        }
+    } 
 } 

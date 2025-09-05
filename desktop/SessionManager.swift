@@ -411,11 +411,15 @@ class SessionManager {
     /// Check if current user has access to Follow-up Question feature (Pro/Max only)
     func hasFollowupQuestionAccess() -> Bool {
         guard let user = getCurrentUser() else {
+            Logger.debug("hasFollowupQuestionAccess: No current user found")
             return false
         }
         
+        let hasAccess = user.userType.lowercased() == "pro" || user.userType.lowercased() == "max"
+        Logger.debug("hasFollowupQuestionAccess: User '\(user.username)' with type '\(user.userType)' -> hasAccess: \(hasAccess)")
+        
         // Allow access for pro and enterprise (max) users only
-        return user.userType.lowercased() == "pro" || user.userType.lowercased() == "max"
+        return hasAccess
     }
     
     /// Update only the userType for the current user

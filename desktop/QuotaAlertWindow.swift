@@ -85,9 +85,12 @@ class QuotaAlertWindow: NSWindow {
         alert.addButton(withTitle: "Learn About Pricing")
         alert.addButton(withTitle: "Quit App")
         
-        // 移除应用图标，并防止系统自动附加默认图标
-        alert.icon = nil
-        alert.icon = NSImage(size: NSSize(width: 1, height: 1))
+        // Set info icon for login requirement dialog
+        if let infoIcon = NSImage(systemSymbolName: "info.circle.fill", accessibilityDescription: "Information") {
+            alert.icon = infoIcon
+        } else if let infoIcon = NSImage(named: NSImage.infoName) {
+            alert.icon = infoIcon
+        }
         
         // 确保对话框显示在最前面
         alert.window.level = .modalPanel
@@ -100,7 +103,7 @@ class QuotaAlertWindow: NSWindow {
             UserManager.shared.openLoginPage()
         case .alertSecondButtonReturn:
             // Learn About Pricing
-            self.openPricingPage()
+            EnvironmentManager.shared.openUpgradePage()
         case .alertThirdButtonReturn:
             // Quit App
             Logger.info("User chose to quit app without signing in")
@@ -118,6 +121,15 @@ class QuotaAlertWindow: NSWindow {
             Logger.info("Quota alert window already shown, skipping")
             return
         }
+        
+        // Check cooldown period to prevent duplicate dialogs within 5 seconds
+        let now = Date()
+        if let lastAlert = lastAlertTime, now.timeIntervalSince(lastAlert) < 5.0 {
+            Logger.info("Quota exhausted dialog shown recently, skipping duplicate (cooldown: \(now.timeIntervalSince(lastAlert))s)")
+            return
+        }
+        
+        lastAlertTime = now
         
         // 配额耗尽时，无需再显示后续的低配额警告
         QuotaManager.shared.clearPendingWarnings()
@@ -156,9 +168,12 @@ class QuotaAlertWindow: NSWindow {
         alert.addButton(withTitle: "Upgrade to Pro/Max")
         alert.addButton(withTitle: "Continue") 
         
-        // 移除应用图标，并防止系统自动附加默认图标
-        alert.icon = nil
-        alert.icon = NSImage(size: NSSize(width: 1, height: 1))
+        // Set warning icon for quota warning dialog
+        if let warningIcon = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "Warning") {
+            alert.icon = warningIcon
+        } else if let cautionIcon = NSImage(named: NSImage.cautionName) {
+            alert.icon = cautionIcon
+        }
         
         // 确保对话框显示在最前面
         alert.window.level = .modalPanel
@@ -168,7 +183,7 @@ class QuotaAlertWindow: NSWindow {
         switch response {
         case .alertFirstButtonReturn:
             // Upgrade to Pro
-            self.openUpgradePage()
+            EnvironmentManager.shared.openUpgradePage()
         case .alertSecondButtonReturn:
             // Continue using
             Logger.info("User chose to continue with free quota") 
@@ -181,24 +196,44 @@ class QuotaAlertWindow: NSWindow {
     
     private func showExceededDialog(_ quotaInfo: QuotaInfo) {
         let alert = NSAlert()
-        alert.messageText = "Translation Quota Exceeded"
-        alert.informativeText = """
-        Your free translation quota (\(QuotaLimits.FREE_MONTHLY_LIMIT) times) for this month has been used up.
+        alert.messageText = "Translation Quota Exhausted"
         
-        Upgrade your plan:
-        • Pro: \(QuotaLimits.PRO_MONTHLY_LIMIT) translations
-        • Max: Unlimited translations
-        • Priority customer support
-        • Advanced translation features
-        """
+        // Create more user-friendly message based on user type
+        let quotaMessage: String
+        if quotaInfo.isFreeUser {
+            quotaMessage = """
+            You've used all \(QuotaLimits.FREE_MONTHLY_LIMIT) free translations for this month.
+            
+            🚀 Upgrade to continue translating:
+            • Pro Plan: \(QuotaLimits.PRO_MONTHLY_LIMIT) translations/month
+            • Max Plan: Unlimited translations
+            
+            Your quota will reset next month, or upgrade now for instant access.
+            """
+        } else {
+            quotaMessage = """
+            Your translation quota has been exceeded.
+            
+            Please check your account status or contact support if you believe this is an error.
+            """
+        }
         
-        alert.alertStyle = .critical
+        alert.informativeText = quotaMessage
+        alert.alertStyle = .warning
         alert.addButton(withTitle: "Upgrade Now")
-        alert.addButton(withTitle: "Next Month")
+        alert.addButton(withTitle: "Maybe Later")
         
-        // 移除应用图标，并防止系统自动附加默认图标
-        alert.icon = nil
-        alert.icon = NSImage(size: NSSize(width: 1, height: 1))
+        // Set custom icon for quota exhausted dialog
+        if let customIcon = createQuotaExhaustedIcon() {
+            alert.icon = customIcon
+        } else {
+            // Fallback to system warning icon if custom icon creation fails
+            alert.icon = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "Warning")
+            // If system symbol not available (older macOS), use named system image
+            if alert.icon == nil {
+                alert.icon = NSImage(named: NSImage.cautionName)
+            }
+        }
         
         // 确保对话框显示在最前面
         alert.window.level = .modalPanel
@@ -208,67 +243,18 @@ class QuotaAlertWindow: NSWindow {
         switch response {
         case .alertFirstButtonReturn:
             // Upgrade now
-            self.openUpgradePage()
+            Logger.info("User clicked 'Upgrade Now' for quota exceeded")
+            EnvironmentManager.shared.openUpgradePage()
         case .alertSecondButtonReturn:
-            // Next month
-            Logger.info("User chose to upgrade next month")
+            // Maybe later
+            Logger.info("User clicked 'Maybe Later' for quota exceeded")
         default:
+            Logger.info("User dismissed quota exceeded dialog")
             break
         }
         
         isShowingAlert = false
-    }
-    
- 
-    private func openPricingPage() {
-        let environmentManager = EnvironmentManager.shared
-        let pricingURL = "\(environmentManager.baseURL)/pricing"
-        
-        if let url = URL(string: pricingURL) {
-            NSWorkspace.shared.open(url)
-            Logger.info("Opening pricing page: \(pricingURL)")
-        } else {
-            Logger.error("Invalid pricing URL: \(pricingURL)")
-            
-            // Backup plan - Show pricing information
-            let alert = NSAlert()
-            alert.messageText = "Pricing Information"
-            alert.informativeText = """
-            Please visit the following URL to see pricing:
-            \(pricingURL)
-             
-            
-            Contact support for assistance:
-            support@glotera.ai
-            """
-            alert.addButton(withTitle: "OK")
-            alert.runModal()
-        }
-    }
-    
-    private func openUpgradePage() {
-        let upgradeURL = "https://glotera.ai/pricing"
-        
-        if let url = URL(string: upgradeURL) {
-            NSWorkspace.shared.open(url)
-            Logger.info("Open upgrade page: \(upgradeURL)")
-        } else {
-            Logger.error("Invalid upgrade page URL: \(upgradeURL)")
-            
-            // Backup plan - Show upgrade information
-            let alert = NSAlert()
-            alert.messageText = "Upgrade Information"
-            alert.informativeText = """
-            Please visit the following URL to upgrade to Pro:
-            https://glotera.ai/pricing
-            
-            Or contact support for assistance:
-            support@glotera.ai
-            """
-            alert.addButton(withTitle: "OK")
-            alert.runModal()
-        }
-    }
+    } 
     
     /// 关闭所有翻译相关窗口
     private func closeAllTranslationWindows() {
@@ -294,6 +280,52 @@ class QuotaAlertWindow: NSWindow {
         isShowingAlert = false
         lastAlertTime = nil
         Logger.info("Quota alert state reset")
+    }
+    
+    /// 创建配额耗尽对话框的自定义图标
+    private func createQuotaExhaustedIcon() -> NSImage? {
+        // Try to use system symbol first (macOS 11+)
+        if let systemIcon = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "Warning") {
+            systemIcon.size = NSSize(width: 64, height: 64)
+            return systemIcon
+        }
+        
+        // Fallback to system caution icon for older macOS versions
+        if let cautionIcon = NSImage(named: NSImage.cautionName) {
+            cautionIcon.size = NSSize(width: 64, height: 64)
+            return cautionIcon
+        }
+        
+        // Last resort: create a simple custom icon
+        let image = NSImage(size: NSSize(width: 64, height: 64))
+        image.lockFocus()
+        
+        // Draw a warning triangle
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: 32, y: 10))
+        path.line(to: NSPoint(x: 50, y: 50))
+        path.line(to: NSPoint(x: 14, y: 50))
+        path.close()
+        
+        NSColor.systemOrange.setFill()
+        path.fill()
+        
+        // Draw exclamation mark
+        let exclamationPath = NSBezierPath()
+        exclamationPath.move(to: NSPoint(x: 30, y: 40))
+        exclamationPath.line(to: NSPoint(x: 34, y: 40))
+        exclamationPath.line(to: NSPoint(x: 34, y: 25))
+        exclamationPath.line(to: NSPoint(x: 30, y: 25))
+        exclamationPath.close()
+        
+        let dotPath = NSBezierPath(ovalIn: NSRect(x: 30, y: 20, width: 4, height: 4))
+        
+        NSColor.white.setFill()
+        exclamationPath.fill()
+        dotPath.fill()
+        
+        image.unlockFocus()
+        return image
     }
 }
 
