@@ -356,15 +356,14 @@ notarize_app() {
         NOTARIZE_INFO=$(xcrun notarytool info "$SUBMISSION_ID" \
             --keychain-profile "$KEYCHAIN_PROFILE" 2>/dev/null)
         echo "$NOTARIZE_INFO"
-        STATUS=$(echo "$NOTARIZE_INFO" | grep "status:" | sed 's/.*status: *//' | tr -d '[:space:]')
-        
-        log "Current status: '$STATUS'"
+        STATUS_LINE=$(echo "$NOTARIZE_INFO" | grep "status:")
+        log "Status line: '$STATUS_LINE'"
         log "Full notarization info:"
         echo "$NOTARIZE_INFO" | while IFS= read -r line; do
             log "  $line"
         done
         
-        if [ "$STATUS" = "Accepted" ] || [ "$STATUS" = "accepted" ]; then
+        if echo "$STATUS_LINE" | grep -q "Accepted"; then
             log "Notarization successful! ✅"
             
             # Staple the notarization
@@ -387,14 +386,14 @@ notarize_app() {
             
             return 0
             
-        elif [ "$STATUS" = "Rejected" ] || [ "$STATUS" = "rejected" ] || [ "$STATUS" = "Invalid" ] || [ "$STATUS" = "invalid" ]; then
-            error "Notarization failed with status: $STATUS"
+        elif echo "$STATUS_LINE" | grep -q "Rejected\|Invalid"; then
+            error "Notarization failed with status: $STATUS_LINE"
             log "Getting notarization log..."
             xcrun notarytool log "$SUBMISSION_ID" --keychain-profile "$KEYCHAIN_PROFILE"
             return 1
             
-        elif [ "$STATUS" = "In Progress" ] || [ "$STATUS" = "in progress" ] || [ "$STATUS" = "Pending" ] || [ "$STATUS" = "pending" ]; then
-            log "Notarization still in progress... (Status: $STATUS)"
+        elif echo "$STATUS_LINE" | grep -q "In Progress\|Pending"; then
+            log "Notarization still in progress... (Status: $STATUS_LINE)"
             if [ $ATTEMPT -lt $MAX_ATTEMPTS ]; then
                 log "Waiting 10 minutes before next check..."
                 sleep 600
@@ -529,21 +528,18 @@ handle_continue() {
         log "Raw notarization info:"
         echo "$NOTARIZE_INFO"
         
-        # Extract status more robustly
+        # Extract status line
         STATUS_LINE=$(echo "$NOTARIZE_INFO" | grep "status:")
         log "Status line: '$STATUS_LINE'"
         
-        if [ -n "$STATUS_LINE" ]; then
-            STATUS=$(echo "$STATUS_LINE" | sed 's/.*status: *//' | tr -d '[:space:]')
-            log "Extracted status: '$STATUS'"
-        else
+        if [ -z "$STATUS_LINE" ]; then
             error "Could not find status line in notarization info"
             log "Full notarization info:"
             echo "$NOTARIZE_INFO"
             exit 1
         fi
         
-        if [ "$STATUS" = "Accepted" ] || [ "$STATUS" = "accepted" ]; then
+        if echo "$STATUS_LINE" | grep -q "Accepted"; then
             log "Notarization is successful! Proceeding with stapling..."
             
             # Staple the notarization
@@ -588,20 +584,20 @@ handle_continue() {
                 exit 1
             fi
             
-        elif [ "$STATUS" = "Rejected" ] || [ "$STATUS" = "rejected" ] || [ "$STATUS" = "Invalid" ] || [ "$STATUS" = "invalid" ]; then
-            error "Notarization failed with status: $STATUS"
+        elif echo "$STATUS_LINE" | grep -q "Rejected\|Invalid"; then
+            error "Notarization failed with status: $STATUS_LINE"
             log "Getting notarization log..."
             xcrun notarytool log "$SUBMISSION_ID" --keychain-profile "$KEYCHAIN_PROFILE"
             exit 1
             
-        elif [ "$STATUS" = "In Progress" ] || [ "$STATUS" = "in progress" ] || [ "$STATUS" = "Pending" ] || [ "$STATUS" = "pending" ]; then
-            error "Notarization is still in progress (Status: $STATUS)"
+        elif echo "$STATUS_LINE" | grep -q "In Progress\|Pending"; then
+            error "Notarization is still in progress (Status: $STATUS_LINE)"
             echo ""
             echo "Please wait for notarization to complete, then run this script again with --continue"
             exit 1
             
         else
-            error "Unknown notarization status: $STATUS"
+            error "Unknown notarization status: $STATUS_LINE"
             log "Full notarization info:"
             echo "$NOTARIZE_INFO" | while IFS= read -r line; do
                 log "  $line"
