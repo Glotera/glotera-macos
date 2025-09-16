@@ -42,7 +42,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // Initialize chat translation manager
         _ = ChatTranslationManager.shared
-        
+
+        // Initialize screenshot translation manager with modern hotkeys
+        Logger.info("🔄 About to initialize ScreenshotTranslationManager...")
+        _ = ScreenshotTranslationManager.shared
+        Logger.info("✅ ScreenshotTranslationManager initialization completed")
+
         // Initialize update manager and check for updates
         _ = UpdateManager.shared
         UpdateManager.shared.performFirstLaunchCheck()

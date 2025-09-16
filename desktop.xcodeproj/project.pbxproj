@@ -36,6 +36,11 @@
 		60366E7F2E41F815005AE609 /* WhatsAppMessagesProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60366E7C2E41F815005AE609 /* WhatsAppMessagesProcessor.swift */; };
 		60366E802E41F815005AE609 /* ChatMessagesProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60366E792E41F815005AE609 /* ChatMessagesProcessor.swift */; };
 		60366E812E41F815005AE609 /* ChatMessagesUtil.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60366E7A2E41F815005AE609 /* ChatMessagesUtil.swift */; };
+		603B83852E78259700C0F4D5 /* ScreenshotManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 603B83832E78259600C0F4D5 /* ScreenshotManager.swift */; };
+		603B83862E78259700C0F4D5 /* ImageTranslationWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 603B83822E78259600C0F4D5 /* ImageTranslationWindow.swift */; };
+		603B83872E78259700C0F4D5 /* ImageTranslationHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 603B83812E78259600C0F4D5 /* ImageTranslationHistory.swift */; };
+		603B83882E78259700C0F4D5 /* ScreenshotTranslationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 603B83842E78259600C0F4D5 /* ScreenshotTranslationManager.swift */; };
+		603B83892E78259700C0F4D5 /* HotkeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 603B83802E78259600C0F4D5 /* HotkeyManager.swift */; };
 		608349332E16ACC2008EBB87 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 608349322E16ACC2008EBB87 /* Sparkle */; };
 		608349432E18F981008EBB87 /* SimpleMemoryManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 608349422E18F981008EBB87 /* SimpleMemoryManager.swift */; };
 		60B4B7912E0BA3D800A08883 /* UserManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60B4B7902E0BA3D800A08883 /* UserManager.swift */; };
@@ -108,6 +113,11 @@
 		60366E7A2E41F815005AE609 /* ChatMessagesUtil.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessagesUtil.swift; sourceTree = "<group>"; };
 		60366E7B2E41F815005AE609 /* WeChatMessagesProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeChatMessagesProcessor.swift; sourceTree = "<group>"; };
 		60366E7C2E41F815005AE609 /* WhatsAppMessagesProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhatsAppMessagesProcessor.swift; sourceTree = "<group>"; };
+		603B83802E78259600C0F4D5 /* HotkeyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyManager.swift; sourceTree = "<group>"; };
+		603B83812E78259600C0F4D5 /* ImageTranslationHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageTranslationHistory.swift; sourceTree = "<group>"; };
+		603B83822E78259600C0F4D5 /* ImageTranslationWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageTranslationWindow.swift; sourceTree = "<group>"; };
+		603B83832E78259600C0F4D5 /* ScreenshotManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotManager.swift; sourceTree = "<group>"; };
+		603B83842E78259600C0F4D5 /* ScreenshotTranslationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotTranslationManager.swift; sourceTree = "<group>"; };
 		608349422E18F981008EBB87 /* SimpleMemoryManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimpleMemoryManager.swift; sourceTree = "<group>"; };
 		60B4B78F2E0BA3D800A08883 /* EnvironmentManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnvironmentManager.swift; sourceTree = "<group>"; };
 		60B4B7902E0BA3D800A08883 /* UserManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserManager.swift; sourceTree = "<group>"; };
@@ -233,6 +243,11 @@
 		9BE4ED702E012FF1002AC2AE /* desktop */ = {
 			isa = PBXGroup;
 			children = (
+				603B83802E78259600C0F4D5 /* HotkeyManager.swift */,
+				603B83812E78259600C0F4D5 /* ImageTranslationHistory.swift */,
+				603B83822E78259600C0F4D5 /* ImageTranslationWindow.swift */,
+				603B83832E78259600C0F4D5 /* ScreenshotManager.swift */,
+				603B83842E78259600C0F4D5 /* ScreenshotTranslationManager.swift */,
 				60366E7D2E41F815005AE609 /* chat */,
 				60366E772E40830C005AE609 /* GloteraLogoBar.swift */,
 				602693082E2E09A50046465E /* SelectEventManager.swift */,
@@ -443,6 +458,11 @@
 				3D153861DB83474CB7A5CE30 /* ConfigWindow.swift in Sources */,
 				A1B2C3D4E5F678901234567A /* Logger.swift in Sources */,
 				602693012E2CB9670046465E /* AppleScriptManager.swift in Sources */,
+				603B83852E78259700C0F4D5 /* ScreenshotManager.swift in Sources */,
+				603B83862E78259700C0F4D5 /* ImageTranslationWindow.swift in Sources */,
+				603B83872E78259700C0F4D5 /* ImageTranslationHistory.swift in Sources */,
+				603B83882E78259700C0F4D5 /* ScreenshotTranslationManager.swift in Sources */,
+				603B83892E78259700C0F4D5 /* HotkeyManager.swift in Sources */,
 				C3D4E5F67890123456789ABC /* LoggerExample.swift in Sources */,
 				9BE4ED802E012FF1002AC2AE /* MenuBarController.swift in Sources */,
 				QU0TA5AL3RT4W1ND0W567890 /* QuotaAlertWindow.swift in Sources */,
