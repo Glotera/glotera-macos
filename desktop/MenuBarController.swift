@@ -94,6 +94,25 @@ class MenuBarController: NSObject, NSMenuDelegate {
         logoBarStatusItem.target = self
         debugMenu.addItem(logoBarStatusItem)
         
+        // Screenshot Debug Functions
+        debugMenu.addItem(NSMenuItem.separator())
+        
+        let screenshotDiagnosisItem = NSMenuItem(title: "Screenshot Diagnosis", action: #selector(runScreenshotDiagnosis), keyEquivalent: "")
+        screenshotDiagnosisItem.target = self
+        debugMenu.addItem(screenshotDiagnosisItem)
+        
+        let testImmediateCaptureItem = NSMenuItem(title: "Test Immediate Capture", action: #selector(testImmediateCapture), keyEquivalent: "")
+        testImmediateCaptureItem.target = self
+        debugMenu.addItem(testImmediateCaptureItem)
+        
+        let testWorkflowItem = NSMenuItem(title: "Test Screenshot Workflow", action: #selector(testScreenshotWorkflow), keyEquivalent: "")
+        testWorkflowItem.target = self
+        debugMenu.addItem(testWorkflowItem)
+        
+        let checkPermissionsItem = NSMenuItem(title: "Check Screen Recording Permission", action: #selector(checkScreenRecordingPermission), keyEquivalent: "")
+        checkPermissionsItem.target = self
+        debugMenu.addItem(checkPermissionsItem)
+        
         menu.addItem(debugMenuItem)
         #endif
 
@@ -1117,5 +1136,98 @@ class MenuBarController: NSObject, NSMenuDelegate {
             fetchQuotaInfoIfNeeded()
         }
     }
+    
+    // MARK: - Screenshot Debug Methods
+    
+    #if DEBUG
+    @objc func runScreenshotDiagnosis() {
+        Logger.info("🔍 Running comprehensive screenshot diagnosis...")
+        ScreenshotManager.shared.diagnoseDifferentCaptureMethods()
+        
+        // Show alert to user
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = "Screenshot Diagnosis Complete"
+            alert.informativeText = "Test images have been saved to your Desktop. Check for files starting with 'glotera_test_' to see what each capture method produces."
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        }
+    }
+    
+    @objc func testImmediateCapture() {
+        Logger.info("📸 Testing immediate screenshot capture...")
+        ScreenshotTranslationManager.shared.testImmediateScreenshotCapture()
+        
+        // Show alert to user
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = "Immediate Capture Test Complete"
+            alert.informativeText = "Test image saved to Desktop as 'glotera_immediate_capture_test.png'. This shows what the hotkey would capture right now."
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        }
+    }
+    
+    @objc func testScreenshotWorkflow() {
+        Logger.info("🔄 Testing complete screenshot workflow...")
+        ScreenshotTranslationManager.shared.testFullScreenshotWorkflow()
+        
+        // Show alert to user
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = "Screenshot Workflow Test Complete"
+            alert.informativeText = "Test images saved to Desktop: 'glotera_workflow_precapture.png' and 'glotera_workflow_fullscreen.png' show the comparison between the two capture methods."
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        }
+    }
+    
+    @objc func checkScreenRecordingPermission() {
+        Logger.info("🔒 Checking screen recording permission...")
+        
+        if #available(macOS 10.15, *) {
+            // Test by trying to capture a small area
+            let testRect = CGRect(x: 0, y: 0, width: 10, height: 10)
+            let options: CGWindowListOption = [.optionOnScreenOnly]
+            
+            let hasPermission = CGWindowListCreateImage(testRect, options, kCGNullWindowID, []) != nil
+            
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.messageText = "Screen Recording Permission Status"
+                
+                if hasPermission {
+                    alert.informativeText = "✅ Screen recording permission is granted. Screenshot translation should work properly."
+                    alert.alertStyle = .informational
+                    alert.addButton(withTitle: "OK")
+                } else {
+                    alert.informativeText = "❌ Screen recording permission is NOT granted. Please grant permission in System Preferences > Security & Privacy > Privacy > Screen Recording for screenshot translation to work."
+                    alert.alertStyle = .warning
+                    alert.addButton(withTitle: "Open System Preferences")
+                    alert.addButton(withTitle: "Cancel")
+                }
+                
+                let response = alert.runModal()
+                if !hasPermission && response == .alertFirstButtonReturn {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+            }
+        } else {
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.messageText = "Screen Recording Permission Status"
+                alert.informativeText = "ℹ️ Running on macOS < 10.15. Screen recording permissions are not required on this version."
+                alert.alertStyle = .informational
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+            }
+        }
+    }
+    #endif
 
 } 
