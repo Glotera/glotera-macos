@@ -334,13 +334,12 @@ class ScreenshotManager: NSObject {
         Logger.info("🖼️ Image dimensions (pixels): \(imageWidth) x \(imageHeight)")
 
         // CRITICAL: The selection rect is already in pixels (converted by convertScreenRectToImageRect)
-        // No need to scale again - use directly
-        let cropRect = CGRect(
-            x: rect.origin.x,
-            y: rect.origin.y,
-            width: rect.width,
-            height: rect.height
-        )
+        // Align it to pixel boundaries to avoid introducing artifact borders during cropping
+        let pixelAlignedRect = NSIntegralRectWithOptions(rect, .alignAllEdgesNearest)
+        let cropRect = CGRect(x: pixelAlignedRect.origin.x,
+                              y: pixelAlignedRect.origin.y,
+                              width: pixelAlignedRect.width,
+                              height: pixelAlignedRect.height)
 
         Logger.info("📐 Crop rect (pixels): \(cropRect)")
 
@@ -853,18 +852,24 @@ class ScreenshotManager: NSObject {
             height: scaledRect.height
         )
 
+        // Align to the nearest pixel boundaries to avoid subpixel artifacts when cropping
+        let pixelAlignedRect = NSIntegralRectWithOptions(imageRect, .alignAllEdgesNearest)
+
         Logger.info("🖼️ Image rect (pixels): \(imageRect)")
+        Logger.info("🧭 Pixel-aligned rect (pixels): \(pixelAlignedRect)")
 
         // Ensure the rect is within image bounds while keeping its size
-        let maxX = max(0, imageSize.width - imageRect.width)
-        let maxY = max(0, imageHeight - imageRect.height)
+        let width = min(pixelAlignedRect.width, imageSize.width)
+        let height = min(pixelAlignedRect.height, imageHeight)
+        let maxX = max(0, imageSize.width - width)
+        let maxY = max(0, imageHeight - height)
         let clampedRect = NSRect(
-            x: min(max(imageRect.origin.x, 0), maxX),
-            y: min(max(imageRect.origin.y, 0), maxY),
-            width: imageRect.width,
-            height: imageRect.height
+            x: min(max(pixelAlignedRect.origin.x, 0), maxX),
+            y: min(max(pixelAlignedRect.origin.y, 0), maxY),
+            width: width,
+            height: height
         )
-        
+
         Logger.info("🔒 Clamped image rect (pixels): \(clampedRect)")
         return clampedRect
     }
