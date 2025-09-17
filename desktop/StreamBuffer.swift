@@ -118,9 +118,9 @@ class StreamBatchProcessor {
     private var batchTimer: Timer?
     
     // Configuration
-    private let maxBatchSize: Int = 10
-    private let batchTimeoutMs: TimeInterval = 16.67 // ~60 FPS (16.67ms)
-    private let maxProcessingTime: TimeInterval = 8.0 // 8ms max processing per batch
+    private let maxBatchSize: Int = 3  // Smaller batches for faster updates
+    private let batchTimeoutMs: TimeInterval = 8.33 // ~120 FPS (8.33ms) for smoother streaming
+    private let maxProcessingTime: TimeInterval = 4.0 // 4ms max processing per batch
     
     // Performance tracking
     private var processedChunks = 0
@@ -157,11 +157,13 @@ class StreamBatchProcessor {
             Logger.warn("StreamBatchProcessor: Dropped chunk (total dropped: \(droppedChunks))")
         } else {
             PerformanceTelemetry.shared.recordCounter("stream.chunk_added")
+            Logger.info("🔄 StreamBatchProcessor: Added chunk of type \(chunk.type), triggering immediate processing")
         }
-        
-        // Trigger immediate processing for high-priority events
-        if chunk.type.priority <= 1 { // error or end events
-            PerformanceTelemetry.shared.recordCounter("stream.priority_processing_triggered")
+
+        // Trigger immediate processing for ALL chunks to ensure real-time updates
+        // This ensures that content chunks are processed immediately rather than waiting for timer
+        if chunk.type == .chunk || chunk.type.priority <= 1 { // content chunks or high-priority events
+            PerformanceTelemetry.shared.recordCounter("stream.immediate_processing_triggered")
             triggerImmediateProcessing()
         }
     }
@@ -385,6 +387,7 @@ class StreamBatchProcessor {
         for update in updates {
             if case .contentUpdate(let chunk, let fullContent) = update {
                 accumulatedContent = fullContent // Track the latest full content
+                Logger.info("🎬 StreamBatchProcessor applying UI update: chunk='\(chunk.prefix(30))...', fullContent length=\(fullContent.count)")
                 streamCallbacks?.onChunk(chunk, fullContent)
             }
         }
