@@ -170,11 +170,12 @@ class ImageTranslationData: ObservableObject {
         conversationHistory.append(ConversationItem(type: .userQuestion, content: question))
         Logger.info("💬 Added user question: '\(question)'. Total items: \(conversationHistory.count)")
 
-        // Add temporary AI response for streaming updates
-        let aiResponse = ConversationItem(type: .aiResponse, content: "")
+        // Add temporary AI response for streaming updates with loading state
+        var aiResponse = ConversationItem(type: .aiResponse, content: "")
+        aiResponse.isLoading = true
         conversationHistory.append(aiResponse)
         let aiResponseIndex = conversationHistory.count - 1
-        Logger.info("🤖 Added empty AI response at index \(aiResponseIndex). Total items: \(conversationHistory.count)")
+        Logger.info("🤖 Added loading AI response at index \(aiResponseIndex). Total items: \(conversationHistory.count)")
 
         isProcessingFollowUp = true
         followUpQuestion = "" // Clear input immediately
@@ -195,6 +196,10 @@ class ImageTranslationData: ObservableObject {
                     if let strongSelf = self, aiResponseIndex < strongSelf.conversationHistory.count {
                         Logger.info("🔄 Updating AI response at index \(aiResponseIndex) with content length: \(partialResponse.count)")
                         strongSelf.conversationHistory[aiResponseIndex].content = partialResponse
+                        // Clear loading state when we start receiving actual content
+                        if strongSelf.conversationHistory[aiResponseIndex].isLoading && !partialResponse.isEmpty {
+                            strongSelf.conversationHistory[aiResponseIndex].isLoading = false
+                        }
                     } else {
                         Logger.error("❌ Invalid AI response index \(aiResponseIndex), total items: \(self?.conversationHistory.count ?? 0)")
                     }
@@ -209,6 +214,7 @@ class ImageTranslationData: ObservableObject {
                         // Update the specific AI response with final content
                         if let strongSelf = self, aiResponseIndex < strongSelf.conversationHistory.count {
                             strongSelf.conversationHistory[aiResponseIndex].content = response
+                            strongSelf.conversationHistory[aiResponseIndex].isLoading = false
                             Logger.info("✅ Follow-up question completed successfully")
                         }
 
@@ -216,6 +222,7 @@ class ImageTranslationData: ObservableObject {
                         // Update the AI response with error message
                         if let strongSelf = self, aiResponseIndex < strongSelf.conversationHistory.count {
                             strongSelf.conversationHistory[aiResponseIndex].content = "Sorry, I encountered an error: \(error.localizedDescription)"
+                            strongSelf.conversationHistory[aiResponseIndex].isLoading = false
                         }
                         Logger.error("❌ Follow-up question failed: \(error)")
                     }
@@ -263,6 +270,7 @@ struct ConversationItem: Identifiable, Equatable {
     let type: ConversationType
     var content: String
     let timestamp: Date = Date()
+    var isLoading: Bool = false
 
     enum ConversationType {
         case userQuestion
@@ -342,19 +350,12 @@ struct ImageTranslationView: View {
                                     } else {
                                         // Show translation content (either streaming or completed)
                                         HStack(alignment: .top) {
-                                            // Use simple text instead of complex markdown rendering during streaming
-                                            if data.isTranslating {
-                                                Text(data.translationResult)
-                                                    .textSelection(.enabled)
-                                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                                    .fixedSize(horizontal: false, vertical: true)
-                                            } else {
-                                                ImageMarkdownText(markdown: data.translationResult)
-                                                    .textSelection(.enabled)
-                                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                            }
+                                            // Always use Markdown rendering for better formatting, both during streaming and when completed
+                                            ImageMarkdownText(markdown: data.translationResult)
+                                                .textSelection(.enabled)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
 
-                                            // Streaming indicator
+                                            // Streaming indicator - shows real-time rendering is active
                                             if data.isTranslating {
                                                 Text("|")
                                                     .font(.system(size: 14, weight: .medium))
@@ -477,15 +478,46 @@ struct ImageTranslationView: View {
 
                     // Conversation history
                     if !data.conversationHistory.isEmpty {
-                        ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 12) {
-                                ForEach(data.conversationHistory) { item in
-                                    ConversationBubble(item: item)
+                        ScrollViewReader { proxy in
+                            ScrollView {
+                                LazyVStack(alignment: .leading, spacing: 12) {
+                                    ForEach(data.conversationHistory) { item in
+                                        ConversationBubble(item: item)
+                                            .id(item.id) // Add ID for scrolling reference
+                                    }
+
+
+                                    // Bottom anchor for scrolling
+                                    Color.clear
+                                        .frame(height: 1)
+                                        .id("bottom")
+                                }
+                                .padding(.horizontal)
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .onChange(of: data.conversationHistory.count) { _ in
+                                // Auto-scroll to bottom when new messages are added
+                                withAnimation(.easeOut(duration: 0.3)) {
+                                    proxy.scrollTo("bottom", anchor: .bottom)
                                 }
                             }
-                            .padding(.horizontal)
+                            .onChange(of: data.conversationHistory.last?.content) { _ in
+                                // Auto-scroll to bottom during streaming updates
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                    withAnimation(.easeOut(duration: 0.2)) {
+                                        proxy.scrollTo("bottom", anchor: .bottom)
+                                    }
+                                }
+                            }
+                            .onChange(of: data.isProcessingFollowUp) { isProcessing in
+                                // Auto-scroll to bottom when processing starts (for better visibility)
+                                if isProcessing {
+                                    withAnimation(.easeOut(duration: 0.3)) {
+                                        proxy.scrollTo("bottom", anchor: .bottom)
+                                    }
+                                }
+                            }
                         }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else if !data.translationResult.isEmpty && data.errorMessage == nil {
                         // Empty state for follow-up questions
                         VStack(spacing: 16) {
@@ -549,6 +581,44 @@ struct ImageTranslationView: View {
     }
 }
 
+// MARK: - Loading Dots Animation
+struct LoadingDotsView: View {
+    @State private var animationPhase = 0
+    @State private var timer: Timer?
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(0..<3, id: \.self) { index in
+                Circle()
+                    .frame(width: 6, height: 6)
+                    .foregroundColor(.secondary)
+                    .opacity(animationPhase == index ? 1.0 : 0.3)
+                    .animation(.easeInOut(duration: 0.5), value: animationPhase)
+            }
+        }
+        .onAppear {
+            startAnimation()
+        }
+        .onDisappear {
+            stopAnimation()
+        }
+    }
+
+    private func startAnimation() {
+        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+            withAnimation(.easeInOut(duration: 0.5)) {
+                animationPhase = (animationPhase + 1) % 3
+            }
+        }
+    }
+
+    private func stopAnimation() {
+        timer?.invalidate()
+        timer = nil
+        animationPhase = 0
+    }
+}
+
 // MARK: - Conversation Bubble View
 struct ConversationBubble: View {
     let item: ConversationItem
@@ -569,16 +639,44 @@ struct ConversationBubble: View {
             }
 
             VStack(alignment: isUserQuestion ? .trailing : .leading, spacing: 4) {
-                Text(item.content)
+                if item.isLoading && !isUserQuestion {
+                    // Show loading dots for AI responses that are being processed
+                    HStack {
+                        LoadingDotsView()
+                        Spacer()
+                    }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .background(
                         RoundedRectangle(cornerRadius: 12)
-                            .fill(isUserQuestion ?
-                                  Color.blue : Color(NSColor.controlBackgroundColor))
+                            .fill(Color(NSColor.controlBackgroundColor))
                     )
-                    .foregroundColor(isUserQuestion ? .white : .primary)
-                    .textSelection(.enabled)
+                } else {
+                    if isUserQuestion {
+                        // User messages - plain text
+                        Text(item.content)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(Color.blue)
+                            )
+                            .foregroundColor(.white)
+                            .textSelection(.enabled)
+                    } else {
+                        // AI messages - use markdown rendering
+                        VStack(alignment: .leading, spacing: 0) {
+                            FollowupMarkdownText(markdown: item.content)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color(NSColor.controlBackgroundColor))
+                        )
+                        .textSelection(.enabled)
+                    }
+                }
 
                 Text(formatTime(item.timestamp))
                     .font(.caption2)
@@ -668,22 +766,23 @@ struct ImageMarkdownText: View {
                             .fontWeight(.bold)
                             .padding(.vertical, 4)
                     case .paragraph:
-                        if #available(macOS 12.0, *) {
-                            // Try to render with markdown for formatting
-                            if let attributedString = try? AttributedString(markdown: element.content) {
-                                Text(attributedString)
-                                    .multilineTextAlignment(.leading)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            } else {
-                                Text(element.content)
-                                    .multilineTextAlignment(.leading)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        } else {
-                            Text(element.content)
+                        // Use custom text rendering with better bold formatting
+                        renderFormattedText(element.content)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    case .listItem:
+                        // Render list item with bullet point
+                        HStack(alignment: .top, spacing: 8) {
+                            Text("•")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.primary)
+                                .padding(.top, 2)
+
+                            renderFormattedText(element.content)
                                 .multilineTextAlignment(.leading)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
+                        .padding(.vertical, 2)
                     case .separator:
                         Divider()
                             .padding(.vertical, 4)
@@ -694,33 +793,178 @@ struct ImageMarkdownText: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    // Render text with proper bold formatting
+    private func renderFormattedText(_ text: String) -> Text {
+        // Parse bold text patterns manually for better control
+        let parts = parseBoldText(text)
+
+        if parts.count == 1 && !parts[0].isBold {
+            // Simple case: no formatting needed
+            return Text(parts[0].content)
+        }
+
+        // Build attributed text by combining parts
+        var result = Text("")
+        for part in parts {
+            if part.isBold {
+                result = result + Text(part.content).fontWeight(.bold)
+            } else {
+                result = result + Text(part.content)
+            }
+        }
+
+        return result
+    }
+
+    // Parse text for bold formatting (** text **)
+    private func parseBoldText(_ text: String) -> [TextPart] {
+        var parts: [TextPart] = []
+        var currentText = ""
+        var i = text.startIndex
+
+        while i < text.endIndex {
+            if i < text.index(text.endIndex, offsetBy: -1) &&
+               text[i] == "*" && text[text.index(after: i)] == "*" {
+
+                // Found start of potential bold section
+                if !currentText.isEmpty {
+                    parts.append(TextPart(content: currentText, isBold: false))
+                    currentText = ""
+                }
+
+                // Look for closing **
+                let startIndex = text.index(i, offsetBy: 2)
+                var endIndex = startIndex
+                var foundClosing = false
+
+                while endIndex < text.index(text.endIndex, offsetBy: -1) {
+                    if text[endIndex] == "*" && text[text.index(after: endIndex)] == "*" {
+                        foundClosing = true
+                        break
+                    }
+                    endIndex = text.index(after: endIndex)
+                }
+
+                if foundClosing {
+                    // Extract bold content
+                    let boldContent = String(text[startIndex..<endIndex])
+                    if !boldContent.isEmpty {
+                        parts.append(TextPart(content: boldContent, isBold: true))
+                    }
+                    i = text.index(endIndex, offsetBy: 2) // Skip closing **
+                } else {
+                    // No closing **, treat as regular text
+                    currentText.append(text[i])
+                    i = text.index(after: i)
+                }
+            } else {
+                currentText.append(text[i])
+                i = text.index(after: i)
+            }
+        }
+
+        // Add remaining text
+        if !currentText.isEmpty {
+            parts.append(TextPart(content: currentText, isBold: false))
+        }
+
+        return parts.isEmpty ? [TextPart(content: text, isBold: false)] : parts
+    }
+
     // Parse text into markdown elements (headers, paragraphs, separators)
     private func parseMarkdownElements(_ text: String) -> [MarkdownElement] {
         var elements: [MarkdownElement] = []
 
-        // Split by double newlines to get blocks
-        let blocks = text.components(separatedBy: "\n\n")
+        // Split by lines first to better handle headers followed by single newlines
+        let lines = text.components(separatedBy: .newlines)
+        var currentParagraph: [String] = []
 
-        for block in blocks {
-            let trimmedBlock = block.trimmingCharacters(in: .whitespaces)
+        for line in lines {
+            let trimmedLine = line.trimmingCharacters(in: .whitespaces)
 
-            if trimmedBlock.isEmpty {
+            // Check if it's a horizontal rule
+            if trimmedLine == "---" {
+                // Add any accumulated paragraph content first
+                if !currentParagraph.isEmpty {
+                    let paragraphContent = currentParagraph.joined(separator: "\n").trimmingCharacters(in: .whitespaces)
+                    if !paragraphContent.isEmpty {
+                        elements.append(MarkdownElement(type: .paragraph, content: paragraphContent))
+                    }
+                    currentParagraph.removeAll()
+                }
+                elements.append(MarkdownElement(type: .separator, content: ""))
                 continue
             }
 
-            // Check if it's a horizontal rule
-            if trimmedBlock == "---" {
-                elements.append(MarkdownElement(type: .separator, content: ""))
-            } else {
-                // Check if it's a header (starts with #)
-                if trimmedBlock.hasPrefix("#") {
-                    // Extract header content (remove # and trim)
-                    let headerContent = trimmedBlock.replacingOccurrences(of: "^#+\\s*", with: "", options: .regularExpression)
-                    elements.append(MarkdownElement(type: .header, content: headerContent))
-                } else {
-                    // Regular paragraph
-                    elements.append(MarkdownElement(type: .paragraph, content: trimmedBlock))
+            // Check if it's a header (starts with #)
+            if trimmedLine.hasPrefix("#") {
+                // Add any accumulated paragraph content first
+                if !currentParagraph.isEmpty {
+                    let paragraphContent = currentParagraph.joined(separator: "\n").trimmingCharacters(in: .whitespaces)
+                    if !paragraphContent.isEmpty {
+                        elements.append(MarkdownElement(type: .paragraph, content: paragraphContent))
+                    }
+                    currentParagraph.removeAll()
                 }
+
+                // Extract header content (remove # characters and leading whitespace)
+                var headerContent = trimmedLine
+                while headerContent.hasPrefix("#") {
+                    headerContent = String(headerContent.dropFirst())
+                }
+                headerContent = headerContent.trimmingCharacters(in: .whitespaces)
+
+                if !headerContent.isEmpty {
+                    elements.append(MarkdownElement(type: .header, content: headerContent))
+                }
+                continue
+            }
+
+            // Check if it's a list item (starts with -)
+            if trimmedLine.hasPrefix("-") {
+                // Add any accumulated paragraph content first
+                if !currentParagraph.isEmpty {
+                    let paragraphContent = currentParagraph.joined(separator: "\n").trimmingCharacters(in: .whitespaces)
+                    if !paragraphContent.isEmpty {
+                        elements.append(MarkdownElement(type: .paragraph, content: paragraphContent))
+                    }
+                    currentParagraph.removeAll()
+                }
+
+                // Extract list item content safely (remove - and leading whitespace)
+                var listItemContent = ""
+                if trimmedLine.hasPrefix("-") && trimmedLine.count > 1 {
+                    listItemContent = String(trimmedLine.dropFirst()).trimmingCharacters(in: .whitespaces)
+                }
+
+                if !listItemContent.isEmpty {
+                    elements.append(MarkdownElement(type: .listItem, content: listItemContent))
+                }
+                continue
+            }
+
+            // Handle empty lines
+            if trimmedLine.isEmpty {
+                // If we have accumulated content, finalize the current paragraph
+                if !currentParagraph.isEmpty {
+                    let paragraphContent = currentParagraph.joined(separator: "\n").trimmingCharacters(in: .whitespaces)
+                    if !paragraphContent.isEmpty {
+                        elements.append(MarkdownElement(type: .paragraph, content: paragraphContent))
+                    }
+                    currentParagraph.removeAll()
+                }
+                continue
+            }
+
+            // Regular line - add to current paragraph
+            currentParagraph.append(line)
+        }
+
+        // Add any remaining paragraph content
+        if !currentParagraph.isEmpty {
+            let paragraphContent = currentParagraph.joined(separator: "\n").trimmingCharacters(in: .whitespaces)
+            if !paragraphContent.isEmpty {
+                elements.append(MarkdownElement(type: .paragraph, content: paragraphContent))
             }
         }
 
@@ -733,9 +977,176 @@ struct ImageMarkdownText: View {
             case header
             case paragraph
             case separator
+            case listItem
         }
 
         let type: ElementType
         let content: String
+    }
+
+    // Helper structure for text formatting
+    private struct TextPart {
+        let content: String
+        let isBold: Bool
+    }
+}
+
+// MARK: - Follow-up Markdown Text Renderer (from TranslationResultWindow)
+struct FollowupMarkdownText: View {
+    let markdown: String
+
+    // Preprocess content to handle newlines properly
+    private var processedText: String {
+        var result = markdown
+
+        // Handle escaped newlines if they exist
+        if result.contains("\\n") {
+            result = result.replacingOccurrences(of: "\\n", with: "\n")
+        }
+
+        // Normalize different line break formats to standard \n
+        result = result.replacingOccurrences(of: "\r\n", with: "\n")
+        result = result.replacingOccurrences(of: "\r", with: "\n")
+
+        // Normalize smart quotes to standard quotes
+        result = result.replacingOccurrences(of: "\u{201C}", with: "\"")
+        result = result.replacingOccurrences(of: "\u{201D}", with: "\"")
+        result = result.replacingOccurrences(of: "\u{2018}", with: "'")
+        result = result.replacingOccurrences(of: "\u{2019}", with: "'")
+
+        return result
+    }
+
+    var body: some View {
+        // Use custom rendering that properly handles newlines, optimized for streaming
+        renderTextWithNewlines(processedText)
+    }
+
+    // Custom text renderer that properly handles \n and \n\n
+    private func renderTextWithNewlines(_ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(parseTextBlocks(text).enumerated()), id: \.offset) { index, block in
+                switch block.type {
+                case .paragraph:
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(0..<block.lines.count, id: \.self) { lineIndex in
+                            let line = block.lines[lineIndex]
+                            let trimmedLine = line.trimmingCharacters(in: .whitespaces)
+                            if !trimmedLine.isEmpty {
+                                // Check if this line is a list item
+                                if trimmedLine.hasPrefix("-") {
+                                    // Render as list item
+                                    HStack(alignment: .top, spacing: 6) {
+                                        Text("•")
+                                            .font(.system(size: 13, weight: .medium))
+                                            .foregroundColor(.primary)
+                                            .padding(.top, 1)
+
+                                        // Extract list content safely
+                                        let listContent = extractListContent(from: trimmedLine)
+
+                                        if #available(macOS 12.0, *) {
+                                            // Try to render with markdown for formatting
+                                            if let attributedString = try? AttributedString(markdown: listContent) {
+                                                Text(attributedString)
+                                                    .font(.system(size: 13))
+                                                    .multilineTextAlignment(.leading)
+                                                    .fixedSize(horizontal: false, vertical: true)
+                                            } else {
+                                                Text(listContent)
+                                                    .font(.system(size: 13))
+                                                    .multilineTextAlignment(.leading)
+                                                    .fixedSize(horizontal: false, vertical: true)
+                                            }
+                                        } else {
+                                            Text(listContent)
+                                                .font(.system(size: 13))
+                                                .multilineTextAlignment(.leading)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                        }
+                                    }
+                                    .padding(.vertical, 1)
+                                } else {
+                                    // Render as regular line
+                                    if #available(macOS 12.0, *) {
+                                        // Try to render with markdown for formatting
+                                        if let attributedString = try? AttributedString(markdown: line) {
+                                            Text(attributedString)
+                                                .font(.system(size: 13))
+                                                .multilineTextAlignment(.leading)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                        } else {
+                                            Text(line)
+                                                .font(.system(size: 13))
+                                                .multilineTextAlignment(.leading)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                        }
+                                    } else {
+                                        Text(line)
+                                            .font(.system(size: 13))
+                                            .multilineTextAlignment(.leading)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .padding(.bottom, block.isLastParagraph ? 0 : 8) // Add spacing between paragraphs
+
+                case .separator:
+                    Divider()
+                        .padding(.vertical, 8)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // Parse text into blocks handling \n and \n\n correctly
+    private func parseTextBlocks(_ text: String) -> [FollowupTextBlock] {
+        var blocks: [FollowupTextBlock] = []
+
+        // Split by double newlines to get paragraphs
+        let paragraphs = text.components(separatedBy: "\n\n")
+
+        for (index, paragraph) in paragraphs.enumerated() {
+            let trimmedParagraph = paragraph.trimmingCharacters(in: .whitespaces)
+
+            if trimmedParagraph.isEmpty {
+                continue
+            }
+
+            // Check if it's a horizontal rule
+            if trimmedParagraph == "---" {
+                blocks.append(FollowupTextBlock(type: .separator, lines: [], isLastParagraph: false))
+            } else {
+                // Split paragraph by single newlines to get lines
+                let lines = paragraph.components(separatedBy: "\n")
+                let isLast = (index == paragraphs.count - 1)
+                blocks.append(FollowupTextBlock(type: .paragraph, lines: lines, isLastParagraph: isLast))
+            }
+        }
+
+        return blocks
+    }
+
+    // Helper function to extract list content safely
+    private func extractListContent(from line: String) -> String {
+        if line.hasPrefix("-") && line.count > 1 {
+            return String(line.dropFirst()).trimmingCharacters(in: .whitespaces)
+        }
+        return ""
+    }
+
+    // Helper structures for text parsing
+    private struct FollowupTextBlock {
+        enum BlockType {
+            case paragraph
+            case separator
+        }
+
+        let type: BlockType
+        let lines: [String]
+        let isLastParagraph: Bool
     }
 }
