@@ -189,12 +189,20 @@ class ScreenshotManager: NSObject {
         }
 
         // Convert screen coordinates to image coordinates
-        let imageRect = convertScreenRectToImageRect(rect, for: currentScreen, imageSize: currentScreenImage.size)
+        let pixelSize: NSSize
+        if let cgImage = currentScreenImage.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+            pixelSize = NSSize(width: cgImage.width, height: cgImage.height)
+        } else {
+            pixelSize = currentScreenImage.size
+        }
+
+        let imageRect = convertScreenRectToImageRect(rect, for: currentScreen, imageSize: pixelSize)
 
         // DEBUG: Save detailed information about coordinates and image
         Logger.info("🔍 DEBUGGING COORDINATE SYSTEM:")
         Logger.info("📱 Screen frame: \(currentScreen.frame)")
-        Logger.info("🖼️ Image size: \(currentScreenImage.size)")
+        Logger.info("🖼️ Image size (points): \(currentScreenImage.size)")
+        Logger.info("🧮 Image pixel size: \(pixelSize)")
         Logger.info("📦 Screen selection rect: \(rect)")
         Logger.info("🖼️ Image selection rect: \(imageRect)")
         Logger.info("🖱️ Mouse location: \(NSEvent.mouseLocation)")
@@ -818,18 +826,25 @@ class ScreenshotManager: NSObject {
         
         Logger.info("🖥️ Local screen rect (points): \(localRect)")
         
-        // CRITICAL: Convert from points to pixels using backingScaleFactor
-        let scaleFactor = screen.backingScaleFactor
-        Logger.info("📊 Screen scale factor: \(scaleFactor)")
-        
+        // CRITICAL: Convert from points to pixels using the actual captured image size when available
+        let screenFrame = screen.frame
+        let fallbackScale = screen.backingScaleFactor
+        let derivedScaleX = screenFrame.width != 0 ? imageSize.width / screenFrame.width : fallbackScale
+        let derivedScaleY = screenFrame.height != 0 ? imageSize.height / screenFrame.height : fallbackScale
+        let scaleX = derivedScaleX.isFinite && derivedScaleX > 0 ? derivedScaleX : fallbackScale
+        let scaleY = derivedScaleY.isFinite && derivedScaleY > 0 ? derivedScaleY : fallbackScale
+
+        Logger.info("📊 Screen scale factor: \(fallbackScale)")
+        Logger.info("📐 Derived image scale: (x: \(scaleX), y: \(scaleY))")
+
         let scaledRect = NSRect(
-            x: localRect.origin.x * scaleFactor,
-            y: localRect.origin.y * scaleFactor,
-            width: localRect.width * scaleFactor,
-            height: localRect.height * scaleFactor
+            x: localRect.origin.x * scaleX,
+            y: localRect.origin.y * scaleY,
+            width: localRect.width * scaleX,
+            height: localRect.height * scaleY
         )
 
-        let imageHeight = imageSize.height > 0 ? imageSize.height : screen.frame.height * scaleFactor
+        let imageHeight = imageSize.height > 0 ? imageSize.height : screenFrame.height * scaleY
         let flippedY = imageHeight - (scaledRect.origin.y + scaledRect.height)
         let imageRect = NSRect(
             x: scaledRect.origin.x,
@@ -909,9 +924,16 @@ class ScreenshotManager: NSObject {
             Logger.info("✅ Screenshot captured: \(screenshot.size)")
             
             // Convert coordinates
-            let imageRect = convertScreenRectToImageRect(rect, for: currentScreen, imageSize: screenshot.size)
+            let pixelSize: NSSize
+            if let cgImage = screenshot.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+                pixelSize = NSSize(width: cgImage.width, height: cgImage.height)
+            } else {
+                pixelSize = screenshot.size
+            }
+
+            let imageRect = convertScreenRectToImageRect(rect, for: currentScreen, imageSize: pixelSize)
             Logger.info("🖼️ Converted image rect: \(imageRect)")
-            
+
             // Save debug images
             saveDebugImage(screenshot, name: "debug_full_screenshot", rect: imageRect)
             
