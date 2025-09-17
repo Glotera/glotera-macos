@@ -7,43 +7,58 @@ class ScreenshotTranslationManager: NSObject {
 
     private var globalMonitor: Any?
     private var translationWindow: ImageTranslationWindow?
-
+    private var isScreenshotInProgress = false
     override init() {
         super.init()
         Logger.info("📸 Initializing ScreenshotTranslationManager...")
         setupScreenshotHotkey()
     }
 
-    // Setup default screenshot hotkey (Cmd+Shift+S) using modern NSEvent
+    // Setup screenshot hotkey (Shift+Option+S) using modern NSEvent
     private func setupScreenshotHotkey() {
-        Logger.info("🔑 Setting up modern screenshot hotkey (Cmd+Shift+S) using NSEvent...")
+        Logger.info("🔑 Setting up screenshot hotkey (Shift+Option+S) using NSEvent...")
+
+        // Remove existing monitor if any
+        if let existingMonitor = globalMonitor {
+            NSEvent.removeMonitor(existingMonitor)
+        }
 
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             self?.handleKeyEvent(event)
         }
 
         if globalMonitor != nil {
-            Logger.info("✅ NSEvent global monitor installed successfully for screenshot hotkey")
+            Logger.info("✅ NSEvent global monitor installed successfully for screenshot hotkey: Shift+Option+S")
         } else {
             Logger.error("❌ Failed to install NSEvent global monitor for screenshot hotkey")
         }
     }
 
     private func handleKeyEvent(_ event: NSEvent) {
+        // Prevent multiple screenshot processes
+        guard !isScreenshotInProgress else {
+            Logger.warn("Screenshot already in progress, ignoring hotkey")
+            return
+        }
+
         let keyCode = event.keyCode
         let modifierFlags = event.modifierFlags
 
-        // Check for Cmd+Shift+S (keyCode 1 for 'S')
-        if keyCode == 1 && modifierFlags.contains([.command, .shift]) {
-            // Make sure we don't have other modifiers (like Ctrl or Option)
+        // Check for Shift+Option+S (keyCode 1 for 'S')
+        if keyCode == 1 && modifierFlags.contains([.shift, .option]) {
+            // Make sure we don't have other modifiers (like Ctrl or Cmd)
             let relevantModifiers = modifierFlags.intersection([.command, .shift, .control, .option])
-            if relevantModifiers == [.command, .shift] {
-                Logger.info("🚨 Cmd+Shift+S detected - IMMEDIATE screenshot capture!")
+            if relevantModifiers == [.shift, .option] {
+                Logger.info("🚨 Shift+Option+S detected - IMMEDIATE screenshot capture!")
+
+                // Set flag to prevent concurrent screenshots
+                isScreenshotInProgress = true
 
                 // CRITICAL: Capture screen IMMEDIATELY before any other processing
                 // This ensures we get the current foreground application (Chrome)
                 guard let immediateScreenshot = captureScreenImmediately() else {
                     Logger.error("Failed to capture immediate screenshot")
+                    isScreenshotInProgress = false // Reset flag on error
                     return
                 }
 
@@ -211,9 +226,12 @@ class ScreenshotTranslationManager: NSObject {
             return
         }
 
-        // Use the legacy method that captures screenshot at selection time
-        // This ensures we get the current screen state when user selects the area
-        ScreenshotManager.shared.captureScreenshotWithSelection { [weak self] image in
+        // Use the pre-captured image to ensure no selection overlay borders are included
+        // This ensures we get the clean screen state from before the overlay was shown
+        ScreenshotManager.shared.captureScreenshotWithSelectionUsingPreCapture(preCapture) { [weak self] image in
+            // Always reset the screenshot flag when selection is complete
+            self?.isScreenshotInProgress = false
+
             guard let image = image else {
                 Logger.info("Screenshot selection cancelled or failed")
                 return
@@ -334,6 +352,36 @@ class ScreenshotTranslationManager: NSObject {
         // Close any existing translation window
         translationWindow?.close()
         translationWindow = nil
+
+        // Reset screenshot progress flag
+        isScreenshotInProgress = false
+
+        // Force cleanup of screenshot manager
+        ScreenshotManager.shared.cleanup()
+    }
+
+    // Force reset all window states (emergency function)
+    func forceResetWindowStates() {
+        Logger.warn("🚨 Force resetting all window states...")
+
+        // Reset our internal state
+        isScreenshotInProgress = false
+
+        // Force cleanup screenshot manager
+        ScreenshotManager.shared.cleanup()
+
+        // Ensure all Glotera windows are at normal level
+        for window in NSApp.windows {
+            if window.title.contains("Glotera") || window.title.contains("Image Translation") {
+                window.level = .normal
+                Logger.info("Reset window level for: \(window.title)")
+            }
+        }
+
+        // Force application to resign any elevated privileges
+        NSApp.deactivate()
+
+        Logger.info("✅ Window states reset complete")
     }
     
     // MARK: - Debug Methods

@@ -208,7 +208,7 @@ struct ImageTranslationHistoryView: View {
                             .font(.title3)
                             .foregroundColor(.secondary)
 
-                        Text("Use Cmd+Shift+S to capture and translate screenshots")
+                        Text("Use Shift+Option+S to capture and translate screenshots")
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)

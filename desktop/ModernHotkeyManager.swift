@@ -31,20 +31,24 @@ class ModernHotkeyManager: NSObject {
         let keyCode = event.keyCode
         let modifierFlags = event.modifierFlags
 
-        // Check for Cmd+Shift+S (keyCode 1 for 'S')
-        if keyCode == 1 && modifierFlags.contains([.command, .shift]) {
-            Logger.info("🚨 Cmd+Shift+S detected!")
+        // Check for Shift+Option+S (keyCode 1 for 'S')
+        if keyCode == 1 && modifierFlags.contains([.shift, .option]) {
+            // Make sure we don't have other modifiers (like Ctrl or Cmd)
+            let relevantModifiers = modifierFlags.intersection([.command, .shift, .control, .option])
+            if relevantModifiers == [.shift, .option] {
+                Logger.info("🚨 Shift+Option+S detected!")
 
-            if let callback = hotkeyCallbacks["screenshot"] {
-                DispatchQueue.main.async {
-                    callback()
+                if let callback = hotkeyCallbacks["screenshot"] {
+                    DispatchQueue.main.async {
+                        callback()
+                    }
                 }
             }
         }
     }
 
     func registerScreenshotHotkey(callback: @escaping () -> Void) -> Bool {
-        Logger.info("🔑 Registering screenshot hotkey (Cmd+Shift+S)...")
+        Logger.info("🔑 Registering screenshot hotkey (Shift+Option+S)...")
         hotkeyCallbacks["screenshot"] = callback
         Logger.info("✅ Screenshot hotkey callback registered")
         return true
@@ -71,7 +75,7 @@ class ModernScreenshotTranslationManager: NSObject {
     }
 
     private func setupScreenshotHotkey() {
-        Logger.info("🔑 Setting up modern screenshot hotkey (Cmd+Shift+S)...")
+        Logger.info("🔑 Setting up modern screenshot hotkey (Shift+Option+S)...")
 
         let success = ModernHotkeyManager.shared.registerScreenshotHotkey { [weak self] in
             Logger.info("🚨 Modern screenshot hotkey triggered!")
