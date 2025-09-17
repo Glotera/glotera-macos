@@ -56,7 +56,17 @@ class ImageTranslationData: ObservableObject {
     @Published var translationResult: String = ""
     @Published var isTranslating: Bool = false
     @Published var errorMessage: String?
-    @Published var selectedTargetLanguage: String = "en"
+    @Published var selectedTargetLanguage: String = "en" {
+        didSet {
+            if oldValue != selectedTargetLanguage && !isInitializing {
+                Logger.info("Target language changed from \(oldValue) to \(selectedTargetLanguage)")
+                // Save the new preferred language to cache
+                ConfigManager.shared.setPreferredLanguage(selectedTargetLanguage)
+                // Start new translation with the selected language
+                startTranslation()
+            }
+        }
+    }
     @Published var conversationHistory: [ConversationItem] = []
     @Published var followUpQuestion: String = ""
     @Published var isProcessingFollowUp: Bool = false
@@ -80,6 +90,8 @@ class ImageTranslationData: ObservableObject {
         ("hi", "हिन्दी")
     ]
 
+    private var isInitializing = true
+
     init(image: NSImage, base64Data: String, savedImageURL: URL?) {
         self.image = image
         self.base64Data = base64Data
@@ -89,6 +101,14 @@ class ImageTranslationData: ObservableObject {
         self.selectedTargetLanguage = ConfigManager.shared.getUserPreferredLanguage()
 
         Logger.info("ImageTranslationData initialized with target language: \(selectedTargetLanguage)")
+
+        // Mark initialization as complete
+        self.isInitializing = false
+
+        // Start translation automatically when initialized
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            self.startTranslation()
+        }
     }
 
     func startTranslation() {
@@ -98,6 +118,8 @@ class ImageTranslationData: ObservableObject {
         isTranslating = true
         errorMessage = nil
         translationResult = ""
+        // Clear previous conversation history when starting new translation
+        conversationHistory.removeAll()
 
         // Use streaming translation for better user experience
         TranslatorClient.shared.translateImageStream(
@@ -105,26 +127,32 @@ class ImageTranslationData: ObservableObject {
             to: selectedTargetLanguage,
             onChunk: { [weak self] chunk, fullContent in
                 Logger.info("📝 Image translation chunk received: chunk='\(chunk.prefix(50))...', fullContent length=\(fullContent.count)")
-                DispatchQueue.main.async {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
                     Logger.info("🔄 Updating UI with fullContent length: \(fullContent.count)")
-                    self?.translationResult = fullContent
+                    // Add safety check to prevent rapid updates
+                    if self.translationResult != fullContent {
+                        self.translationResult = fullContent
+                    }
                 }
             },
             onComplete: { [weak self] result, quotaInfo in
-                DispatchQueue.main.async {
-                    self?.isTranslating = false
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    self.isTranslating = false
                     if let result = result, !result.isEmpty {
-                        self?.translationResult = result
+                        self.translationResult = result
                         Logger.info("Image translation completed successfully")
                     } else {
-                        self?.errorMessage = "Translation completed but no result received"
+                        self.errorMessage = "Translation completed but no result received"
                     }
                 }
             },
             onError: { [weak self] error in
-                DispatchQueue.main.async {
-                    self?.isTranslating = false
-                    self?.errorMessage = error
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    self.isTranslating = false
+                    self.errorMessage = error
                     Logger.error("Image translation failed: \(error)")
                 }
             }
@@ -251,85 +279,9 @@ struct ImageTranslationView: View {
 
     var body: some View {
         HSplitView {
-            // Left side - Image and controls
-            VStack(spacing: 16) {
-                // Image preview
-                VStack {
-                    Text("Screenshot")
-                        .font(.headline)
-                        .foregroundColor(.primary)
-
-                    Button(action: {
-                        showImageFullSize = true
-                    }) {
-                        Image(nsImage: data.image)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(maxWidth: 300, maxHeight: 200)
-                            .cornerRadius(8)
-                            .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                    .help("Click to view full size")
-                }
-
-                // Language selection
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Translate to:")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-
-                    Picker("Target Language", selection: $data.selectedTargetLanguage) {
-                        ForEach(data.availableLanguages, id: \.0) { code, name in
-                            Text(name).tag(code)
-                        }
-                    }
-                    .pickerStyle(MenuPickerStyle())
-                    .disabled(data.isTranslating)
-                }
-
-                // Action buttons
-                VStack(spacing: 8) {
-                    Button(action: {
-                        data.startTranslation()
-                    }) {
-                        HStack {
-                            if data.isTranslating {
-                                ProgressView()
-                                    .scaleEffect(0.8)
-                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                            }
-                            Text(data.isTranslating ? "Translating..." : "Translate Image")
-                                .fontWeight(.medium)
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(data.isTranslating)
-
-                    if data.errorMessage != nil {
-                        Button("Retry") {
-                            data.retryTranslation()
-                        }
-                        .buttonStyle(.bordered)
-                    }
-
-                    if data.savedImageURL != nil {
-                        Button("Show in Finder") {
-                            data.openImageInFinder()
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                }
-
-                Spacer()
-            }
-            .padding()
-            .frame(minWidth: 350, maxWidth: 400)
-
-            // Right side - Translation results and conversation
+            // Left side - Translation results only
             VStack(spacing: 0) {
-                // Translation result area
+                // Translation result area (full height)
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
                         Text("Translation Result")
@@ -344,6 +296,9 @@ struct ImageTranslationView: View {
                         }
                         .buttonStyle(PlainButtonStyle())
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 16)
+                    .padding(.bottom, 8)
 
                     ScrollView {
                         VStack(alignment: .leading, spacing: 16) {
@@ -365,30 +320,66 @@ struct ImageTranslationView: View {
                                 .padding()
                                 .background(Color.red.opacity(0.1))
                                 .cornerRadius(8)
-                            } else if data.isTranslating {
-                                // Loading state
-                                VStack(spacing: 12) {
-                                    HStack {
-                                        ProgressView()
-                                            .scaleEffect(1.2)
-                                        Text("Processing image...")
-                                            .foregroundColor(.secondary)
-                                    }
+                            } else if !data.translationResult.isEmpty || data.isTranslating {
+                                // Translation result with streaming support
+                                VStack(alignment: .leading, spacing: 8) {
+                                    if data.translationResult.isEmpty && data.isTranslating {
+                                        // Initial loading state (no content yet)
+                                        VStack(spacing: 12) {
+                                            HStack {
+                                                ProgressView()
+                                                    .scaleEffect(1.2)
+                                                Text("Processing image...")
+                                                    .foregroundColor(.secondary)
+                                            }
+                                            Text("Please wait while we analyze and translate your screenshot")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                                .multilineTextAlignment(.center)
+                                        }
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 40)
+                                    } else {
+                                        // Show translation content (either streaming or completed)
+                                        HStack(alignment: .top) {
+                                            // Use simple text instead of complex markdown rendering during streaming
+                                            if data.isTranslating {
+                                                Text(data.translationResult)
+                                                    .textSelection(.enabled)
+                                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                                    .fixedSize(horizontal: false, vertical: true)
+                                            } else {
+                                                ImageMarkdownText(markdown: data.translationResult)
+                                                    .textSelection(.enabled)
+                                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                            }
 
-                                    Text("Please wait while we analyze and translate your screenshot")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                        .multilineTextAlignment(.center)
+                                            // Streaming indicator
+                                            if data.isTranslating {
+                                                Text("|")
+                                                    .font(.system(size: 14, weight: .medium))
+                                                    .foregroundColor(.blue)
+                                                    .opacity(0.8)
+                                                    .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: data.isTranslating)
+                                            }
+                                        }
+                                        .padding()
+
+                                        // Streaming status indicator
+                                        if data.isTranslating {
+                                            HStack {
+                                                ProgressView()
+                                                    .scaleEffect(0.6)
+                                                Text("Translating...")
+                                                    .font(.caption)
+                                                    .foregroundColor(.secondary)
+                                                Spacer()
+                                            }
+                                            .padding(.horizontal)
+                                            .padding(.bottom, 8)
+                                        }
+                                    }
                                 }
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 40)
-                            } else if !data.translationResult.isEmpty {
-                                // Translation result with markdown rendering
-                                ImageMarkdownText(data.translationResult)
-                                    .textSelection(.enabled)
-                                    .padding()
-                                    .background(Color(NSColor.controlBackgroundColor))
-                                    .cornerRadius(8)
                             } else {
                                 // Initial state
                                 VStack(spacing: 16) {
@@ -401,7 +392,7 @@ struct ImageTranslationView: View {
                                         .fontWeight(.medium)
                                         .foregroundColor(.primary)
 
-                                    Text("Click 'Translate Image' to get started")
+                                    Text("Select language to start translation")
                                         .foregroundColor(.secondary)
                                 }
                                 .frame(maxWidth: .infinity)
@@ -410,32 +401,119 @@ struct ImageTranslationView: View {
                         }
                         .padding()
                     }
-                    .frame(maxHeight: 300)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity) // Take all available space
                 }
+            }
+            .frame(minWidth: 400)
 
-                Divider()
-
-                // Conversation area for follow-up questions
-                if !data.translationResult.isEmpty && data.errorMessage == nil {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Follow-up Questions")
+            // Right side - Image (1/4 height) and Follow-up Questions (3/4 height)
+            VStack(spacing: 0) {
+                // Image preview section (1/4 of window height)
+                VStack(spacing: 12) {
+                    HStack {
+                        Text("Screenshot")
                             .font(.headline)
                             .foregroundColor(.primary)
 
-                        // Conversation history
-                        if !data.conversationHistory.isEmpty {
-                            ScrollView {
-                                LazyVStack(alignment: .leading, spacing: 12) {
-                                    ForEach(data.conversationHistory) { item in
-                                        ConversationBubble(item: item)
-                                    }
-                                }
-                                .padding(.horizontal)
-                            }
-                            .frame(maxHeight: 200)
-                        }
+                        Spacer()
 
-                        // Input area
+                        // Show in Finder icon button (only show if image is saved)
+                        if data.savedImageURL != nil {
+                            Button(action: {
+                                data.openImageInFinder()
+                            }) {
+                                Image(systemName: "folder")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(.secondary)
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            .help("Show in Finder")
+                        }
+                    }
+
+                    Button(action: {
+                        showImageFullSize = true
+                    }) {
+                        Image(nsImage: data.image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(maxWidth: 280, maxHeight: 140) // Reduced size for 1/4 height
+                            .cornerRadius(8)
+                            .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .help("Click to view full size")
+
+                    // Language selection
+                    Picker("Translate To", selection: $data.selectedTargetLanguage) {
+                        ForEach(data.availableLanguages, id: \.0) { code, name in
+                            Text(name).tag(code)
+                        }
+                    }
+                    .pickerStyle(MenuPickerStyle())
+                    .disabled(data.isTranslating)
+
+                    // Retry button (if there's an error)
+                    if data.errorMessage != nil {
+                        Button("Retry") {
+                            data.retryTranslation()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+                .padding()
+                .frame(height: 200) // Fixed height for 1/4 of typical window
+
+                Divider()
+
+                // Follow-up Questions section (3/4 of remaining height)
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Follow-up Questions")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                        .padding(.horizontal)
+                        .padding(.top)
+
+                    // Conversation history
+                    if !data.conversationHistory.isEmpty {
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 12) {
+                                ForEach(data.conversationHistory) { item in
+                                    ConversationBubble(item: item)
+                                }
+                            }
+                            .padding(.horizontal)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if !data.translationResult.isEmpty && data.errorMessage == nil {
+                        // Empty state for follow-up questions
+                        VStack(spacing: 16) {
+                            Image(systemName: "text.bubble")
+                                .font(.system(size: 32))
+                                .foregroundColor(.secondary)
+
+                            Text("Ask follow-up questions")
+                                .font(.title3)
+                                .fontWeight(.medium)
+                                .foregroundColor(.primary)
+
+                            Text("Get more details about the translation")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding()
+                    } else {
+                        Spacer() // Take up space when no translation available
+                    }
+
+                    // Input area (always at bottom when translation is available)
+                    if !data.translationResult.isEmpty && data.errorMessage == nil {
+                        Divider()
+                            .padding(.horizontal)
+
                         HStack {
                             TextField("Ask a follow-up question...", text: $data.followUpQuestion)
                                 .textFieldStyle(RoundedBorderTextFieldStyle())
@@ -458,13 +536,12 @@ struct ImageTranslationView: View {
                             .buttonStyle(PlainButtonStyle())
                             .disabled(data.followUpQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || data.isProcessingFollowUp)
                         }
+                        .padding()
                     }
-                    .padding()
                 }
-
-                Spacer()
+                .frame(maxWidth: .infinity, maxHeight: .infinity) // Take remaining space (3/4)
             }
-            .frame(minWidth: 400)
+            .frame(minWidth: 350, maxWidth: 400)
         }
         .sheet(isPresented: $showImageFullSize) {
             FullSizeImageView(image: data.image)
@@ -548,64 +625,117 @@ struct FullSizeImageView: View {
     }
 }
 
-// MARK: - Image Translation Markdown Text View
+// MARK: - Enhanced Markdown Text Renderer (copied from TranslationResultWindow)
 struct ImageMarkdownText: View {
-    let content: String
+    let markdown: String
 
-    init(_ content: String) {
-        self.content = content
+    // Preprocess content to handle newlines properly
+    private var processedText: String {
+        var result = markdown
+
+        // Handle escaped newlines if they exist
+        if result.contains("\\n") {
+            result = result.replacingOccurrences(of: "\\n", with: "\n")
+        }
+
+        // Normalize different line break formats to standard \n
+        result = result.replacingOccurrences(of: "\r\n", with: "\n")
+        result = result.replacingOccurrences(of: "\r", with: "\n")
+
+        // Normalize smart quotes to standard quotes
+        result = result.replacingOccurrences(of: "\u{201C}", with: "\"")
+        result = result.replacingOccurrences(of: "\u{201D}", with: "\"")
+        result = result.replacingOccurrences(of: "\u{2018}", with: "'")
+        result = result.replacingOccurrences(of: "\u{2019}", with: "'")
+
+        return result
     }
 
     var body: some View {
-        // Basic markdown rendering - this can be enhanced with a proper markdown library
+        // Use custom rendering that properly handles newlines
+        renderTextWithNewlines(processedText)
+    }
+
+    // Custom text renderer that properly handles markdown headers and formatting
+    private func renderTextWithNewlines(_ text: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            ForEach(parseMarkdown(content), id: \.0) { index, section in
-                Text(section.text)
-                    .font(section.font)
-                    .fontWeight(section.fontWeight)
-                    .foregroundColor(section.color)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            ForEach(Array(parseMarkdownElements(text).enumerated()), id: \.offset) { index, element in
+                Group {
+                    switch element.type {
+                    case .header:
+                        Text(element.content)
+                            .font(.headline)
+                            .fontWeight(.bold)
+                            .padding(.vertical, 4)
+                    case .paragraph:
+                        if #available(macOS 12.0, *) {
+                            // Try to render with markdown for formatting
+                            if let attributedString = try? AttributedString(markdown: element.content) {
+                                Text(attributedString)
+                                    .multilineTextAlignment(.leading)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            } else {
+                                Text(element.content)
+                                    .multilineTextAlignment(.leading)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        } else {
+                            Text(element.content)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    case .separator:
+                        Divider()
+                            .padding(.vertical, 4)
+                    }
+                }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func parseMarkdown(_ text: String) -> [(Int, MarkdownSection)] {
-        let lines = text.components(separatedBy: .newlines)
-        var sections: [(Int, MarkdownSection)] = []
+    // Parse text into markdown elements (headers, paragraphs, separators)
+    private func parseMarkdownElements(_ text: String) -> [MarkdownElement] {
+        var elements: [MarkdownElement] = []
 
-        for (index, line) in lines.enumerated() {
-            let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Split by double newlines to get blocks
+        let blocks = text.components(separatedBy: "\n\n")
 
-            if trimmedLine.hasPrefix("# ") {
-                // H1
-                let text = String(trimmedLine.dropFirst(2))
-                sections.append((index, MarkdownSection(text: text, font: .title, fontWeight: .bold, color: .primary)))
-            } else if trimmedLine.hasPrefix("## ") {
-                // H2
-                let text = String(trimmedLine.dropFirst(3))
-                sections.append((index, MarkdownSection(text: text, font: .title2, fontWeight: .semibold, color: .primary)))
-            } else if trimmedLine.hasPrefix("### ") {
-                // H3
-                let text = String(trimmedLine.dropFirst(4))
-                sections.append((index, MarkdownSection(text: text, font: .title3, fontWeight: .medium, color: .primary)))
-            } else if trimmedLine.hasPrefix("**") && trimmedLine.hasSuffix("**") && trimmedLine.count > 4 {
-                // Bold
-                let text = String(trimmedLine.dropFirst(2).dropLast(2))
-                sections.append((index, MarkdownSection(text: text, font: .body, fontWeight: .bold, color: .primary)))
-            } else if !trimmedLine.isEmpty {
-                // Regular text
-                sections.append((index, MarkdownSection(text: trimmedLine, font: .body, fontWeight: .regular, color: .primary)))
+        for block in blocks {
+            let trimmedBlock = block.trimmingCharacters(in: .whitespaces)
+
+            if trimmedBlock.isEmpty {
+                continue
+            }
+
+            // Check if it's a horizontal rule
+            if trimmedBlock == "---" {
+                elements.append(MarkdownElement(type: .separator, content: ""))
+            } else {
+                // Check if it's a header (starts with #)
+                if trimmedBlock.hasPrefix("#") {
+                    // Extract header content (remove # and trim)
+                    let headerContent = trimmedBlock.replacingOccurrences(of: "^#+\\s*", with: "", options: .regularExpression)
+                    elements.append(MarkdownElement(type: .header, content: headerContent))
+                } else {
+                    // Regular paragraph
+                    elements.append(MarkdownElement(type: .paragraph, content: trimmedBlock))
+                }
             }
         }
 
-        return sections
+        return elements
     }
-}
 
-struct MarkdownSection {
-    let text: String
-    let font: Font
-    let fontWeight: Font.Weight
-    let color: Color
+    // Helper structures for markdown parsing
+    private struct MarkdownElement {
+        enum ElementType {
+            case header
+            case paragraph
+            case separator
+        }
+
+        let type: ElementType
+        let content: String
+    }
 }

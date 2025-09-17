@@ -337,7 +337,7 @@ struct ImageTranslationDetailView: View {
                     // Metadata
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            Text("Target Language:")
+                            Text("Translate To:")
                             Spacer()
                             Text(languageName(for: record.targetLanguage))
                                 .foregroundColor(.secondary)
