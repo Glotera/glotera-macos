@@ -168,50 +168,67 @@ class ScreenshotManager: NSObject {
             return
         }
 
-        Logger.info("Selected area: \(rect), capturing current screen state...")
+        Logger.info("Selected area: \(rect), using pre-captured clean screenshot...")
+
+        // CRITICAL: Use the stored clean screenshot captured BEFORE showing overlay
+        // This ensures we don't include the selection borders in the final image
+        guard let cleanScreenImage = storedScreenImage else {
+            Logger.error("No stored clean screenshot available - falling back to current capture")
+
+            // Fallback: Get the screen that contains the selection area
+            let currentScreen = NSScreen.screens.first { screen in
+                NSMouseInRect(NSPoint(x: rect.origin.x + rect.width/2, y: rect.origin.y + rect.height/2), screen.frame, false)
+            } ?? NSScreen.main ?? NSScreen.screens.first!
+
+            guard let currentScreenImage = captureScreenForSpecificScreen(currentScreen) else {
+                Logger.error("Failed to capture current screen state")
+                completionHandler?(nil)
+                completionHandler = nil
+                return
+            }
+
+            processSelectedArea(rect: rect, screenImage: currentScreenImage, screen: currentScreen)
+            return
+        }
 
         // CRITICAL: Get the screen that contains the selection area, not the mouse location
         // The selection area might be on a different screen than where the mouse currently is
         let currentScreen = NSScreen.screens.first { screen in
             NSMouseInRect(NSPoint(x: rect.origin.x + rect.width/2, y: rect.origin.y + rect.height/2), screen.frame, false)
         } ?? NSScreen.main ?? NSScreen.screens.first!
-        
+
         Logger.info("🎯 Using screen for selection: \(currentScreen.frame)")
         Logger.info("📦 Selection center: (\(rect.origin.x + rect.width/2), \(rect.origin.y + rect.height/2))")
+        Logger.info("✨ Using pre-captured clean screenshot (no overlay borders)")
 
-        // Capture the current screen state AFTER user selection
-        // This ensures we get the actual content the user sees
-        guard let currentScreenImage = captureScreenForSpecificScreen(currentScreen) else {
-            Logger.error("Failed to capture current screen state")
-            completionHandler?(nil)
-            completionHandler = nil
-            return
-        }
+        processSelectedArea(rect: rect, screenImage: cleanScreenImage, screen: currentScreen)
+    }
 
+    private func processSelectedArea(rect: NSRect, screenImage: NSImage, screen: NSScreen) {
         // Convert screen coordinates to image coordinates
         let pixelSize: NSSize
-        if let cgImage = currentScreenImage.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+        if let cgImage = screenImage.cgImage(forProposedRect: nil, context: nil, hints: nil) {
             pixelSize = NSSize(width: cgImage.width, height: cgImage.height)
         } else {
-            pixelSize = currentScreenImage.size
+            pixelSize = screenImage.size
         }
 
-        let imageRect = convertScreenRectToImageRect(rect, for: currentScreen, imageSize: pixelSize)
+        let imageRect = convertScreenRectToImageRect(rect, for: screen, imageSize: pixelSize)
 
         // DEBUG: Save detailed information about coordinates and image
         Logger.info("🔍 DEBUGGING COORDINATE SYSTEM:")
-        Logger.info("📱 Screen frame: \(currentScreen.frame)")
-        Logger.info("🖼️ Image size (points): \(currentScreenImage.size)")
+        Logger.info("📱 Screen frame: \(screen.frame)")
+        Logger.info("🖼️ Image size (points): \(screenImage.size)")
         Logger.info("🧮 Image pixel size: \(pixelSize)")
         Logger.info("📦 Screen selection rect: \(rect)")
         Logger.info("🖼️ Image selection rect: \(imageRect)")
         Logger.info("🖱️ Mouse location: \(NSEvent.mouseLocation)")
 
         // Save the original screenshot with selection rectangle for verification
-        // saveDebugImage(currentScreenImage, name: "original_screenshot", rect: imageRect)
+        // saveDebugImage(screenImage, name: "original_screenshot", rect: imageRect)
 
-        guard let croppedImage = cropImage(currentScreenImage, toRect: imageRect) else {
-            Logger.error("Failed to crop selected area from current screenshot")
+        guard let croppedImage = cropImage(screenImage, toRect: imageRect) else {
+            Logger.error("Failed to crop selected area from clean screenshot")
             completionHandler?(nil)
             completionHandler = nil
             return
@@ -220,12 +237,15 @@ class ScreenshotManager: NSObject {
         // DEBUG: Save the cropped result
         //saveDebugImageSimple(croppedImage, name: "cropped_result")
 
-        Logger.info("Successfully cropped from current screen state with size: \(imageRect)")
+        Logger.info("Successfully cropped from clean screenshot with size: \(imageRect)")
 
         if let handler = completionHandler {
             handler(croppedImage)
             completionHandler = nil
         }
+
+        // Clear stored image after processing
+        storedScreenImage = nil
     }
 
     private func captureFullScreenInternal() -> NSImage? {
@@ -1425,7 +1445,7 @@ class TransparentSelectionOverlayView: NSView {
 
     private func setupTransparentView() {
         self.wantsLayer = true
-        // COMPLETELY transparent background - applications show through
+        // Keep background transparent - we'll handle dark overlay in draw method
         self.layer?.backgroundColor = NSColor.clear.cgColor
         // Enable key events
         self.acceptsTouchEvents = true
@@ -1433,22 +1453,80 @@ class TransparentSelectionOverlayView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
+        // Fill entire background with dark overlay to darken the screen
+        NSColor.black.withAlphaComponent(0.4).setFill()
+        dirtyRect.fill()
 
-        // Only draw selection rectangle border if selection exists
-        // NO background overlay - keep applications fully visible
+        // If we have a selection, cut out the selected area to show it clearly
         if !selectionRect.isEmpty {
-            // Draw selection border with enhanced visibility
-            NSColor.white.setStroke()
-            let borderPath = NSBezierPath(rect: selectionRect)
-            borderPath.lineWidth = 3.0 // Slightly thicker for better visibility
-            borderPath.stroke()
+            // Clear the selected rectangle to remove the dark overlay (make it fully transparent)
+            NSColor.clear.setFill()
+            let context = NSGraphicsContext.current?.cgContext
+            context?.setBlendMode(.clear)
+            selectionRect.fill()
+            context?.setBlendMode(.normal)
 
-            // Add a contrasting inner border for better visibility on any background
-            // NSColor.black.setStroke()
-            // let innerBorderPath = NSBezierPath(rect: selectionRect.insetBy(dx: 1.5, dy: 1.5))
-            // innerBorderPath.lineWidth = 1.0
-            // innerBorderPath.stroke()
+            // Draw selection border with high contrast
+            NSColor.systemBlue.setStroke()
+            let outerBorderPath = NSBezierPath(rect: selectionRect)
+            outerBorderPath.lineWidth = 2.0
+            outerBorderPath.stroke()
+
+            // Add white inner border for better visibility
+            NSColor.white.setStroke()
+            let innerBorderPath = NSBezierPath(rect: selectionRect.insetBy(dx: 1, dy: 1))
+            innerBorderPath.lineWidth = 1.0
+            innerBorderPath.stroke()
+
+            // Add corner handles for visual feedback
+            drawCornerHandles(in: selectionRect)
+
+            // Draw selection size info
+            drawSizeInfo(for: selectionRect)
+        }
+    }
+
+    private func drawSizeInfo(for rect: NSRect) {
+        let width = Int(rect.width)
+        let height = Int(rect.height)
+        let sizeText = "\(width) × \(height)"
+
+        let attributes: [NSAttributedString.Key: Any] = [
+            .foregroundColor: NSColor.white,
+            .backgroundColor: NSColor.black.withAlphaComponent(0.7),
+            .font: NSFont.systemFont(ofSize: 12, weight: .medium)
+        ]
+
+        let attributedString = NSAttributedString(string: sizeText, attributes: attributes)
+        let textSize = attributedString.size()
+
+        // Position the text above the selection rectangle, centered
+        let textX = rect.midX - textSize.width / 2
+        let textY = rect.maxY + 10
+        let textRect = NSRect(x: textX, y: textY, width: textSize.width + 8, height: textSize.height + 4)
+
+        // Draw background
+        NSColor.black.withAlphaComponent(0.7).setFill()
+        NSBezierPath(roundedRect: textRect, xRadius: 4, yRadius: 4).fill()
+
+        // Draw text
+        attributedString.draw(at: NSPoint(x: textX + 4, y: textY + 2))
+    }
+
+    private func drawCornerHandles(in rect: NSRect) {
+        let handleSize: CGFloat = 8.0
+        let cornerHandles = [
+            NSRect(x: rect.minX - handleSize/2, y: rect.minY - handleSize/2, width: handleSize, height: handleSize),
+            NSRect(x: rect.maxX - handleSize/2, y: rect.minY - handleSize/2, width: handleSize, height: handleSize),
+            NSRect(x: rect.minX - handleSize/2, y: rect.maxY - handleSize/2, width: handleSize, height: handleSize),
+            NSRect(x: rect.maxX - handleSize/2, y: rect.maxY - handleSize/2, width: handleSize, height: handleSize)
+        ]
+
+        for handle in cornerHandles {
+            NSColor.systemBlue.setFill()
+            handle.fill()
+            NSColor.white.setStroke()
+            NSBezierPath(rect: handle).stroke()
         }
     }
 

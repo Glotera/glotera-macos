@@ -29,8 +29,11 @@ class ImageTranslationWindow: NSWindow {
         )
 
         self.title = "Glotera AI - Image Translation"
-        self.level = .floating
+        self.level = .normal
         self.isReleasedWhenClosed = false
+
+        // Allow other apps to gain focus when user clicks on them
+        self.hidesOnDeactivate = false
 
         setupContent()
 
@@ -298,11 +301,17 @@ struct ImageTranslationView: View {
 
                         Spacer()
 
-                        Button(action: onClose) {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundColor(.secondary)
+                        Button(action: {
+                            // Copy translation result to clipboard
+                            let pasteboard = NSPasteboard.general
+                            pasteboard.clearContents()
+                            pasteboard.setString(data.translationResult, forType: .string)
+                        }) {
+                            Image(systemName: "doc.on.doc")
+                                .foregroundColor(.blue)
                         }
                         .buttonStyle(PlainButtonStyle())
+                        .help("Copy translation to clipboard")
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 16)
@@ -446,13 +455,19 @@ struct ImageTranslationView: View {
                     .help("Click to view full size")
 
                     // Language selection
-                    Picker("Translate To", selection: $data.selectedTargetLanguage) {
-                        ForEach(data.availableLanguages, id: \.0) { code, name in
-                            Text(name).tag(code)
+                    HStack {
+                        Picker("Translate To", selection: $data.selectedTargetLanguage) {
+                            ForEach(data.availableLanguages, id: \.0) { code, name in
+                                Text(name).tag(code)
+                            }
                         }
+                        .pickerStyle(MenuPickerStyle())
+                        .disabled(data.isTranslating)
+                        .frame(maxWidth: 280) // 调整为合适的宽度（原来的3/4）
+
+                        Spacer() // 增加右边间距
                     }
-                    .pickerStyle(MenuPickerStyle())
-                    .disabled(data.isTranslating)
+                    .padding(.horizontal, 8) // 增加左右边距
 
                     // Retry button (if there's an error)
                     if data.errorMessage != nil {
@@ -543,9 +558,6 @@ struct ImageTranslationView: View {
 
                     // Input area (always at bottom when translation is available)
                     if !data.translationResult.isEmpty && data.errorMessage == nil {
-                        Divider()
-                            .padding(.horizontal)
-
                         HStack {
                             TextField("Ask a follow-up question...", text: $data.followUpQuestion)
                                 .textFieldStyle(RoundedBorderTextFieldStyle())
@@ -568,7 +580,9 @@ struct ImageTranslationView: View {
                             .buttonStyle(PlainButtonStyle())
                             .disabled(data.followUpQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || data.isProcessingFollowUp)
                         }
-                        .padding()
+                        .padding(.horizontal)
+                        .padding(.top, 12)
+                        .padding(.bottom)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity) // Take remaining space (3/4)

@@ -101,12 +101,13 @@ class HotkeyManager: NSObject {
         Logger.info("Unregistered all hotkeys")
     }
 
-    // Helper method to register screenshot translation hotkey (Cmd+Shift+S)
+    // Helper method to register screenshot translation hotkey (Shift+Option+S)
     func registerScreenshotTranslationHotkey(callback: @escaping () -> Void) -> UInt32? {
-        // Key code for 'S' is 1, Cmd+Shift modifiers
+        // Key code for 'S' is 1, Shift+Option modifiers
         let keyCode: UInt32 = 1 // 'S' key
-        let modifiers: UInt32 = UInt32(cmdKey | shiftKey)
+        let modifiers: UInt32 = UInt32(shiftKey | optionKey)
 
+        Logger.info("Registering screenshot hotkey with Carbon: Shift+Option+S")
         return registerHotkey(keyCode: keyCode, modifiers: modifiers, callback: callback)
     }
 
