@@ -822,21 +822,32 @@ class ScreenshotManager: NSObject {
         let scaleFactor = screen.backingScaleFactor
         Logger.info("📊 Screen scale factor: \(scaleFactor)")
         
-        let imageRect = NSRect(
+        let scaledRect = NSRect(
             x: localRect.origin.x * scaleFactor,
             y: localRect.origin.y * scaleFactor,
             width: localRect.width * scaleFactor,
             height: localRect.height * scaleFactor
         )
-        
+
+        let imageHeight = imageSize.height > 0 ? imageSize.height : screen.frame.height * scaleFactor
+        let flippedY = imageHeight - (scaledRect.origin.y + scaledRect.height)
+        let imageRect = NSRect(
+            x: scaledRect.origin.x,
+            y: flippedY,
+            width: scaledRect.width,
+            height: scaledRect.height
+        )
+
         Logger.info("🖼️ Image rect (pixels): \(imageRect)")
-        
-        // Ensure the rect is within image bounds
+
+        // Ensure the rect is within image bounds while keeping its size
+        let maxX = max(0, imageSize.width - imageRect.width)
+        let maxY = max(0, imageHeight - imageRect.height)
         let clampedRect = NSRect(
-            x: max(0, min(imageRect.origin.x, imageSize.width - 1)),
-            y: max(0, min(imageRect.origin.y, imageSize.height - 1)),
-            width: min(imageRect.width, imageSize.width - max(0, imageRect.origin.x)),
-            height: min(imageRect.height, imageSize.height - max(0, imageRect.origin.y))
+            x: min(max(imageRect.origin.x, 0), maxX),
+            y: min(max(imageRect.origin.y, 0), maxY),
+            width: imageRect.width,
+            height: imageRect.height
         )
         
         Logger.info("🔒 Clamped image rect (pixels): \(clampedRect)")
