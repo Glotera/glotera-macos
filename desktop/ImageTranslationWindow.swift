@@ -104,7 +104,9 @@ class ImageTranslationData: ObservableObject {
             base64Data: base64Data,
             to: selectedTargetLanguage,
             onChunk: { [weak self] chunk, fullContent in
+                Logger.info("📝 Image translation chunk received: chunk='\(chunk.prefix(50))...', fullContent length=\(fullContent.count)")
                 DispatchQueue.main.async {
+                    Logger.info("🔄 Updating UI with fullContent length: \(fullContent.count)")
                     self?.translationResult = fullContent
                 }
             },
@@ -138,37 +140,35 @@ class ImageTranslationData: ObservableObject {
 
         // Add user question to conversation history
         conversationHistory.append(ConversationItem(type: .userQuestion, content: question))
+        Logger.info("💬 Added user question: '\(question)'. Total items: \(conversationHistory.count)")
+
+        // Add temporary AI response for streaming updates
+        let aiResponse = ConversationItem(type: .aiResponse, content: "")
+        conversationHistory.append(aiResponse)
+        let aiResponseIndex = conversationHistory.count - 1
+        Logger.info("🤖 Added empty AI response at index \(aiResponseIndex). Total items: \(conversationHistory.count)")
 
         isProcessingFollowUp = true
         followUpQuestion = "" // Clear input immediately
+
+        // Build conversation history from existing messages (exclude the current question and response)
+        let previousHistory = conversationHistory.prefix(conversationHistory.count - 2) // Exclude current Q&A pair
+        let conversationPairs = buildConversationPairs(from: Array(previousHistory))
 
         // Use chat API for follow-up questions
         TranslatorClient.shared.chat(
             message: question,
             originalText: "", // Image translation doesn't have original text
             translatedText: translationResult,
-            conversationHistory: conversationHistory.compactMap { item in
-                if case .userQuestion = item.type {
-                    // Find corresponding AI response
-                    if let index = conversationHistory.firstIndex(of: item),
-                       index + 1 < conversationHistory.count,
-                       case .aiResponse = conversationHistory[index + 1].type {
-                        return (userMessage: item.content, aiResponse: conversationHistory[index + 1].content)
-                    }
-                }
-                return nil
-            },
+            conversationHistory: conversationPairs,
             onStreamUpdate: { [weak self] partialResponse in
                 DispatchQueue.main.async {
-                    // Update the last AI response in real-time
-                    if let lastIndex = self?.conversationHistory.lastIndex(where: { item in
-                        if case .aiResponse = item.type { return true }
-                        return false
-                    }) {
-                        self?.conversationHistory[lastIndex].content = partialResponse
+                    // Update the specific AI response we just created (don't search for last AI response)
+                    if let strongSelf = self, aiResponseIndex < strongSelf.conversationHistory.count {
+                        Logger.info("🔄 Updating AI response at index \(aiResponseIndex) with content length: \(partialResponse.count)")
+                        strongSelf.conversationHistory[aiResponseIndex].content = partialResponse
                     } else {
-                        // Add new AI response
-                        self?.conversationHistory.append(ConversationItem(type: .aiResponse, content: partialResponse))
+                        Logger.error("❌ Invalid AI response index \(aiResponseIndex), total items: \(self?.conversationHistory.count ?? 0)")
                     }
                 }
             },
@@ -178,25 +178,45 @@ class ImageTranslationData: ObservableObject {
 
                     switch result {
                     case .success(let response):
-                        // Ensure the final response is in conversation history
-                        if let lastIndex = self?.conversationHistory.lastIndex(where: { item in
-                            if case .aiResponse = item.type { return true }
-                            return false
-                        }) {
-                            self?.conversationHistory[lastIndex].content = response
-                        } else {
-                            self?.conversationHistory.append(ConversationItem(type: .aiResponse, content: response))
+                        // Update the specific AI response with final content
+                        if let strongSelf = self, aiResponseIndex < strongSelf.conversationHistory.count {
+                            strongSelf.conversationHistory[aiResponseIndex].content = response
+                            Logger.info("✅ Follow-up question completed successfully")
                         }
-                        Logger.info("Follow-up question processed successfully")
 
                     case .failure(let error):
-                        // Add error message to conversation
-                        self?.conversationHistory.append(ConversationItem(type: .aiResponse, content: "Sorry, I encountered an error: \(error.localizedDescription)"))
-                        Logger.error("Follow-up question failed: \(error)")
+                        // Update the AI response with error message
+                        if let strongSelf = self, aiResponseIndex < strongSelf.conversationHistory.count {
+                            strongSelf.conversationHistory[aiResponseIndex].content = "Sorry, I encountered an error: \(error.localizedDescription)"
+                        }
+                        Logger.error("❌ Follow-up question failed: \(error)")
                     }
                 }
             }
         )
+    }
+
+    // Helper method to build conversation pairs from conversation history
+    private func buildConversationPairs(from history: [ConversationItem]) -> [(userMessage: String, aiResponse: String)] {
+        var pairs: [(userMessage: String, aiResponse: String)] = []
+
+        var i = 0
+        while i < history.count - 1 {
+            let currentItem = history[i]
+            if case .userQuestion = currentItem.type {
+                let nextItem = history[i + 1]
+                if case .aiResponse = nextItem.type {
+                    pairs.append((userMessage: currentItem.content, aiResponse: nextItem.content))
+                    i += 2 // Skip both items
+                } else {
+                    i += 1 // Skip lone user question
+                }
+            } else {
+                i += 1 // Skip AI response or continue
+            }
+        }
+
+        return pairs
     }
 
     func retryTranslation() {

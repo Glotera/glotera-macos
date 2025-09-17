@@ -208,7 +208,7 @@ class ScreenshotManager: NSObject {
         Logger.info("🖱️ Mouse location: \(NSEvent.mouseLocation)")
 
         // Save the original screenshot with selection rectangle for verification
-        saveDebugImage(currentScreenImage, name: "original_screenshot", rect: imageRect)
+        // saveDebugImage(currentScreenImage, name: "original_screenshot", rect: imageRect)
 
         guard let croppedImage = cropImage(currentScreenImage, toRect: imageRect) else {
             Logger.error("Failed to crop selected area from current screenshot")
@@ -218,7 +218,7 @@ class ScreenshotManager: NSObject {
         }
 
         // DEBUG: Save the cropped result
-        saveDebugImageSimple(croppedImage, name: "cropped_result")
+        //saveDebugImageSimple(croppedImage, name: "cropped_result")
 
         Logger.info("Successfully cropped from current screen state with size: \(imageRect)")
 
@@ -1445,10 +1445,10 @@ class TransparentSelectionOverlayView: NSView {
             borderPath.stroke()
 
             // Add a contrasting inner border for better visibility on any background
-            NSColor.black.setStroke()
-            let innerBorderPath = NSBezierPath(rect: selectionRect.insetBy(dx: 1.5, dy: 1.5))
-            innerBorderPath.lineWidth = 1.0
-            innerBorderPath.stroke()
+            // NSColor.black.setStroke()
+            // let innerBorderPath = NSBezierPath(rect: selectionRect.insetBy(dx: 1.5, dy: 1.5))
+            // innerBorderPath.lineWidth = 1.0
+            // innerBorderPath.stroke()
         }
     }
 
