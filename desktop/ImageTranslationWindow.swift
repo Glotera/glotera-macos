@@ -77,8 +77,34 @@ class ImageTranslationData: ObservableObject {
     let base64Data: String
     let savedImageURL: URL?
 
-    // Available target languages
-    let availableLanguages = [
+    // Available target languages - computed property to include user preferences
+    var availableLanguages: [(String, String)] {
+        return getAvailableLanguages()
+    }
+
+    private var isInitializing = true
+
+    // Get language name from language code using ConfigManager
+    private func getLanguageNativeName(for code: String) -> String {
+        let languageConfigs = ConfigManager.shared.loadLanguageConfigs()
+        if let config = languageConfigs.first(where: { $0.code == code }) {
+            return config.nativeName
+        }
+
+        // For unknown languages, use the code itself capitalized
+        Logger.debug("Language code '\(code)' not found in configurations, using uppercase code")
+        return code.uppercased()
+    }
+
+    // Get user's preferred language for screenshot translation
+    private func getUserPreferredLanguage() -> String {
+        return ConfigManager.shared.getUserPreferredLanguage()
+    }
+
+    // Get dynamic language list with default languages + user preferred language if not in default list
+    private func getAvailableLanguages() -> [(String, String)] {
+        // Default language list (keep popular languages for screenshot translation)
+        let defaultLanguages = [
         ("en", "English"),
         ("zh", "中文"),
         ("ja", "日本語"),
@@ -93,7 +119,21 @@ class ImageTranslationData: ObservableObject {
         ("hi", "हिन्दी")
     ]
 
-    private var isInitializing = true
+        let preferredLanguage = getUserPreferredLanguage()
+
+        // Check if the preferred language is already in the default list
+        if defaultLanguages.contains(where: { $0.0 == preferredLanguage }) {
+            return defaultLanguages
+        }
+
+        // If not, get the language name from ConfigManager and add it to the beginning
+        let preferredLanguageName = getLanguageNativeName(for: preferredLanguage)
+        var languages = [(preferredLanguage, preferredLanguageName)]
+        languages.append(contentsOf: defaultLanguages)
+
+        Logger.debug("Added preferred language '\(preferredLanguage)' (\(preferredLanguageName)) to screenshot language menu")
+        return languages
+    }
 
     init(image: NSImage, base64Data: String, savedImageURL: URL?) {
         self.image = image
@@ -293,7 +333,7 @@ struct ImageTranslationView: View {
             // Left side - Translation results only
             VStack(spacing: 0) {
                 // Translation result area (full height)
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Text("Translation Result")
                             .font(.headline)
@@ -315,10 +355,10 @@ struct ImageTranslationView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 16)
-                    .padding(.bottom, 8)
+                    .padding(.bottom, 0)
 
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 8) {
                             if let errorMessage = data.errorMessage {
                                 // Error message
                                 VStack(alignment: .leading, spacing: 8) {
@@ -342,10 +382,10 @@ struct ImageTranslationView: View {
                                 VStack(alignment: .leading, spacing: 8) {
                                     if data.translationResult.isEmpty && data.isTranslating {
                                         // Initial loading state (no content yet)
-                                        VStack(spacing: 12) {
+                                        VStack(spacing: 8) {
                                             HStack {
                                                 ProgressView()
-                                                    .scaleEffect(1.2)
+                                                    .scaleEffect(1.0)
                                                 Text("Processing image...")
                                                     .foregroundColor(.secondary)
                                             }
@@ -355,7 +395,7 @@ struct ImageTranslationView: View {
                                                 .multilineTextAlignment(.center)
                                         }
                                         .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 40)
+                                        .padding(.vertical, 20)
                                     } else {
                                         // Show translation content (either streaming or completed)
                                         HStack(alignment: .top) {
@@ -392,9 +432,9 @@ struct ImageTranslationView: View {
                                 }
                             } else {
                                 // Initial state
-                                VStack(spacing: 16) {
+                                VStack(spacing: 12) {
                                     Image(systemName: "photo.on.rectangle.angled")
-                                        .font(.system(size: 48))
+                                        .font(.system(size: 36))
                                         .foregroundColor(.secondary)
 
                                     Text("Ready to translate your screenshot")
@@ -406,7 +446,7 @@ struct ImageTranslationView: View {
                                         .foregroundColor(.secondary)
                                 }
                                 .frame(maxWidth: .infinity)
-                                .padding(.vertical, 40)
+                                .padding(.vertical, 20)
                             }
                         }
                         .padding()
