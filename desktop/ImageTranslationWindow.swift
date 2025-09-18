@@ -757,23 +757,73 @@ struct FullSizeImageView: View {
     let image: NSImage
     @Environment(\.presentationMode) var presentationMode
 
+    // Calculate optimal window size based on image and screen dimensions
+    private var windowSize: (width: CGFloat, height: CGFloat) {
+        let headerHeight: CGFloat = 60 // Height for header with close button
+        let padding: CGFloat = 40 // Extra padding
+
+        // Get screen dimensions
+        guard let screen = NSScreen.main else {
+            return (800, 600) // Fallback size
+        }
+
+        let screenWidth = screen.visibleFrame.width
+        let screenHeight = screen.visibleFrame.height
+
+        // Calculate max usable size (leave some margin from screen edges)
+        let maxWidth = screenWidth * 0.9
+        let maxHeight = screenHeight * 0.9
+
+        // Calculate required window size for original image
+        let requiredWidth = image.size.width + padding
+        let requiredHeight = image.size.height + headerHeight + padding
+
+        // Use original size if it fits on screen, otherwise constrain to screen
+        let finalWidth = min(requiredWidth, maxWidth)
+        let finalHeight = min(requiredHeight, maxHeight)
+
+        return (finalWidth, finalHeight)
+    }
+
     var body: some View {
-        VStack {
+        let size = windowSize
+
+        VStack(spacing: 0) {
+            // Header with close button
             HStack {
+                Text("Original Size: \(Int(image.size.width)) × \(Int(image.size.height))")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
                 Spacer()
+
                 Button("Close") {
                     presentationMode.wrappedValue.dismiss()
                 }
+                .keyboardShortcut(.escape)
             }
             .padding()
+            .background(Color(NSColor.windowBackgroundColor))
 
-            ScrollView([.horizontal, .vertical]) {
+            // Image display - use ScrollView only if image is larger than available space
+            let availableWidth = size.width - 40
+            let availableHeight = size.height - 60 - 40
+
+            if image.size.width <= availableWidth && image.size.height <= availableHeight {
+                // Image fits completely - no scrolling needed
                 Image(nsImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
+                    .frame(width: image.size.width, height: image.size.height)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                // Image is larger than available space - add scrolling
+                ScrollView([.horizontal, .vertical]) {
+                    Image(nsImage: image)
+                        .frame(width: image.size.width, height: image.size.height)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .frame(minWidth: 600, minHeight: 400)
+        .frame(width: size.width, height: size.height)
     }
 }
 

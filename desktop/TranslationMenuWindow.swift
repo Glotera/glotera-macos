@@ -14,31 +14,25 @@ class TranslationMenuWindow: NSWindow {
     private var sourceElementPid: pid_t = 0
     private var currentStreamWindow: TranslationResultWindow?
     
-    // Language selection state management (session-only)
-    private var userSelectedLanguage: String? = nil // User's manual selection in current session
-    private var hasUserInteracted: Bool = false // Track if user has made a manual selection in current session
-    
     // Get the default language for translation menu
     private func getDefaultLanguage() -> String {
-        // If user has manually selected a language in this session, use that
-        if let selectedLanguage = userSelectedLanguage, hasUserInteracted {
-            Logger.debug("Using user selected language in current session: \(selectedLanguage)")
-            return selectedLanguage
-        }
-        
-        // Otherwise use user's preferred language or system language
+        // Use persistent preferred language from ConfigManager
         let preferredLanguage = ConfigManager.shared.getUserPreferredLanguage()
         Logger.debug("Using preferred/system language: \(preferredLanguage)")
-        
+
         // Return the preferred language directly - if it's not in the menu, it will be added dynamically
         return preferredLanguage
     }
-    
-    // Update user's language selection for current session only
+
+    // Update user's language selection (persistent)
     private func updateUserLanguageSelection(_ language: String) {
-        userSelectedLanguage = language
-        hasUserInteracted = true
-        Logger.debug("Updated user language selection for current session: \(language)")
+        // Save to persistent cache using ConfigManager
+        let success = ConfigManager.shared.setPreferredLanguage(language)
+        if success {
+            Logger.debug("Updated user preferred language persistently: \(language)")
+        } else {
+            Logger.warn("Failed to save preferred language: \(language)")
+        }
     }
     
     // Get language name from language code using ConfigManager
