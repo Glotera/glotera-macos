@@ -1175,11 +1175,16 @@ class TransparentSelectionWindow: NSWindow {
         self.acceptsMouseMovedEvents = true
         self.hasShadow = false // No shadow for cleaner appearance
 
+        // CRITICAL: Ensure window can immediately receive mouse events
+        self.hidesOnDeactivate = false
+        self.canHide = false
+
         // Set the transparent overlay as content view
         self.contentView = selectionView
 
-        // CRITICAL: Ensure window can receive key events
+        // CRITICAL: Ensure window can receive key events and mouse events immediately
         self.makeFirstResponder(selectionView)
+        self.makeKeyAndOrderFront(nil)
 
         // Handle selection completion
         selectionView.onSelectionComplete = { [weak self] selectedRect in
@@ -1336,6 +1341,7 @@ class SelectionOverlayView: NSView {
     private func setupView() {
         self.wantsLayer = true
         self.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.3).cgColor
+        // Mouse event handling will be managed by the acceptsFirstMouse method override
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -1365,8 +1371,28 @@ class SelectionOverlayView: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        currentPoint = event.locationInWindow
+        let location = event.locationInWindow
+
+        // If this is the first drag event and we haven't set a start point yet,
+        // initialize the selection from this point (this allows click-and-drag selection)
+        if startPoint == nil {
+            startPoint = location
+            Logger.info("🖱️ Started drag selection at: \(location)")
+        }
+
+        currentPoint = location
         updateSelection()
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        // Allow cursor to move freely when not selecting
+        // This provides better responsiveness and visual feedback
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        // CRITICAL: This allows the view to respond to mouse events immediately
+        // without requiring the user to click first to "activate" the window
+        return true
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -1447,7 +1473,7 @@ class TransparentSelectionOverlayView: NSView {
         self.wantsLayer = true
         // Keep background transparent - we'll handle dark overlay in draw method
         self.layer?.backgroundColor = NSColor.clear.cgColor
-        // Enable key events
+        // Enable key events and mouse events immediately
         self.acceptsTouchEvents = true
         self.becomeFirstResponder()
     }
@@ -1550,14 +1576,32 @@ class TransparentSelectionOverlayView: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        // Use event location directly - no coordinate conversion needed
         let location = event.locationInWindow
+
+        // If this is the first drag event and we haven't set a start point yet,
+        // initialize the selection from this point (this allows click-and-drag selection)
+        if startPoint == nil {
+            startPoint = location
+            Logger.info("🖱️ Started drag selection at: \(location)")
+        }
+
         currentPoint = location
-        
+
         Logger.info("🖱️ Mouse dragged to window location: \(location)")
         Logger.info("🖱️ Current selection rect: \(selectionRect)")
-        
+
         updateSelection()
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        // Allow cursor to move freely when not selecting
+        // This provides better responsiveness and visual feedback
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        // CRITICAL: This allows the view to respond to mouse events immediately
+        // without requiring the user to click first to "activate" the window
+        return true
     }
 
     override func mouseUp(with event: NSEvent) {
