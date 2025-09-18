@@ -2,6 +2,154 @@ import Cocoa
 import Foundation
 import Combine
 
+/// Utility class for mapping between key codes and key strings
+class KeyCodeMapper {
+    /// Convert a key string to its corresponding macOS key code
+    static func getKeyCode(for keyString: String) -> UInt16 {
+        switch keyString.uppercased() {
+        case "A": return 0
+        case "S": return 1
+        case "D": return 2
+        case "F": return 3
+        case "H": return 4
+        case "G": return 5
+        case "Z": return 6
+        case "X": return 7
+        case "C": return 8
+        case "V": return 9
+        case "B": return 11
+        case "Q": return 12
+        case "W": return 13
+        case "E": return 14
+        case "R": return 15
+        case "Y": return 16
+        case "T": return 17
+        case "1": return 18
+        case "2": return 19
+        case "3": return 20
+        case "4": return 21
+        case "6": return 22
+        case "5": return 23
+        case "=": return 24
+        case "9": return 25
+        case "7": return 26
+        case "-": return 27
+        case "8": return 28
+        case "0": return 29
+        case "]": return 30
+        case "O": return 31
+        case "U": return 32
+        case "[": return 33
+        case "I": return 34
+        case "P": return 35
+        case "L": return 37
+        case "J": return 38
+        case "'": return 39
+        case "K": return 40
+        case ";": return 41
+        case "\\": return 42
+        case ",": return 43
+        case "/": return 44
+        case "N": return 45
+        case "M": return 46
+        case ".": return 47
+        case "`": return 50
+        case "F1": return 122
+        case "F2": return 120
+        case "F3": return 99
+        case "F4": return 118
+        case "F5": return 96
+        case "F6": return 97
+        case "F7": return 98
+        case "F8": return 100
+        case "F9": return 101
+        case "F10": return 109
+        case "F11": return 103
+        case "F12": return 111
+        default: return 1 // Default to 'S' key
+        }
+    }
+
+    /// Convert a key code to its corresponding key string
+    static func getKeyString(for keyCode: UInt16) -> String? {
+        switch keyCode {
+        case 0: return "A"
+        case 1: return "S"
+        case 2: return "D"
+        case 3: return "F"
+        case 4: return "H"
+        case 5: return "G"
+        case 6: return "Z"
+        case 7: return "X"
+        case 8: return "C"
+        case 9: return "V"
+        case 11: return "B"
+        case 12: return "Q"
+        case 13: return "W"
+        case 14: return "E"
+        case 15: return "R"
+        case 16: return "Y"
+        case 17: return "T"
+        case 18: return "1"
+        case 19: return "2"
+        case 20: return "3"
+        case 21: return "4"
+        case 22: return "6"
+        case 23: return "5"
+        case 24: return "="
+        case 25: return "9"
+        case 26: return "7"
+        case 27: return "-"
+        case 28: return "8"
+        case 29: return "0"
+        case 30: return "]"
+        case 31: return "O"
+        case 32: return "U"
+        case 33: return "["
+        case 34: return "I"
+        case 35: return "P"
+        case 37: return "L"
+        case 38: return "J"
+        case 39: return "'"
+        case 40: return "K"
+        case 41: return ";"
+        case 42: return "\\"
+        case 43: return ","
+        case 44: return "/"
+        case 45: return "N"
+        case 46: return "M"
+        case 47: return "."
+        case 50: return "`"
+        case 122: return "F1"
+        case 120: return "F2"
+        case 99: return "F3"
+        case 118: return "F4"
+        case 96: return "F5"
+        case 97: return "F6"
+        case 98: return "F7"
+        case 100: return "F8"
+        case 101: return "F9"
+        case 109: return "F10"
+        case 103: return "F11"
+        case 111: return "F12"
+        default: return nil
+        }
+    }
+
+    /// Check if a key string is valid for hotkey use (letters A-Z and numbers 0-9 only)
+    static func isValidHotkeyKey(_ keyString: String) -> Bool {
+        let validKeys = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+        return validKeys.contains(keyString.uppercased())
+    }
+}
+
+// Structure to represent user-configured hotkey
+struct UserHotkey {
+    let keyCode: UInt16
+    let requiredModifiers: NSEvent.ModifierFlags
+    let description: String
+}
+
 class ScreenshotTranslationManager: NSObject {
     static let shared = ScreenshotTranslationManager()
 
@@ -14,9 +162,10 @@ class ScreenshotTranslationManager: NSObject {
         setupScreenshotHotkey()
     }
 
-    // Setup screenshot hotkey (Shift+Option+S) using modern NSEvent
+    // Setup screenshot hotkey using user-configured settings
     private func setupScreenshotHotkey() {
-        Logger.info("🔑 Setting up screenshot hotkey (Shift+Option+S) using NSEvent...")
+        let userHotkey = getUserConfiguredHotkey()
+        Logger.info("🔑 Setting up screenshot hotkey (\(userHotkey.description)) using NSEvent...")
 
         // Remove existing monitor if any
         if let existingMonitor = globalMonitor {
@@ -28,7 +177,7 @@ class ScreenshotTranslationManager: NSObject {
         }
 
         if globalMonitor != nil {
-            Logger.info("✅ NSEvent global monitor installed successfully for screenshot hotkey: Shift+Option+S")
+            Logger.info("✅ NSEvent global monitor installed successfully for screenshot hotkey: \(userHotkey.description)")
         } else {
             Logger.error("❌ Failed to install NSEvent global monitor for screenshot hotkey")
         }
@@ -44,12 +193,15 @@ class ScreenshotTranslationManager: NSObject {
         let keyCode = event.keyCode
         let modifierFlags = event.modifierFlags
 
-        // Check for Shift+Option+S (keyCode 1 for 'S')
-        if keyCode == 1 && modifierFlags.contains([.shift, .option]) {
-            // Make sure we don't have other modifiers (like Ctrl or Cmd)
+        // Get user-configured hotkey settings
+        let userHotkey = getUserConfiguredHotkey()
+
+        // Check if the pressed key matches user's configured hotkey
+        if keyCode == userHotkey.keyCode && modifierFlags.contains(userHotkey.requiredModifiers) {
+            // Make sure we don't have extra modifiers
             let relevantModifiers = modifierFlags.intersection([.command, .shift, .control, .option])
-            if relevantModifiers == [.shift, .option] {
-                Logger.info("🚨 Shift+Option+S detected - IMMEDIATE screenshot capture!")
+            if relevantModifiers == userHotkey.requiredModifiers {
+                Logger.info("🚨 User configured hotkey detected (\(userHotkey.description)) - IMMEDIATE screenshot capture!")
 
                 // Set flag to prevent concurrent screenshots
                 isScreenshotInProgress = true
@@ -68,6 +220,42 @@ class ScreenshotTranslationManager: NSObject {
             }
         }
     }
+
+    // Get user-configured hotkey settings
+    private func getUserConfiguredHotkey() -> UserHotkey {
+        // Load settings from UserDefaults with defaults (Shift+Option+S)
+        let keyString = UserDefaults.standard.string(forKey: "screenshot_hotkey_key") ?? "S"
+        let useCmd = UserDefaults.standard.bool(forKey: "screenshot_hotkey_cmd")
+        let useShift = UserDefaults.standard.object(forKey: "screenshot_hotkey_shift") == nil ? true : UserDefaults.standard.bool(forKey: "screenshot_hotkey_shift")
+        let useOption = UserDefaults.standard.object(forKey: "screenshot_hotkey_option") == nil ? true : UserDefaults.standard.bool(forKey: "screenshot_hotkey_option")
+        let useControl = UserDefaults.standard.bool(forKey: "screenshot_hotkey_control")
+
+        // Convert key string to key code
+        let keyCode = KeyCodeMapper.getKeyCode(for: keyString)
+
+        // Build modifier flags
+        var modifiers: NSEvent.ModifierFlags = []
+        if useCmd { modifiers.insert(.command) }
+        if useShift { modifiers.insert(.shift) }
+        if useOption { modifiers.insert(.option) }
+        if useControl { modifiers.insert(.control) }
+
+        // Build description
+        var components: [String] = []
+        if useControl { components.append("⌃") }
+        if useOption { components.append("⌥") }
+        if useShift { components.append("⇧") }
+        if useCmd { components.append("⌘") }
+        components.append(keyString)
+        let description = components.joined(separator: "")
+
+        return UserHotkey(
+            keyCode: keyCode,
+            requiredModifiers: modifiers,
+            description: description
+        )
+    }
+
 
     // Capture screen immediately on hotkey detection (before any UI changes)
     private func captureScreenImmediately() -> NSImage? {
@@ -339,6 +527,12 @@ class ScreenshotTranslationManager: NSObject {
             alert.addButton(withTitle: "OK")
             alert.runModal()
         }
+    }
+
+    // Reload hotkey settings and reset the global monitor
+    func reloadHotkeySettings() {
+        Logger.info("🔄 Reloading screenshot hotkey settings...")
+        setupScreenshotHotkey()
     }
 
     // Public cleanup method for manual cleanup if needed
