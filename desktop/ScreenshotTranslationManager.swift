@@ -481,18 +481,34 @@ class ScreenshotTranslationManager: NSObject {
 
         // Set up callback to save to history when translation completes
         if let windowData = translationWindow?.imageTranslationData {
+            var hasStoredHistory = false
+
             // Monitor for translation completion to save to history
-            let observation = windowData.$translationResult.sink { [weak self] result in
-                if !result.isEmpty {
-                    // Save successful translation to history
-                    ImageTranslationHistoryManager.shared.addImageTranslation(
-                        image: image,
-                        originalBase64: base64Data,
-                        translationResult: result,
-                        targetLanguage: windowData.selectedTargetLanguage,
-                        savedImageURL: savedImageURL
-                    )
+            let observation = windowData.$translationResult.sink { [weak windowData] result in
+                guard !result.isEmpty,
+                      let data = windowData,
+                      !data.isTranslating,
+                      !hasStoredHistory else {
+                    return
                 }
+
+                hasStoredHistory = true
+                let targetLanguage = data.selectedTargetLanguage
+
+                let base64Snapshot: String? = {
+                    if savedImageURL == nil {
+                        return data.currentBase64Snapshot()
+                    }
+                    return nil
+                }()
+
+                ImageTranslationHistoryManager.shared.addImageTranslation(
+                    image: image,
+                    originalBase64: base64Snapshot,
+                    translationResult: result,
+                    targetLanguage: targetLanguage,
+                    savedImageURL: savedImageURL
+                )
             }
 
             // Store observation to keep it alive (this is a simplified approach)

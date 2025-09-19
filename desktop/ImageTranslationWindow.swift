@@ -78,7 +78,10 @@ class ImageTranslationData: ObservableObject {
     @Published var isProcessingFollowUp: Bool = false
     @Published var translationDisplayElements: [ImageMarkdownElement] = []
 
-    let base64Data: String
+    private let base64AccessQueue = DispatchQueue(label: "com.glotera.imageTranslation.base64", attributes: .concurrent)
+    private var cachedBase64Data: String?
+    private var fullSizeImageCache: NSImage?
+
     let savedImageURL: URL?
     let originalImageSize: NSSize
     let previewImageSize: NSSize
@@ -86,6 +89,63 @@ class ImageTranslationData: ObservableObject {
     // Available target languages - computed property to include user preferences
     var availableLanguages: [(String, String)] {
         return getAvailableLanguages()
+    }
+
+    // MARK: - Base64 Data Management
+    private func getCachedBase64() -> String? {
+        var value: String?
+        base64AccessQueue.sync {
+            value = cachedBase64Data
+        }
+        return value
+    }
+
+    private func setCachedBase64(_ newValue: String?) {
+        base64AccessQueue.sync(flags: .barrier) {
+            cachedBase64Data = newValue
+        }
+    }
+
+    func currentBase64Snapshot() -> String? {
+        return getCachedBase64()
+    }
+
+    private func clearCachedBase64IfPossible() {
+        guard savedImageURL != nil else { return }
+
+        var hadPayload = false
+        base64AccessQueue.sync {
+            if let cached = cachedBase64Data, !cached.isEmpty {
+                hadPayload = true
+            }
+        }
+
+        guard hadPayload else { return }
+
+        setCachedBase64(nil)
+        Logger.debug("Cleared cached base64 data to reduce memory usage")
+    }
+
+    private func obtainBase64Payload() -> String? {
+        if let cached = getCachedBase64(), !cached.isEmpty {
+            return cached
+        }
+
+        guard let savedImageURL else {
+            Logger.error("No cached base64 available and saved image URL missing")
+            return nil
+        }
+
+        do {
+            let fileData = try Data(contentsOf: savedImageURL, options: [.mappedIfSafe])
+            let base64 = fileData.base64EncodedString()
+            setCachedBase64(base64)
+            Logger.info("Loaded base64 payload from saved image for translation retry (data size: \(fileData.count) bytes)")
+            return base64
+        } catch {
+            Logger.error("Failed to read saved image for base64 conversion: \(error)")
+            return nil
+        }
     }
 
     private var isInitializing = true
@@ -158,8 +218,8 @@ class ImageTranslationData: ObservableObject {
         self.image = previewResult.image
         self.previewImageSize = previewResult.size
         self.originalImageSize = originalPixelSize
-        self.base64Data = base64Data
         self.savedImageURL = savedImageURL
+        self.cachedBase64Data = base64Data
 
         // Load user's preferred language from settings
         self.selectedTargetLanguage = ConfigManager.shared.getUserPreferredLanguage()
@@ -179,7 +239,6 @@ class ImageTranslationData: ObservableObject {
     func startTranslation() {
         guard !isTranslating else { return }
 
-        Logger.info("Starting image translation to: \(selectedTargetLanguage)")
         isTranslating = true
         errorMessage = nil
         translationResult = ""
@@ -189,47 +248,66 @@ class ImageTranslationData: ObservableObject {
 
         cancelPendingTranslationRendering()
 
-        // Use streaming translation for better user experience
-        TranslatorClient.shared.translateImageStream(
-            base64Data: base64Data,
-            to: selectedTargetLanguage,
-            onChunk: { [weak self] chunk, fullContent in
-                guard let self = self else { return }
-                Logger.info("📝 Image translation chunk received: chunk='\(chunk.prefix(50))...', fullContent length=\(fullContent.count)")
-                Logger.info("🔄 Queuing UI update with fullContent length: \(fullContent.count)")
-                self.enqueueTranslationContentUpdate(fullContent, isFinal: false)
-            },
-            onComplete: { [weak self] result, quotaInfo in
-                guard let self = self else { return }
-                let finalContent = result ?? self.translationResult
-                self.enqueueTranslationContentUpdate(finalContent, isFinal: true)
+        let targetLanguage = selectedTargetLanguage
 
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+
+            guard let payload = self.obtainBase64Payload() else {
+                Logger.error("Unable to prepare base64 payload for image translation request")
                 DispatchQueue.main.async { [weak self] in
                     guard let self = self else { return }
                     self.isTranslating = false
-                    if let result = result, !result.isEmpty {
-                        Logger.info("Image translation completed successfully")
-                    } else if !self.translationResult.isEmpty {
-                        Logger.info("Image translation completed with streaming content")
-                    } else {
-                        self.errorMessage = "Translation completed but no result received"
-                    }
-
-                    self.cancelPendingTranslationRendering()
+                    self.errorMessage = "Failed to prepare screenshot for translation"
                 }
-            },
-            onError: { [weak self] error in
-                guard let self = self else { return }
-                self.cancelPendingTranslationRendering()
-
-                DispatchQueue.main.async { [weak self] in
-                    guard let self = self else { return }
-                    self.isTranslating = false
-                    self.errorMessage = error
-                    Logger.error("Image translation failed: \(error)")
-                }
+                return
             }
-        )
+
+            Logger.info("Starting image translation to: \(targetLanguage) with payload size: \(payload.count) characters")
+
+            TranslatorClient.shared.translateImageStream(
+                base64Data: payload,
+                to: targetLanguage,
+                onChunk: { [weak self] chunk, fullContent in
+                    guard let self = self else { return }
+                    Logger.info("📝 Image translation chunk received: chunk='\(chunk.prefix(50))...', fullContent length=\(fullContent.count)")
+                    Logger.info("🔄 Queuing UI update with fullContent length: \(fullContent.count)")
+                    self.enqueueTranslationContentUpdate(fullContent, isFinal: false)
+                },
+                onComplete: { [weak self] result, quotaInfo in
+                    guard let self = self else { return }
+                    let finalContent = result ?? self.translationResult
+                    self.enqueueTranslationContentUpdate(finalContent, isFinal: true)
+
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self = self else { return }
+                        self.isTranslating = false
+                        if let result = result, !result.isEmpty {
+                            Logger.info("Image translation completed successfully")
+                        } else if !self.translationResult.isEmpty {
+                            Logger.info("Image translation completed with streaming content")
+                        } else {
+                            self.errorMessage = "Translation completed but no result received"
+                        }
+
+                        self.cancelPendingTranslationRendering()
+                    }
+                },
+                onError: { [weak self] error in
+                    guard let self = self else { return }
+                    self.cancelPendingTranslationRendering()
+
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self = self else { return }
+                        self.isTranslating = false
+                        self.errorMessage = error
+                        Logger.error("Image translation failed: \(error)")
+                    }
+                }
+            )
+
+            self.clearCachedBase64IfPossible()
+        }
     }
 
     private func enqueueTranslationContentUpdate(_ fullContent: String, isFinal: Bool) {
@@ -394,19 +472,28 @@ class ImageTranslationData: ObservableObject {
     }
 
     func loadFullSizeImage() -> NSImage? {
+        if let cached = fullSizeImageCache {
+            Logger.debug("Returning cached full-size image")
+            return cached
+        }
+
         if let savedImageURL,
            let image = ImageTranslationData.loadImage(from: savedImageURL) {
             Logger.debug("Loaded full-size image from saved file: \(savedImageURL.path)")
+            fullSizeImageCache = image
             return image
         }
 
-        if let data = Data(base64Encoded: base64Data, options: .ignoreUnknownCharacters),
+        if let base64 = getCachedBase64(),
+           !base64.isEmpty,
+           let data = Data(base64Encoded: base64, options: .ignoreUnknownCharacters),
            let image = NSImage(data: data) {
-            Logger.debug("Loaded full-size image from base64 data")
+            Logger.debug("Loaded full-size image from cached base64 data")
+            fullSizeImageCache = image
             return image
         }
 
-        Logger.error("Failed to load full-size image from both saved file and base64 data")
+        Logger.error("Failed to load full-size image from available sources")
         return nil
     }
 
