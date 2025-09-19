@@ -38,21 +38,19 @@ class ChatTranslationManager: NSObject {
         
         // Start monitoring for all users to enable logo bar detection
         startMonitoring()
-        
-        // Set enabled status based on user access
-        if SessionManager.shared.hasChatTranslationAccess() {
+
+        // All authenticated users have access to chat translation
+        if SessionManager.shared.isAuthenticated {
             isEnabled = true
-            Logger.info("Chat translation monitoring started - user has Pro/Max access")
-        } else {
-            isEnabled = false
-            Logger.info("Chat translation monitoring started - free user (logo bar enabled, translation requires upgrade)")
-            
+            Logger.info("Chat translation monitoring started - all authenticated users have access")
+
             // Add detailed logging for debugging
             if let user = SessionManager.shared.getCurrentUser() {
                 Logger.info("Current user: \(user.username) (\(user.email)) - Type: \(user.userType)")
-            } else {
-                Logger.info("No current user found - user not logged in")
             }
+        } else {
+            isEnabled = false
+            Logger.info("Chat translation monitoring started - user not authenticated")
         }
         
         // Listen for user login/logout to update feature access
@@ -644,7 +642,7 @@ class ChatTranslationManager: NSObject {
         // Store current app info for later use when logo bar is clicked
         currentActiveApp = appInfo
         
-        // Always enable logo bar manager for all users (free users will see upgrade prompt when clicking)
+        // Always enable logo bar manager for all users
         if !logoBarManager.isLogoBarEnabled() {
             logoBarManager.enable()
             Logger.info("Logo bar enabled for chat app: \(appInfo.appName) (all users)")
