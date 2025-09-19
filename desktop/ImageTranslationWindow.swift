@@ -1,5 +1,6 @@
 import Cocoa
 import SwiftUI
+import ImageIO
 
 class ImageTranslationWindow: NSWindow {
     private var hostingView: NSHostingView<ImageTranslationView>?
@@ -140,9 +141,17 @@ class ImageTranslationData: ObservableObject {
     }
 
     init(image: NSImage, base64Data: String, savedImageURL: URL?) {
-        self.originalImageSize = ImageTranslationData.resolvePixelSize(for: image)
-        self.image = ImageTranslationData.preparePreviewImage(from: image)
-        self.previewImageSize = ImageTranslationData.resolvePixelSize(for: self.image)
+        let originalPixelSize = ImageTranslationData.resolvePixelSize(for: image)
+        let previewResult = ImageTranslationData.preparePreviewImage(
+            from: image,
+            originalPixelSize: originalPixelSize,
+            base64Data: base64Data,
+            savedImageURL: savedImageURL
+        )
+
+        self.image = previewResult.image
+        self.previewImageSize = previewResult.size
+        self.originalImageSize = originalPixelSize
         self.base64Data = base64Data
         self.savedImageURL = savedImageURL
 
@@ -331,64 +340,116 @@ class ImageTranslationData: ObservableObject {
     }
 
     private static func resolvePixelSize(for image: NSImage) -> NSSize {
-        if let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
-            return NSSize(width: cgImage.width, height: cgImage.height)
+        if let representation = image.representations
+            .filter({ $0.pixelsWide > 0 && $0.pixelsHigh > 0 })
+            .max(by: { ($0.pixelsWide * $0.pixelsHigh) < ($1.pixelsWide * $1.pixelsHigh) }) {
+            return NSSize(width: representation.pixelsWide, height: representation.pixelsHigh)
         }
 
-        if let rep = image.representations.first {
-            return NSSize(width: rep.pixelsWide, height: rep.pixelsHigh)
+        if let tiffData = image.tiffRepresentation,
+           let source = CGImageSourceCreateWithData(tiffData as CFData, nil),
+           let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+           let width = properties[kCGImagePropertyPixelWidth] as? CGFloat,
+           let height = properties[kCGImagePropertyPixelHeight] as? CGFloat {
+            return NSSize(width: width, height: height)
         }
 
         return image.size
     }
 
-    private static func preparePreviewImage(from image: NSImage) -> NSImage {
-        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
-            Logger.warn("Unable to obtain CGImage for preview generation, using original image")
-            return image
-        }
-
-        let originalWidth = CGFloat(cgImage.width)
-        let originalHeight = CGFloat(cgImage.height)
-        let largestDimension = max(originalWidth, originalHeight)
+    private static func preparePreviewImage(
+        from image: NSImage,
+        originalPixelSize: NSSize,
+        base64Data: String,
+        savedImageURL: URL?
+    ) -> (image: NSImage, size: NSSize) {
+        let largestDimension = max(originalPixelSize.width, originalPixelSize.height)
 
         guard largestDimension > maxPreviewDimension else {
-            Logger.debug("Original image within preview bounds (\(Int(originalWidth))x\(Int(originalHeight))) - no scaling needed")
-            return image
+            Logger.debug("Original image within preview bounds (\(Int(originalPixelSize.width))x\(Int(originalPixelSize.height))) - no scaling needed")
+            return (image, originalPixelSize)
+        }
+
+        let maxPixelSize = Int(maxPreviewDimension)
+
+        if let thumbnail = createThumbnailImage(
+            maxPixelSize: maxPixelSize,
+            savedImageURL: savedImageURL,
+            base64Data: base64Data,
+            fallbackImage: image
+        ) {
+            let previewSize = NSSize(width: CGFloat(thumbnail.width), height: CGFloat(thumbnail.height))
+            let previewImage = NSImage(cgImage: thumbnail, size: previewSize)
+            Logger.info("Downscaled preview image from \(Int(originalPixelSize.width))x\(Int(originalPixelSize.height)) to \(Int(previewSize.width))x\(Int(previewSize.height)) for UI rendering")
+            return (previewImage, previewSize)
         }
 
         let scale = maxPreviewDimension / largestDimension
-        let targetWidth = max(1, Int((originalWidth * scale).rounded(.down)))
-        let targetHeight = max(1, Int((originalHeight * scale).rounded(.down)))
-        let targetSize = CGSize(width: CGFloat(targetWidth), height: CGFloat(targetHeight))
+        let targetWidth = max(1, Int((originalPixelSize.width * scale).rounded(.down)))
+        let targetHeight = max(1, Int((originalPixelSize.height * scale).rounded(.down)))
+        let targetSize = NSSize(width: CGFloat(targetWidth), height: CGFloat(targetHeight))
 
-        let colorSpace = cgImage.colorSpace ?? CGColorSpaceCreateDeviceRGB()
-        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        let previewImage = NSImage(size: targetSize)
+        previewImage.lockFocus()
+        defer { previewImage.unlockFocus() }
+        NSGraphicsContext.current?.imageInterpolation = .high
+        let targetRect = NSRect(origin: .zero, size: targetSize)
+        image.draw(in: targetRect)
 
-        guard let context = CGContext(
-            data: nil,
-            width: targetWidth,
-            height: targetHeight,
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: colorSpace,
-            bitmapInfo: bitmapInfo
-        ) else {
-            Logger.error("Failed to create CGContext for preview scaling - returning original image")
-            return image
+        Logger.warn("Falling back to manual preview scaling for large image - target preview size: \(Int(targetSize.width))x\(Int(targetSize.height))")
+
+        return (previewImage, targetSize)
+    }
+
+    private static func createThumbnailImage(
+        maxPixelSize: Int,
+        savedImageURL: URL?,
+        base64Data: String,
+        fallbackImage: NSImage
+    ) -> CGImage? {
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+            kCGImageSourceCreateThumbnailWithTransform: true
+        ]
+
+        if let url = savedImageURL,
+           let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+           let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
+            Logger.debug("Generated preview thumbnail from saved image at \(url.path)")
+            return thumbnail
         }
 
-        context.interpolationQuality = .high
-        context.draw(cgImage, in: CGRect(origin: .zero, size: targetSize))
-
-        guard let scaledCGImage = context.makeImage() else {
-            Logger.error("Failed to create scaled CGImage for preview - returning original image")
-            return image
+        var thumbnailFromBase64: CGImage?
+        autoreleasepool {
+            if base64Data.isEmpty {
+                Logger.debug("Base64 image data empty - skipping thumbnail generation from base64 string")
+            } else if let data = Data(base64Encoded: base64Data, options: .ignoreUnknownCharacters) {
+                let cfData = data as CFData
+                if let source = CGImageSourceCreateWithData(cfData, nil) {
+                    thumbnailFromBase64 = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+                    if thumbnailFromBase64 != nil {
+                        Logger.debug("Generated preview thumbnail from base64 image data")
+                    }
+                }
+            } else {
+                Logger.warn("Failed to decode base64 image data for preview thumbnail generation")
+            }
         }
 
-        let previewImage = NSImage(cgImage: scaledCGImage, size: NSSize(width: targetSize.width, height: targetSize.height))
-        Logger.info("Downscaled preview image from \(Int(originalWidth))x\(Int(originalHeight)) to \(Int(targetSize.width))x\(Int(targetSize.height)) for UI rendering")
-        return previewImage
+        if let thumbnail = thumbnailFromBase64 {
+            return thumbnail
+        }
+
+        if let tiffData = fallbackImage.tiffRepresentation,
+           let source = CGImageSourceCreateWithData(tiffData as CFData, nil),
+           let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
+            Logger.debug("Generated preview thumbnail from in-memory TIFF representation")
+            return thumbnail
+        }
+
+        Logger.error("Failed to create preview thumbnail using ImageIO")
+        return nil
     }
 
     private static func loadImage(from url: URL) -> NSImage? {
