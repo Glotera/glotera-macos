@@ -255,7 +255,7 @@ class ImageTranslationData: ObservableObject {
                 DispatchQueue.main.async {
                     // Update the specific AI response we just created (don't search for last AI response)
                     if let strongSelf = self, aiResponseIndex < strongSelf.conversationHistory.count {
-                        Logger.info("🔄 Updating AI response at index \(aiResponseIndex) with content length: \(partialResponse.count)")
+                        Logger.debug("🔄 Updating AI response at index \(aiResponseIndex) with content length: \(partialResponse.count)")
                         strongSelf.conversationHistory[aiResponseIndex].content = partialResponse
                         // Clear loading state when we start receiving actual content
                         if strongSelf.conversationHistory[aiResponseIndex].isLoading && !partialResponse.isEmpty {
