@@ -72,9 +72,6 @@ class TranslationResultWindow: NSWindow {
             },
             onClose: { [weak self] in
                 self?.hide()
-            },
-            onUpgradePrompt: { [weak self] in
-                self?.showFollowupQuestionUpgradePrompt()
             }
         )
         
@@ -465,25 +462,6 @@ class TranslationResultWindow: NSWindow {
         self.hide()
     }
     
-    private func showFollowupQuestionUpgradePrompt() {
-        let alert = NSAlert()
-        alert.messageText = "Follow-up Question"
-        alert.informativeText = "Follow-up Question feature is only available for Pro and Max users."
-        alert.alertStyle = .informational
-        
-        // Add buttons
-        alert.addButton(withTitle: "Upgrade Now")
-        alert.addButton(withTitle: "Cancel")
-        
-        // Set the window as parent for the alert
-        alert.beginSheetModal(for: self) { response in
-            if response == .alertFirstButtonReturn {
-                // User clicked "Upgrade Now"
-                EnvironmentManager.shared.openUpgradePage()
-            }
-            // User clicked "Cancel" or closed the dialog - do nothing
-        }
-    }
     
     override var canBecomeKey: Bool {
         return true
@@ -578,9 +556,6 @@ class TranslationResultWindow: NSWindow {
             },
             onClose: { [weak self] in
                 self?.hide()
-            },
-            onUpgradePrompt: { [weak self] in
-                self?.showFollowupQuestionUpgradePrompt()
             }
         )
         
@@ -641,23 +616,15 @@ class TranslationResultViewModel: ObservableObject {
     var onChatToggle: (() -> Void)?
     
     func toggleChat() {
-        // Only allow Follow-up Question toggle for Pro/Max users
-        guard SessionManager.shared.hasFollowupQuestionAccess() else {
-            Logger.info("Follow-up Question toggle blocked - user doesn't have Follow-up Question access")
-            return
-        }
-        
+        // All users can use follow-up questions (limited by quota)
         showingChat.toggle()
         onChatToggle?()
+        Logger.info("Follow-up Question toggled - showingChat: \(showingChat)")
     }
-    
+
     func sendChatMessage(_ message: String) {
-        // Only allow Follow-up Question messages for Pro/Max users
-        guard SessionManager.shared.hasFollowupQuestionAccess() else {
-            Logger.info("Follow-up Question message blocked - user doesn't have Follow-up Question access")
-            return
-        }
-        
+        // All users can send follow-up questions (limited by quota)
+
         // Add user message
         let userMessage = ChatBubbleMessage(content: message, isFromUser: true)
         chatMessages.append(userMessage)
@@ -744,16 +711,14 @@ struct TranslationResultView: View {
     @ObservedObject var viewModel: TranslationResultViewModel
     let onCopy: (String) -> Void
     let onClose: () -> Void
-    let onUpgradePrompt: () -> Void
-    
+
     @State private var showingCopySuccess = false
-    
-    init(original: String, translated: String, isStreaming: Bool, onCopy: @escaping (String) -> Void, onClose: @escaping () -> Void, onUpgradePrompt: @escaping () -> Void) {
+
+    init(original: String, translated: String, isStreaming: Bool, onCopy: @escaping (String) -> Void, onClose: @escaping () -> Void) {
         self.original = original
         self.viewModel = TranslationResultViewModel(translated: translated, isStreaming: isStreaming, originalText: original)
         self.onCopy = onCopy
         self.onClose = onClose
-        self.onUpgradePrompt = onUpgradePrompt
     }
     
     var body: some View {
@@ -770,42 +735,22 @@ struct TranslationResultView: View {
                     .foregroundColor(.primary)
                 
                 Spacer()
-                
-                // Follow-up Question toggle button (Pro/Max only)
-                if SessionManager.shared.hasFollowupQuestionAccess() {
-                    Button(action: {
-                        viewModel.toggleChat()
-                    }) {
-                        Image(systemName: viewModel.showingChat ? "text.bubble.fill" : "text.bubble")
-                            .font(.system(size: 14))
-                            .foregroundColor(.blue)
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                    .help("Toggle Follow-up Question")
-                    .onHover { isHovered in
-                        if isHovered {
-                            NSCursor.pointingHand.push()
-                        } else {
-                            NSCursor.pop()
-                        }
-                    }
-                } else {
-                    // Show upgrade hint for free users
-                    Button(action: {
-                        onUpgradePrompt()
-                    }) {
-                        Image(systemName: "text.bubble")
-                            .font(.system(size: 14))
-                            .foregroundColor(.secondary.opacity(0.6))
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                    .help("Follow-up Question (Pro/Max feature) - Click to upgrade")
-                    .onHover { isHovered in
-                        if isHovered {
-                            NSCursor.pointingHand.push()
-                        } else {
-                            NSCursor.pop()
-                        }
+
+                // Follow-up Question toggle button (available for all users)
+                Button(action: {
+                    viewModel.toggleChat()
+                }) {
+                    Image(systemName: viewModel.showingChat ? "text.bubble.fill" : "text.bubble")
+                        .font(.system(size: 14))
+                        .foregroundColor(.blue)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .help("Toggle Follow-up Question")
+                .onHover { isHovered in
+                    if isHovered {
+                        NSCursor.pointingHand.push()
+                    } else {
+                        NSCursor.pop()
                     }
                 }
                 
@@ -852,22 +797,22 @@ struct TranslationResultView: View {
             }
             
             // Main content area with proportional layout when chat is active
-            if viewModel.showingChat && SessionManager.shared.hasFollowupQuestionAccess() {
-                // When chat is active and user has access: 1:2 ratio (translation:chat) in 600px window
+            if viewModel.showingChat {
+                // When chat is active: 1:2 ratio (translation:chat) in 600px window
                 VStack(spacing: 0) {
                     // Translation content (200px out of 600px = 1/3 of total window)
                     TranslationContentView(original: original, viewModel: viewModel)
                         .frame(height: 200) // Fixed height for consistent 1:2 ratio
-                    
+
                     Divider()
                         .padding(.vertical, 4)
-                    
-                    // Chat section (400px out of 600px = 2/3 of total window) 
+
+                    // Chat section (400px out of 600px = 2/3 of total window)
                     ExpandedChatSection(viewModel: viewModel)
                         .frame(maxHeight: .infinity) // Takes remaining space (~396px after divider)
                 }
             } else {
-                // When chat is inactive or user doesn't have access: full space for translation
+                // When chat is inactive: full space for translation
                 TranslationContentView(original: original, viewModel: viewModel)
             }
         }
