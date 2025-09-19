@@ -55,6 +55,8 @@ class ImageTranslationWindow: NSWindow {
 
 // MARK: - Image Translation Data Model
 class ImageTranslationData: ObservableObject {
+    private static let maxPreviewDimension: CGFloat = 2048
+
     @Published var image: NSImage
     @Published var translationResult: String = ""
     @Published var isTranslating: Bool = false
@@ -76,6 +78,8 @@ class ImageTranslationData: ObservableObject {
 
     let base64Data: String
     let savedImageURL: URL?
+    let originalImageSize: NSSize
+    let previewImageSize: NSSize
 
     // Available target languages - computed property to include user preferences
     var availableLanguages: [(String, String)] {
@@ -136,7 +140,9 @@ class ImageTranslationData: ObservableObject {
     }
 
     init(image: NSImage, base64Data: String, savedImageURL: URL?) {
-        self.image = image
+        self.originalImageSize = ImageTranslationData.resolvePixelSize(for: image)
+        self.image = ImageTranslationData.preparePreviewImage(from: image)
+        self.previewImageSize = ImageTranslationData.resolvePixelSize(for: self.image)
         self.base64Data = base64Data
         self.savedImageURL = savedImageURL
 
@@ -144,6 +150,7 @@ class ImageTranslationData: ObservableObject {
         self.selectedTargetLanguage = ConfigManager.shared.getUserPreferredLanguage()
 
         Logger.info("ImageTranslationData initialized with target language: \(selectedTargetLanguage)")
+        Logger.info("Image sizes - original: \(Int(originalImageSize.width))x\(Int(originalImageSize.height)) px, preview: \(Int(previewImageSize.width))x\(Int(previewImageSize.height)) px")
 
         // Mark initialization as complete
         self.isInitializing = false
@@ -304,6 +311,94 @@ class ImageTranslationData: ObservableObject {
     func openImageInFinder() {
         guard let url = savedImageURL else { return }
         NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    func loadFullSizeImage() -> NSImage? {
+        if let savedImageURL,
+           let image = ImageTranslationData.loadImage(from: savedImageURL) {
+            Logger.debug("Loaded full-size image from saved file: \(savedImageURL.path)")
+            return image
+        }
+
+        if let data = Data(base64Encoded: base64Data, options: .ignoreUnknownCharacters),
+           let image = NSImage(data: data) {
+            Logger.debug("Loaded full-size image from base64 data")
+            return image
+        }
+
+        Logger.error("Failed to load full-size image from both saved file and base64 data")
+        return nil
+    }
+
+    private static func resolvePixelSize(for image: NSImage) -> NSSize {
+        if let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+            return NSSize(width: cgImage.width, height: cgImage.height)
+        }
+
+        if let rep = image.representations.first {
+            return NSSize(width: rep.pixelsWide, height: rep.pixelsHigh)
+        }
+
+        return image.size
+    }
+
+    private static func preparePreviewImage(from image: NSImage) -> NSImage {
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            Logger.warn("Unable to obtain CGImage for preview generation, using original image")
+            return image
+        }
+
+        let originalWidth = CGFloat(cgImage.width)
+        let originalHeight = CGFloat(cgImage.height)
+        let largestDimension = max(originalWidth, originalHeight)
+
+        guard largestDimension > maxPreviewDimension else {
+            Logger.debug("Original image within preview bounds (\(Int(originalWidth))x\(Int(originalHeight))) - no scaling needed")
+            return image
+        }
+
+        let scale = maxPreviewDimension / largestDimension
+        let targetWidth = max(1, Int((originalWidth * scale).rounded(.down)))
+        let targetHeight = max(1, Int((originalHeight * scale).rounded(.down)))
+        let targetSize = CGSize(width: CGFloat(targetWidth), height: CGFloat(targetHeight))
+
+        let colorSpace = cgImage.colorSpace ?? CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+
+        guard let context = CGContext(
+            data: nil,
+            width: targetWidth,
+            height: targetHeight,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else {
+            Logger.error("Failed to create CGContext for preview scaling - returning original image")
+            return image
+        }
+
+        context.interpolationQuality = .high
+        context.draw(cgImage, in: CGRect(origin: .zero, size: targetSize))
+
+        guard let scaledCGImage = context.makeImage() else {
+            Logger.error("Failed to create scaled CGImage for preview - returning original image")
+            return image
+        }
+
+        let previewImage = NSImage(cgImage: scaledCGImage, size: NSSize(width: targetSize.width, height: targetSize.height))
+        Logger.info("Downscaled preview image from \(Int(originalWidth))x\(Int(originalHeight)) to \(Int(targetSize.width))x\(Int(targetSize.height)) for UI rendering")
+        return previewImage
+    }
+
+    private static func loadImage(from url: URL) -> NSImage? {
+        do {
+            let data = try Data(contentsOf: url)
+            return NSImage(data: data)
+        } catch {
+            Logger.error("Failed to load image from URL \(url): \(error)")
+            return nil
+        }
     }
 }
 
@@ -494,6 +589,20 @@ struct ImageTranslationView: View {
                     .buttonStyle(PlainButtonStyle())
                     .help("Click to view full size")
 
+                    VStack(spacing: 2) {
+                        if data.originalImageSize != data.previewImageSize {
+                            Text("Preview: \(formatSize(data.previewImageSize))  •  Original: \(formatSize(data.originalImageSize))")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                        } else {
+                            Text("Image size: \(formatSize(data.previewImageSize))")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+
                     // Language selection
                     HStack {
                         Picker("Translate To", selection: $data.selectedTargetLanguage) {
@@ -630,8 +739,12 @@ struct ImageTranslationView: View {
             .frame(minWidth: 350, maxWidth: 400)
         }
         .sheet(isPresented: $showImageFullSize) {
-            FullSizeImageView(image: data.image)
+            FullSizeImageLoaderView(data: data)
         }
+    }
+
+    private func formatSize(_ size: NSSize) -> String {
+        "\(Int(size.width)) × \(Int(size.height))"
     }
 }
 
@@ -752,9 +865,77 @@ struct ConversationBubble: View {
     }
 }
 
+// MARK: - Full Size Image Loader
+struct FullSizeImageLoaderView: View {
+    @ObservedObject var data: ImageTranslationData
+    @Environment(\.presentationMode) var presentationMode
+    @State private var fullImage: NSImage?
+    @State private var isLoading = true
+    @State private var showingPreviewFallback = false
+
+    var body: some View {
+        Group {
+            if let fullImage = fullImage {
+                FullSizeImageView(
+                    image: fullImage,
+                    isPreviewFallback: showingPreviewFallback,
+                    originalImageSize: showingPreviewFallback ? data.originalImageSize : nil
+                )
+            } else if isLoading {
+                VStack(spacing: 12) {
+                    ProgressView()
+                    Text("Loading original image...")
+                        .foregroundColor(.secondary)
+                }
+                .frame(width: 420, height: 320)
+            } else {
+                VStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 32))
+                        .foregroundColor(.orange)
+                    Text("Unable to load screenshot")
+                        .font(.headline)
+                    Text("Please try taking the screenshot again.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    Button("Close") {
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                }
+                .padding()
+                .frame(width: 420, height: 320)
+            }
+        }
+        .onAppear {
+            loadImageIfNeeded()
+        }
+    }
+
+    private func loadImageIfNeeded() {
+        guard fullImage == nil && isLoading else { return }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let loadedImage = data.loadFullSizeImage()
+            DispatchQueue.main.async {
+                if let loadedImage = loadedImage {
+                    self.fullImage = loadedImage
+                    self.showingPreviewFallback = false
+                } else {
+                    self.fullImage = data.image
+                    self.showingPreviewFallback = true
+                    Logger.warn("Falling back to preview image for full-size display")
+                }
+                self.isLoading = false
+            }
+        }
+    }
+}
+
 // MARK: - Full Size Image View
 struct FullSizeImageView: View {
     let image: NSImage
+    var isPreviewFallback: Bool = false
+    var originalImageSize: NSSize? = nil
     @Environment(\.presentationMode) var presentationMode
 
     // Calculate optimal window size based on image and screen dimensions
@@ -791,9 +972,17 @@ struct FullSizeImageView: View {
         VStack(spacing: 0) {
             // Header with close button
             HStack {
-                Text("Original Size: \(Int(image.size.width)) × \(Int(image.size.height))")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Display Size: \(Int(image.size.width)) × \(Int(image.size.height))")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    if let originalImageSize, isPreviewFallback {
+                        Text("Original Size: \(Int(originalImageSize.width)) × \(Int(originalImageSize.height))")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
 
                 Spacer()
 
@@ -804,6 +993,15 @@ struct FullSizeImageView: View {
             }
             .padding()
             .background(Color(NSColor.windowBackgroundColor))
+
+            if isPreviewFallback {
+                Text("Original screenshot was too large to load directly. Displaying preview version instead.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal)
+                    .padding(.bottom, 4)
+                    .multilineTextAlignment(.center)
+            }
 
             // Image display - use ScrollView only if image is larger than available space
             let availableWidth = size.width - 40
@@ -899,6 +1097,10 @@ struct ImageMarkdownText: View {
 
     // Render text with proper bold formatting
     private func renderFormattedText(_ text: String) -> Text {
+        guard !text.isEmpty else {
+            return Text("")
+        }
+
         // Parse bold text patterns manually for better control
         let parts = parseBoldText(text)
 
@@ -922,52 +1124,52 @@ struct ImageMarkdownText: View {
 
     // Parse text for bold formatting (** text **)
     private func parseBoldText(_ text: String) -> [TextPart] {
+        guard text.count >= 2 else {
+            return [TextPart(content: text, isBold: false)]
+        }
+
         var parts: [TextPart] = []
         var currentText = ""
-        var i = text.startIndex
+        var index = text.startIndex
+        let lastIndex = text.index(before: text.endIndex)
 
-        while i < text.endIndex {
-            if i < text.index(text.endIndex, offsetBy: -1) &&
-               text[i] == "*" && text[text.index(after: i)] == "*" {
+        while index < text.endIndex {
+            let nextIndex = text.index(after: index)
 
-                // Found start of potential bold section
+            if index < lastIndex && text[index] == "*" && text[nextIndex] == "*" {
                 if !currentText.isEmpty {
                     parts.append(TextPart(content: currentText, isBold: false))
-                    currentText = ""
+                    currentText.removeAll()
                 }
 
-                // Look for closing **
-                let startIndex = text.index(i, offsetBy: 2)
-                var endIndex = startIndex
+                let boldStart = text.index(index, offsetBy: 2)
+                var searchIndex = boldStart
                 var foundClosing = false
 
-                while endIndex < text.index(text.endIndex, offsetBy: -1) {
-                    if text[endIndex] == "*" && text[text.index(after: endIndex)] == "*" {
+                while searchIndex < lastIndex {
+                    let closingNext = text.index(after: searchIndex)
+                    if text[searchIndex] == "*" && text[closingNext] == "*" {
+                        let boldContent = String(text[boldStart..<searchIndex])
+                        if !boldContent.isEmpty {
+                            parts.append(TextPart(content: boldContent, isBold: true))
+                        }
+                        index = text.index(searchIndex, offsetBy: 2)
                         foundClosing = true
                         break
                     }
-                    endIndex = text.index(after: endIndex)
+                    searchIndex = text.index(after: searchIndex)
                 }
 
-                if foundClosing {
-                    // Extract bold content
-                    let boldContent = String(text[startIndex..<endIndex])
-                    if !boldContent.isEmpty {
-                        parts.append(TextPart(content: boldContent, isBold: true))
-                    }
-                    i = text.index(endIndex, offsetBy: 2) // Skip closing **
-                } else {
-                    // No closing **, treat as regular text
-                    currentText.append(text[i])
-                    i = text.index(after: i)
+                if !foundClosing {
+                    currentText.append(text[index])
+                    index = nextIndex
                 }
             } else {
-                currentText.append(text[i])
-                i = text.index(after: i)
+                currentText.append(text[index])
+                index = nextIndex
             }
         }
 
-        // Add remaining text
         if !currentText.isEmpty {
             parts.append(TextPart(content: currentText, isBold: false))
         }
