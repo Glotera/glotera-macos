@@ -40,6 +40,12 @@ class ImageTranslationWindow: NSWindow {
         Logger.info("ImageTranslationWindow created with image size: \(image.size)")
     }
 
+    deinit {
+        // Ensure proper cleanup when window is destroyed
+        imageTranslationData.cleanup()
+        Logger.debug("ImageTranslationWindow deinitialized")
+    }
+
     private func setupContent() {
         let translationView = ImageTranslationView(
             data: imageTranslationData,
@@ -136,7 +142,8 @@ class ImageTranslationData: ObservableObject {
     }
 
     init(image: NSImage, base64Data: String, savedImageURL: URL?) {
-        self.image = image
+        // Create a safe copy of NSImage to avoid memory management issues
+        self.image = image.copy() as? NSImage ?? image
         self.base64Data = base64Data
         self.savedImageURL = savedImageURL
 
@@ -149,13 +156,16 @@ class ImageTranslationData: ObservableObject {
         self.isInitializing = false
 
         // Start translation automatically when initialized
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            self.startTranslation()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            self?.startTranslation()
         }
     }
 
     func startTranslation() {
-        guard !isTranslating else { return }
+        guard !isTranslating else {
+            Logger.debug("Translation already in progress, skipping")
+            return
+        }
 
         Logger.info("Starting image translation to: \(selectedTargetLanguage)")
         isTranslating = true
@@ -171,22 +181,28 @@ class ImageTranslationData: ObservableObject {
             onChunk: { [weak self] chunk, fullContent in
                 Logger.info("📝 Image translation chunk received: chunk='\(chunk.prefix(50))...', fullContent length=\(fullContent.count)")
                 DispatchQueue.main.async { [weak self] in
-                    guard let self = self else { return }
+                    guard let self = self, !chunk.isEmpty else { return }
                     Logger.info("🔄 Updating UI with fullContent length: \(fullContent.count)")
-                    // Add safety check to prevent rapid updates
-                    if self.translationResult != fullContent {
+                    // Add safety check to prevent rapid updates and ensure we're still translating
+                    if self.isTranslating && self.translationResult != fullContent {
                         self.translationResult = fullContent
                     }
                 }
             },
             onComplete: { [weak self] result, quotaInfo in
+                Logger.info("📍 ImageTranslationWindow: onComplete called with result length: \(result?.count ?? 0)")
                 DispatchQueue.main.async { [weak self] in
-                    guard let self = self else { return }
+                    guard let self = self else {
+                        Logger.warn("📍 ImageTranslationWindow: self is nil in onComplete")
+                        return
+                    }
+                    Logger.info("📍 ImageTranslationWindow: Setting isTranslating = false")
                     self.isTranslating = false
                     if let result = result, !result.isEmpty {
                         self.translationResult = result
-                        Logger.info("Image translation completed successfully")
+                        Logger.info("📍 Image translation completed successfully with result length: \(result.count)")
                     } else {
+                        Logger.warn("📍 Translation completed but no result received")
                         self.errorMessage = "Translation completed but no result received"
                     }
                 }
@@ -197,6 +213,8 @@ class ImageTranslationData: ObservableObject {
                     self.isTranslating = false
                     self.errorMessage = error
                     Logger.error("Image translation failed: \(error)")
+                    // Clear any partial translation result on error
+                    self.translationResult = ""
                 }
             }
         )
@@ -304,6 +322,23 @@ class ImageTranslationData: ObservableObject {
     func openImageInFinder() {
         guard let url = savedImageURL else { return }
         NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    func cleanup() {
+        // Stop any ongoing translation
+        isTranslating = false
+
+        // Clear references to potentially large objects
+        translationResult = ""
+        conversationHistory.removeAll()
+        followUpQuestion = ""
+
+        Logger.debug("ImageTranslationData cleaned up")
+    }
+
+    deinit {
+        cleanup()
+        Logger.debug("ImageTranslationData deinitialized")
     }
 }
 
@@ -484,12 +519,24 @@ struct ImageTranslationView: View {
                     Button(action: {
                         showImageFullSize = true
                     }) {
-                        Image(nsImage: data.image)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(maxWidth: 280, maxHeight: 140) // Reduced size for 1/4 height
-                            .cornerRadius(8)
-                            .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
+                        // Create a safe image view with memory-efficient loading
+                        if let imageData = data.image.tiffRepresentation,
+                           let safeImage = NSImage(data: imageData) {
+                            Image(nsImage: safeImage)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(maxWidth: 280, maxHeight: 140)
+                                .cornerRadius(8)
+                                .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
+                        } else {
+                            // Fallback to original image if conversion fails
+                            Image(nsImage: data.image)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(maxWidth: 280, maxHeight: 140)
+                                .cornerRadius(8)
+                                .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
+                        }
                     }
                     .buttonStyle(PlainButtonStyle())
                     .help("Click to view full size")
@@ -809,18 +856,37 @@ struct FullSizeImageView: View {
             let availableWidth = size.width - 40
             let availableHeight = size.height - 60 - 40
 
-            if image.size.width <= availableWidth && image.size.height <= availableHeight {
-                // Image fits completely - no scrolling needed
-                Image(nsImage: image)
-                    .frame(width: image.size.width, height: image.size.height)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                // Image is larger than available space - add scrolling
-                ScrollView([.horizontal, .vertical]) {
-                    Image(nsImage: image)
-                        .frame(width: image.size.width, height: image.size.height)
+            // Create safe image representation for full size view
+            Group {
+                if let imageData = image.tiffRepresentation,
+                   let safeImage = NSImage(data: imageData) {
+                    if safeImage.size.width <= availableWidth && safeImage.size.height <= availableHeight {
+                        // Image fits completely - no scrolling needed
+                        Image(nsImage: safeImage)
+                            .frame(width: safeImage.size.width, height: safeImage.size.height)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        // Image is larger than available space - add scrolling
+                        ScrollView([.horizontal, .vertical]) {
+                            Image(nsImage: safeImage)
+                                .frame(width: safeImage.size.width, height: safeImage.size.height)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                } else {
+                    // Fallback to original image
+                    if image.size.width <= availableWidth && image.size.height <= availableHeight {
+                        Image(nsImage: image)
+                            .frame(width: image.size.width, height: image.size.height)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        ScrollView([.horizontal, .vertical]) {
+                            Image(nsImage: image)
+                                .frame(width: image.size.width, height: image.size.height)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .frame(width: size.width, height: size.height)

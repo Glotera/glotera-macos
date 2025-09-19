@@ -715,13 +715,13 @@ class TranslatorClient: NSObject {
                 onComplete: onComplete,
                 onError: onError
             ),
-            quotaDelegate: quotaDelegate
+            quotaDelegate: self.quotaDelegate
         )
         
         // 创建专用的流式会话
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = timeoutInterval
-        config.timeoutIntervalForResource = timeoutInterval * 2
+        config.timeoutIntervalForResource = 120.0  // 2分钟，允许更长的流式传输
         
         // 根据环境配置网络参数
         if isProductionEnvironment {
@@ -730,7 +730,7 @@ class TranslatorClient: NSObject {
             config.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
             config.urlCache = nil
             config.httpShouldUsePipelining = false
-            config.timeoutIntervalForRequest = 60.0  // 生产环境延长超时
+            config.timeoutIntervalForRequest = 60.0  // 生产环境延长超时到2分钟
         } else {
             Logger.info("🏠 Configuring for development environment")
             config.httpMaximumConnectionsPerHost = 5
@@ -803,8 +803,8 @@ class TranslatorClient: NSObject {
         Logger.info("📡 Stream translation request started - waiting for response...")
         
         // Store startTime in the task for later reference in delegate methods
-        // We'll use objc_setAssociatedObject to attach timing info to the task
-        objc_setAssociatedObject(task, "streamStartTime", startTime, .OBJC_ASSOCIATION_RETAIN)
+        // Use COPY_NONATOMIC instead of RETAIN to avoid double free issues
+        objc_setAssociatedObject(task, "streamStartTime", startTime, .OBJC_ASSOCIATION_COPY_NONATOMIC)
     }
     
     // 便捷方法：流式翻译（向后兼容）
@@ -1023,7 +1023,28 @@ class TranslatorClient: NSObject {
         }
     }
     
+    private func cleanupStreamSession() {
+        // 只清理一次，避免重复清理
+        guard streamSession != nil else { return }
+
+        // 先清理streamProcessor，避免Timer相关的double free
+        streamProcessor?.cleanup()
+        streamProcessor = nil
+
+        // 清理URLSession
+        streamSession?.invalidateAndCancel()
+        streamSession = nil
+
+        // 清理其他引用
+        streamCallbacks = nil
+        streamBuffer = ""
+
+        Logger.debug("Stream session cleaned up safely")
+    }
+
     deinit {
+        // 确保在对象销毁前清理所有资源
+        cleanupStreamSession()
         NotificationCenter.default.removeObserver(self)
     }
     
@@ -1274,6 +1295,7 @@ extension TranslatorClient: URLSessionDataDelegate {
             DispatchQueue.main.async {
                 self.streamCallbacks?.onError("Invalid response format")
             }
+            cleanupStreamSession()
             completionHandler(.cancel)
             return
         }
@@ -1292,6 +1314,7 @@ extension TranslatorClient: URLSessionDataDelegate {
             DispatchQueue.main.async {
                 self.streamCallbacks?.onError("Server error: \(httpResponse.statusCode)")
             }
+            cleanupStreamSession()
             completionHandler(.cancel)
             return
         }
@@ -1305,17 +1328,16 @@ extension TranslatorClient: URLSessionDataDelegate {
             Logger.error("Failed to decode stream data")
             return
         }
-        
-        
-        // if isProductionEnvironment {
-        //     Logger.info("Raw data: \(dataString.prefix(200))...") // Only show first 200 characters
-        // }else{
-        //     Logger.info("Raw data: \(dataString)")
-        // }
-        
-        // 异步处理数据，避免阻塞delegate队列
-        DispatchQueue.global(qos: .userInteractive).async { [weak self] in
-            self?.processStreamData(dataString)
+
+        // 使用StreamBatchProcessor处理数据，而不是直接处理
+        // 这样可以避免并发问题和内存管理问题
+        if let processor = streamProcessor {
+            processor.addRawData(dataString)
+        } else {
+            // Fallback：如果processor不存在，使用原有方式
+            DispatchQueue.global(qos: .userInteractive).async { [weak self] in
+                self?.processStreamData(dataString)
+            }
         }
     }
     
@@ -1334,6 +1356,9 @@ extension TranslatorClient: URLSessionDataDelegate {
             DispatchQueue.main.async {
                 self.streamCallbacks?.onError("Network error: \(error.localizedDescription)")
             }
+
+            // 确保网络错误时也清理资源
+            cleanupStreamSession()
         } else {
             // 检查HTTP状态码，特别是429配额耗尽的情况
             if let httpResponse = task.response as? HTTPURLResponse {
@@ -1434,42 +1459,55 @@ extension TranslatorClient: URLSessionDataDelegate {
                     }
                     
                     // 清理并返回，不需要继续处理
-                    streamSession?.invalidateAndCancel()
-                    streamSession = nil
-                    streamCallbacks = nil
-                    streamBuffer = ""
+                    cleanupStreamSession()
                     return
                 }
             }
             
             // 处理缓冲区中剩余的数据
-            if !streamBuffer.isEmpty {
-                processStreamLine(streamBuffer)
+            // 注意：只在streamSession仍然存在时处理，避免访问已释放的资源
+            if streamSession != nil && !streamBuffer.isEmpty {
+                let remainingBuffer = streamBuffer // 创建本地副本
+                streamBuffer = "" // 先清空，避免重复处理
+                processStreamLine(remainingBuffer)
             }
+
+            // 如果使用 StreamProcessor，延迟清理以确保所有事件都被处理
+            if streamProcessor != nil {
+                Logger.info("📍 Delaying cleanup to allow StreamProcessor to finish processing")
+                // 延迟清理，给 processor 时间处理所有排队的事件
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    Logger.info("📍 Performing delayed cleanup after StreamProcessor processing")
+                    self?.cleanupStreamSession()
+                }
+            } else {
+                // 没有使用 processor，直接清理
+                cleanupStreamSession()
+            }
+
             Logger.info("✅ Stream translation completed successfully after \(String(format: "%.3f", duration * 1000))ms")
-        }
-         
-        // 清理
-        streamSession?.invalidateAndCancel()
-        streamSession = nil
-        streamCallbacks = nil
-        streamProcessor = nil
-        streamBuffer = "" 
+        } 
     }
     
     private func processStreamData(_ dataString: String) {
+        // 检查session是否仍然有效
+        guard streamSession != nil else {
+            Logger.debug("Stream session already cleaned up, ignoring data")
+            return
+        }
+
         // Add to buffer for processing
         streamBuffer += dataString
-        
+
         // Process complete lines
         let lines = streamBuffer.components(separatedBy: .newlines)
-        
+
         // Keep the last incomplete line in buffer
         if lines.count > 1 {
             streamBuffer = lines.last ?? ""
-            
+
             // Process complete lines
-            for line in lines.dropLast() {
+            for line in lines.dropLast() where streamSession != nil {
                 processStreamLine(line)
             }
         }
@@ -1543,6 +1581,11 @@ extension TranslatorClient: URLSessionDataDelegate {
                             capturedCallbacks?.onComplete(fullContent.isEmpty ? nil : fullContent, quotaInfo)
                         }
                     }
+
+                    // 流式翻译完成后清理资源
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        self.cleanupStreamSession()
+                    }
                     return
                     
                 case "error":
@@ -1552,6 +1595,9 @@ extension TranslatorClient: URLSessionDataDelegate {
                             self.streamCallbacks?.onError(errorMessage)
                         }
                     }
+
+                    // 错误时立即清理资源
+                    cleanupStreamSession()
                     return
                     
                 default:
@@ -1953,20 +1999,20 @@ extension TranslatorClient {
                 onComplete: onComplete,
                 onError: onError
             ),
-            quotaDelegate: quotaDelegate
+            quotaDelegate: self.quotaDelegate
         )
 
         // Create streaming session
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = timeoutInterval
-        config.timeoutIntervalForResource = timeoutInterval * 2
+        config.timeoutIntervalForResource = 300.0  // 5分钟，允许更长的图像流式传输
 
         // Configure for streaming
         if isProductionEnvironment {
             config.httpMaximumConnectionsPerHost = 1
             config.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
             config.urlCache = nil
-            config.timeoutIntervalForRequest = 60.0
+            config.timeoutIntervalForRequest = 60.0  // 图像翻译延长超时到2分钟
         } else {
             config.httpMaximumConnectionsPerHost = 5
             config.requestCachePolicy = .useProtocolCachePolicy
@@ -2034,6 +2080,6 @@ extension TranslatorClient {
         Logger.info("📡 Stream image translation request started - waiting for response...")
 
         // Store timing info
-        objc_setAssociatedObject(task, "streamStartTime", startTime, .OBJC_ASSOCIATION_RETAIN)
+        objc_setAssociatedObject(task, "streamStartTime", startTime, .OBJC_ASSOCIATION_COPY_NONATOMIC)
     }
 }
