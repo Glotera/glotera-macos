@@ -12,7 +12,7 @@ class ImageTranslationHistoryManager: ObservableObject {
         loadHistory()
     }
 
-    func addImageTranslation(image: NSImage, originalBase64: String, translationResult: String, targetLanguage: String, savedImageURL: URL?) {
+    func addImageTranslation(image: NSImage, originalBase64: String?, translationResult: String, targetLanguage: String, savedImageURL: URL?) {
         let record = ImageTranslationRecord(
             id: UUID(),
             image: image,
@@ -102,7 +102,7 @@ class ImageTranslationHistoryManager: ObservableObject {
                 let record = ImageTranslationRecord(
                     id: meta.id,
                     image: image ?? createPlaceholderImage(),
-                    originalBase64: "", // Not persisted
+                    originalBase64: nil, // Not persisted
                     translationResult: meta.translationResult,
                     targetLanguage: meta.targetLanguage,
                     savedImageURL: meta.savedImageURL,
@@ -144,7 +144,7 @@ class ImageTranslationHistoryManager: ObservableObject {
 struct ImageTranslationRecord: Identifiable {
     let id: UUID
     let image: NSImage
-    let originalBase64: String
+    let originalBase64: String?
     let translationResult: String
     let targetLanguage: String
     let savedImageURL: URL?

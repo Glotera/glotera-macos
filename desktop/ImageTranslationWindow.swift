@@ -1,5 +1,6 @@
 import Cocoa
 import SwiftUI
+import ImageIO
 
 class ImageTranslationWindow: NSWindow {
     private var hostingView: NSHostingView<ImageTranslationView>?
@@ -55,6 +56,8 @@ class ImageTranslationWindow: NSWindow {
 
 // MARK: - Image Translation Data Model
 class ImageTranslationData: ObservableObject {
+    private static let maxPreviewDimension: CGFloat = 2048
+
     @Published var image: NSImage
     @Published var translationResult: String = ""
     @Published var isTranslating: Bool = false
@@ -73,16 +76,84 @@ class ImageTranslationData: ObservableObject {
     @Published var conversationHistory: [ConversationItem] = []
     @Published var followUpQuestion: String = ""
     @Published var isProcessingFollowUp: Bool = false
+    @Published var translationDisplayElements: [ImageMarkdownElement] = []
 
-    let base64Data: String
+    private let base64AccessQueue = DispatchQueue(label: "com.glotera.imageTranslation.base64", attributes: .concurrent)
+    private var cachedBase64Data: String?
+    private var fullSizeImageCache: NSImage?
+
     let savedImageURL: URL?
+    let originalImageSize: NSSize
+    let previewImageSize: NSSize
 
     // Available target languages - computed property to include user preferences
     var availableLanguages: [(String, String)] {
         return getAvailableLanguages()
     }
 
+    // MARK: - Base64 Data Management
+    private func getCachedBase64() -> String? {
+        var value: String?
+        base64AccessQueue.sync {
+            value = cachedBase64Data
+        }
+        return value
+    }
+
+    private func setCachedBase64(_ newValue: String?) {
+        base64AccessQueue.sync(flags: .barrier) {
+            cachedBase64Data = newValue
+        }
+    }
+
+    func currentBase64Snapshot() -> String? {
+        return getCachedBase64()
+    }
+
+    private func clearCachedBase64IfPossible() {
+        guard savedImageURL != nil else { return }
+
+        var hadPayload = false
+        base64AccessQueue.sync {
+            if let cached = cachedBase64Data, !cached.isEmpty {
+                hadPayload = true
+            }
+        }
+
+        guard hadPayload else { return }
+
+        setCachedBase64(nil)
+        Logger.debug("Cleared cached base64 data to reduce memory usage")
+    }
+
+    private func obtainBase64Payload() -> String? {
+        if let cached = getCachedBase64(), !cached.isEmpty {
+            return cached
+        }
+
+        guard let savedImageURL else {
+            Logger.error("No cached base64 available and saved image URL missing")
+            return nil
+        }
+
+        do {
+            let fileData = try Data(contentsOf: savedImageURL, options: [.mappedIfSafe])
+            let base64 = fileData.base64EncodedString()
+            setCachedBase64(base64)
+            Logger.info("Loaded base64 payload from saved image for translation retry (data size: \(fileData.count) bytes)")
+            return base64
+        } catch {
+            Logger.error("Failed to read saved image for base64 conversion: \(error)")
+            return nil
+        }
+    }
+
     private var isInitializing = true
+    private let translationProcessingQueue = DispatchQueue(label: "com.glotera.imageTranslation.render", qos: .userInitiated)
+    private var pendingTranslationWorkItem: DispatchWorkItem?
+    private var latestStreamContent: String = ""
+    private var lastRenderedContent: String = ""
+    private let streamUpdateDebounceInterval: TimeInterval = 0.05
 
     // Get language name from language code using ConfigManager
     private func getLanguageNativeName(for code: String) -> String {
@@ -136,14 +207,25 @@ class ImageTranslationData: ObservableObject {
     }
 
     init(image: NSImage, base64Data: String, savedImageURL: URL?) {
-        self.image = image
-        self.base64Data = base64Data
+        let originalPixelSize = ImageTranslationData.resolvePixelSize(for: image)
+        let previewResult = ImageTranslationData.preparePreviewImage(
+            from: image,
+            originalPixelSize: originalPixelSize,
+            base64Data: base64Data,
+            savedImageURL: savedImageURL
+        )
+
+        self.image = previewResult.image
+        self.previewImageSize = previewResult.size
+        self.originalImageSize = originalPixelSize
         self.savedImageURL = savedImageURL
+        self.cachedBase64Data = base64Data
 
         // Load user's preferred language from settings
         self.selectedTargetLanguage = ConfigManager.shared.getUserPreferredLanguage()
 
         Logger.info("ImageTranslationData initialized with target language: \(selectedTargetLanguage)")
+        Logger.info("Image sizes - original: \(Int(originalImageSize.width))x\(Int(originalImageSize.height)) px, preview: \(Int(previewImageSize.width))x\(Int(previewImageSize.height)) px")
 
         // Mark initialization as complete
         self.isInitializing = false
@@ -157,49 +239,132 @@ class ImageTranslationData: ObservableObject {
     func startTranslation() {
         guard !isTranslating else { return }
 
-        Logger.info("Starting image translation to: \(selectedTargetLanguage)")
         isTranslating = true
         errorMessage = nil
         translationResult = ""
+        translationDisplayElements = []
         // Clear previous conversation history when starting new translation
         conversationHistory.removeAll()
 
-        // Use streaming translation for better user experience
-        TranslatorClient.shared.translateImageStream(
-            base64Data: base64Data,
-            to: selectedTargetLanguage,
-            onChunk: { [weak self] chunk, fullContent in
-                Logger.info("📝 Image translation chunk received: chunk='\(chunk.prefix(50))...', fullContent length=\(fullContent.count)")
-                DispatchQueue.main.async { [weak self] in
-                    guard let self = self else { return }
-                    Logger.info("🔄 Updating UI with fullContent length: \(fullContent.count)")
-                    // Add safety check to prevent rapid updates
-                    if self.translationResult != fullContent {
-                        self.translationResult = fullContent
-                    }
-                }
-            },
-            onComplete: { [weak self] result, quotaInfo in
+        cancelPendingTranslationRendering()
+
+        let targetLanguage = selectedTargetLanguage
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+
+            guard let payload = self.obtainBase64Payload() else {
+                Logger.error("Unable to prepare base64 payload for image translation request")
                 DispatchQueue.main.async { [weak self] in
                     guard let self = self else { return }
                     self.isTranslating = false
-                    if let result = result, !result.isEmpty {
-                        self.translationResult = result
-                        Logger.info("Image translation completed successfully")
-                    } else {
-                        self.errorMessage = "Translation completed but no result received"
+                    self.errorMessage = "Failed to prepare screenshot for translation"
+                }
+                return
+            }
+
+            Logger.info("Starting image translation to: \(targetLanguage) with payload size: \(payload.count) characters")
+
+            TranslatorClient.shared.translateImageStream(
+                base64Data: payload,
+                to: targetLanguage,
+                onChunk: { [weak self] chunk, fullContent in
+                    guard let self = self else { return }
+                    Logger.info("📝 Image translation chunk received: chunk='\(chunk.prefix(50))...', fullContent length=\(fullContent.count)")
+                    Logger.info("🔄 Queuing UI update with fullContent length: \(fullContent.count)")
+                    self.enqueueTranslationContentUpdate(fullContent, isFinal: false)
+                },
+                onComplete: { [weak self] result, quotaInfo in
+                    guard let self = self else { return }
+                    let finalContent = result ?? self.translationResult
+                    self.enqueueTranslationContentUpdate(finalContent, isFinal: true)
+
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self = self else { return }
+                        self.isTranslating = false
+                        if let result = result, !result.isEmpty {
+                            Logger.info("Image translation completed successfully")
+                        } else if !self.translationResult.isEmpty {
+                            Logger.info("Image translation completed with streaming content")
+                        } else {
+                            self.errorMessage = "Translation completed but no result received"
+                        }
+
+                        self.cancelPendingTranslationRendering()
+                    }
+                },
+                onError: { [weak self] error in
+                    guard let self = self else { return }
+                    self.cancelPendingTranslationRendering()
+
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self = self else { return }
+                        self.isTranslating = false
+                        self.errorMessage = error
+                        Logger.error("Image translation failed: \(error)")
                     }
                 }
-            },
-            onError: { [weak self] error in
-                DispatchQueue.main.async { [weak self] in
-                    guard let self = self else { return }
-                    self.isTranslating = false
-                    self.errorMessage = error
-                    Logger.error("Image translation failed: \(error)")
+            )
+
+            self.clearCachedBase64IfPossible()
+        }
+    }
+
+    private func enqueueTranslationContentUpdate(_ fullContent: String, isFinal: Bool) {
+        translationProcessingQueue.async { [weak self] in
+            guard let self = self else { return }
+
+            if !isFinal && fullContent == self.latestStreamContent {
+                // Ignore duplicate non-final updates to reduce redundant work
+                Logger.debug("Skipping duplicate stream content update - no new data to render")
+                return
+            }
+
+            self.latestStreamContent = fullContent
+            self.pendingTranslationWorkItem?.cancel()
+
+            let workItem = DispatchWorkItem { [weak self] in
+                guard let self = self else { return }
+                self.pendingTranslationWorkItem = nil
+
+                let content = self.latestStreamContent
+
+                if content == self.lastRenderedContent {
+                    Logger.debug("Skipping render for unchanged content - size: \(content.count) characters")
+                    return
+                }
+
+                self.lastRenderedContent = content
+
+                autoreleasepool {
+                    let elements = ImageMarkdownParser.parseElements(from: content)
+                    DispatchQueue.main.async {
+                        if self.translationResult != content {
+                            self.translationResult = content
+                        }
+                        self.translationDisplayElements = elements
+                    }
                 }
             }
-        )
+
+            self.pendingTranslationWorkItem = workItem
+
+            if isFinal || self.streamUpdateDebounceInterval <= 0 {
+                workItem.perform()
+            } else {
+                self.translationProcessingQueue.asyncAfter(deadline: .now() + self.streamUpdateDebounceInterval, execute: workItem)
+            }
+        }
+    }
+
+    private func cancelPendingTranslationRendering() {
+        translationProcessingQueue.async { [weak self] in
+            guard let self = self else { return }
+            self.pendingTranslationWorkItem?.cancel()
+            self.pendingTranslationWorkItem = nil
+            self.latestStreamContent = ""
+            self.lastRenderedContent = ""
+        }
     }
 
     func submitFollowUpQuestion() {
@@ -305,6 +470,155 @@ class ImageTranslationData: ObservableObject {
         guard let url = savedImageURL else { return }
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
+
+    func loadFullSizeImage() -> NSImage? {
+        if let cached = fullSizeImageCache {
+            Logger.debug("Returning cached full-size image")
+            return cached
+        }
+
+        if let savedImageURL,
+           let image = ImageTranslationData.loadImage(from: savedImageURL) {
+            Logger.debug("Loaded full-size image from saved file: \(savedImageURL.path)")
+            fullSizeImageCache = image
+            return image
+        }
+
+        if let base64 = getCachedBase64(),
+           !base64.isEmpty,
+           let data = Data(base64Encoded: base64, options: .ignoreUnknownCharacters),
+           let image = NSImage(data: data) {
+            Logger.debug("Loaded full-size image from cached base64 data")
+            fullSizeImageCache = image
+            return image
+        }
+
+        Logger.error("Failed to load full-size image from available sources")
+        return nil
+    }
+
+    private static func resolvePixelSize(for image: NSImage) -> NSSize {
+        if let representation = image.representations
+            .filter({ $0.pixelsWide > 0 && $0.pixelsHigh > 0 })
+            .max(by: { ($0.pixelsWide * $0.pixelsHigh) < ($1.pixelsWide * $1.pixelsHigh) }) {
+            return NSSize(width: representation.pixelsWide, height: representation.pixelsHigh)
+        }
+
+        if let tiffData = image.tiffRepresentation,
+           let source = CGImageSourceCreateWithData(tiffData as CFData, nil),
+           let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+           let width = properties[kCGImagePropertyPixelWidth] as? CGFloat,
+           let height = properties[kCGImagePropertyPixelHeight] as? CGFloat {
+            return NSSize(width: width, height: height)
+        }
+
+        return image.size
+    }
+
+    private static func preparePreviewImage(
+        from image: NSImage,
+        originalPixelSize: NSSize,
+        base64Data: String,
+        savedImageURL: URL?
+    ) -> (image: NSImage, size: NSSize) {
+        let largestDimension = max(originalPixelSize.width, originalPixelSize.height)
+
+        guard largestDimension > maxPreviewDimension else {
+            Logger.debug("Original image within preview bounds (\(Int(originalPixelSize.width))x\(Int(originalPixelSize.height))) - no scaling needed")
+            return (image, originalPixelSize)
+        }
+
+        let maxPixelSize = Int(maxPreviewDimension)
+
+        if let thumbnail = createThumbnailImage(
+            maxPixelSize: maxPixelSize,
+            savedImageURL: savedImageURL,
+            base64Data: base64Data,
+            fallbackImage: image
+        ) {
+            let previewSize = NSSize(width: CGFloat(thumbnail.width), height: CGFloat(thumbnail.height))
+            let previewImage = NSImage(cgImage: thumbnail, size: previewSize)
+            Logger.info("Downscaled preview image from \(Int(originalPixelSize.width))x\(Int(originalPixelSize.height)) to \(Int(previewSize.width))x\(Int(previewSize.height)) for UI rendering")
+            return (previewImage, previewSize)
+        }
+
+        let scale = maxPreviewDimension / largestDimension
+        let targetWidth = max(1, Int((originalPixelSize.width * scale).rounded(.down)))
+        let targetHeight = max(1, Int((originalPixelSize.height * scale).rounded(.down)))
+        let targetSize = NSSize(width: CGFloat(targetWidth), height: CGFloat(targetHeight))
+
+        let previewImage = NSImage(size: targetSize)
+        previewImage.lockFocus()
+        defer { previewImage.unlockFocus() }
+        NSGraphicsContext.current?.imageInterpolation = .high
+        let targetRect = NSRect(origin: .zero, size: targetSize)
+        image.draw(in: targetRect)
+
+        Logger.warn("Falling back to manual preview scaling for large image - target preview size: \(Int(targetSize.width))x\(Int(targetSize.height))")
+
+        return (previewImage, targetSize)
+    }
+
+    private static func createThumbnailImage(
+        maxPixelSize: Int,
+        savedImageURL: URL?,
+        base64Data: String,
+        fallbackImage: NSImage
+    ) -> CGImage? {
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+            kCGImageSourceCreateThumbnailWithTransform: true
+        ]
+
+        if let url = savedImageURL,
+           let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+           let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
+            Logger.debug("Generated preview thumbnail from saved image at \(url.path)")
+            return thumbnail
+        }
+
+        var thumbnailFromBase64: CGImage?
+        autoreleasepool {
+            if base64Data.isEmpty {
+                Logger.debug("Base64 image data empty - skipping thumbnail generation from base64 string")
+            } else if let data = Data(base64Encoded: base64Data, options: .ignoreUnknownCharacters) {
+                let cfData = data as CFData
+                if let source = CGImageSourceCreateWithData(cfData, nil) {
+                    thumbnailFromBase64 = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+                    if thumbnailFromBase64 != nil {
+                        Logger.debug("Generated preview thumbnail from base64 image data")
+                    }
+                }
+            } else {
+                Logger.warn("Failed to decode base64 image data for preview thumbnail generation")
+            }
+        }
+
+        if let thumbnail = thumbnailFromBase64 {
+            return thumbnail
+        }
+
+        if let tiffData = fallbackImage.tiffRepresentation,
+           let source = CGImageSourceCreateWithData(tiffData as CFData, nil),
+           let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
+            Logger.debug("Generated preview thumbnail from in-memory TIFF representation")
+            return thumbnail
+        }
+
+        Logger.error("Failed to create preview thumbnail using ImageIO")
+        return nil
+    }
+
+    private static func loadImage(from url: URL) -> NSImage? {
+        do {
+            let data = try Data(contentsOf: url)
+            return NSImage(data: data)
+        } catch {
+            Logger.error("Failed to load image from URL \(url): \(error)")
+            return nil
+        }
+    }
 }
 
 // MARK: - Conversation Item
@@ -400,7 +714,7 @@ struct ImageTranslationView: View {
                                         // Show translation content (either streaming or completed)
                                         HStack(alignment: .top) {
                                             // Always use Markdown rendering for better formatting, both during streaming and when completed
-                                            ImageMarkdownText(markdown: data.translationResult)
+                                            ImageMarkdownText(elements: data.translationDisplayElements)
                                                 .textSelection(.enabled)
                                                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -493,6 +807,20 @@ struct ImageTranslationView: View {
                     }
                     .buttonStyle(PlainButtonStyle())
                     .help("Click to view full size")
+
+                    VStack(spacing: 2) {
+                        if data.originalImageSize != data.previewImageSize {
+                            Text("Preview: \(formatSize(data.previewImageSize))  •  Original: \(formatSize(data.originalImageSize))")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                        } else {
+                            Text("Image size: \(formatSize(data.previewImageSize))")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
 
                     // Language selection
                     HStack {
@@ -630,8 +958,12 @@ struct ImageTranslationView: View {
             .frame(minWidth: 350, maxWidth: 400)
         }
         .sheet(isPresented: $showImageFullSize) {
-            FullSizeImageView(image: data.image)
+            FullSizeImageLoaderView(data: data)
         }
+    }
+
+    private func formatSize(_ size: NSSize) -> String {
+        "\(Int(size.width)) × \(Int(size.height))"
     }
 }
 
@@ -752,9 +1084,77 @@ struct ConversationBubble: View {
     }
 }
 
+// MARK: - Full Size Image Loader
+struct FullSizeImageLoaderView: View {
+    @ObservedObject var data: ImageTranslationData
+    @Environment(\.presentationMode) var presentationMode
+    @State private var fullImage: NSImage?
+    @State private var isLoading = true
+    @State private var showingPreviewFallback = false
+
+    var body: some View {
+        Group {
+            if let fullImage = fullImage {
+                FullSizeImageView(
+                    image: fullImage,
+                    isPreviewFallback: showingPreviewFallback,
+                    originalImageSize: showingPreviewFallback ? data.originalImageSize : nil
+                )
+            } else if isLoading {
+                VStack(spacing: 12) {
+                    ProgressView()
+                    Text("Loading original image...")
+                        .foregroundColor(.secondary)
+                }
+                .frame(width: 420, height: 320)
+            } else {
+                VStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 32))
+                        .foregroundColor(.orange)
+                    Text("Unable to load screenshot")
+                        .font(.headline)
+                    Text("Please try taking the screenshot again.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    Button("Close") {
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                }
+                .padding()
+                .frame(width: 420, height: 320)
+            }
+        }
+        .onAppear {
+            loadImageIfNeeded()
+        }
+    }
+
+    private func loadImageIfNeeded() {
+        guard fullImage == nil && isLoading else { return }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let loadedImage = data.loadFullSizeImage()
+            DispatchQueue.main.async {
+                if let loadedImage = loadedImage {
+                    self.fullImage = loadedImage
+                    self.showingPreviewFallback = false
+                } else {
+                    self.fullImage = data.image
+                    self.showingPreviewFallback = true
+                    Logger.warn("Falling back to preview image for full-size display")
+                }
+                self.isLoading = false
+            }
+        }
+    }
+}
+
 // MARK: - Full Size Image View
 struct FullSizeImageView: View {
     let image: NSImage
+    var isPreviewFallback: Bool = false
+    var originalImageSize: NSSize? = nil
     @Environment(\.presentationMode) var presentationMode
 
     // Calculate optimal window size based on image and screen dimensions
@@ -791,9 +1191,17 @@ struct FullSizeImageView: View {
         VStack(spacing: 0) {
             // Header with close button
             HStack {
-                Text("Original Size: \(Int(image.size.width)) × \(Int(image.size.height))")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Display Size: \(Int(image.size.width)) × \(Int(image.size.height))")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    if let originalImageSize, isPreviewFallback {
+                        Text("Original Size: \(Int(originalImageSize.width)) × \(Int(originalImageSize.height))")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
 
                 Spacer()
 
@@ -804,6 +1212,15 @@ struct FullSizeImageView: View {
             }
             .padding()
             .background(Color(NSColor.windowBackgroundColor))
+
+            if isPreviewFallback {
+                Text("Original screenshot was too large to load directly. Displaying preview version instead.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal)
+                    .padding(.bottom, 4)
+                    .multilineTextAlignment(.center)
+            }
 
             // Image display - use ScrollView only if image is larger than available space
             let availableWidth = size.width - 40
@@ -827,24 +1244,29 @@ struct FullSizeImageView: View {
     }
 }
 
-// MARK: - Enhanced Markdown Text Renderer (copied from TranslationResultWindow)
-struct ImageMarkdownText: View {
-    let markdown: String
+// MARK: - Markdown Rendering Helpers
+struct ImageMarkdownElement {
+    enum ElementType {
+        case header
+        case paragraph
+        case separator
+        case listItem
+    }
 
-    // Preprocess content to handle newlines properly
-    private var processedText: String {
-        var result = markdown
+    let type: ElementType
+    let content: String
+}
 
-        // Handle escaped newlines if they exist
+enum ImageMarkdownParser {
+    private static func normalizedText(from raw: String) -> String {
+        var result = raw
+
         if result.contains("\\n") {
             result = result.replacingOccurrences(of: "\\n", with: "\n")
         }
 
-        // Normalize different line break formats to standard \n
         result = result.replacingOccurrences(of: "\r\n", with: "\n")
         result = result.replacingOccurrences(of: "\r", with: "\n")
-
-        // Normalize smart quotes to standard quotes
         result = result.replacingOccurrences(of: "\u{201C}", with: "\"")
         result = result.replacingOccurrences(of: "\u{201D}", with: "\"")
         result = result.replacingOccurrences(of: "\u{2018}", with: "'")
@@ -853,15 +1275,105 @@ struct ImageMarkdownText: View {
         return result
     }
 
-    var body: some View {
-        // Use custom rendering that properly handles newlines
-        renderTextWithNewlines(processedText)
-    }
+    static func parseElements(from rawText: String) -> [ImageMarkdownElement] {
+        let text = normalizedText(from: rawText)
 
-    // Custom text renderer that properly handles markdown headers and formatting
-    private func renderTextWithNewlines(_ text: String) -> some View {
+        guard !text.isEmpty else {
+            return []
+        }
+
+        var elements: [ImageMarkdownElement] = []
+        let lines = text.components(separatedBy: .newlines)
+        var currentParagraph: [String] = []
+
+        for line in lines {
+            let trimmedLine = line.trimmingCharacters(in: .whitespaces)
+
+            if trimmedLine == "---" {
+                if !currentParagraph.isEmpty {
+                    let paragraphContent = currentParagraph.joined(separator: "\n").trimmingCharacters(in: .whitespaces)
+                    if !paragraphContent.isEmpty {
+                        elements.append(ImageMarkdownElement(type: .paragraph, content: paragraphContent))
+                    }
+                    currentParagraph.removeAll()
+                }
+                elements.append(ImageMarkdownElement(type: .separator, content: ""))
+                continue
+            }
+
+            if trimmedLine.hasPrefix("#") {
+                if !currentParagraph.isEmpty {
+                    let paragraphContent = currentParagraph.joined(separator: "\n").trimmingCharacters(in: .whitespaces)
+                    if !paragraphContent.isEmpty {
+                        elements.append(ImageMarkdownElement(type: .paragraph, content: paragraphContent))
+                    }
+                    currentParagraph.removeAll()
+                }
+
+                var headerContent = trimmedLine
+                while headerContent.hasPrefix("#") {
+                    headerContent = String(headerContent.dropFirst())
+                }
+                headerContent = headerContent.trimmingCharacters(in: .whitespaces)
+
+                if !headerContent.isEmpty {
+                    elements.append(ImageMarkdownElement(type: .header, content: headerContent))
+                }
+                continue
+            }
+
+            if trimmedLine.hasPrefix("-") {
+                if !currentParagraph.isEmpty {
+                    let paragraphContent = currentParagraph.joined(separator: "\n").trimmingCharacters(in: .whitespaces)
+                    if !paragraphContent.isEmpty {
+                        elements.append(ImageMarkdownElement(type: .paragraph, content: paragraphContent))
+                    }
+                    currentParagraph.removeAll()
+                }
+
+                var listItemContent = ""
+                if trimmedLine.count > 1 {
+                    listItemContent = String(trimmedLine.dropFirst()).trimmingCharacters(in: .whitespaces)
+                }
+
+                if !listItemContent.isEmpty {
+                    elements.append(ImageMarkdownElement(type: .listItem, content: listItemContent))
+                }
+                continue
+            }
+
+            if trimmedLine.isEmpty {
+                if !currentParagraph.isEmpty {
+                    let paragraphContent = currentParagraph.joined(separator: "\n").trimmingCharacters(in: .whitespaces)
+                    if !paragraphContent.isEmpty {
+                        elements.append(ImageMarkdownElement(type: .paragraph, content: paragraphContent))
+                    }
+                    currentParagraph.removeAll()
+                }
+                continue
+            }
+
+            currentParagraph.append(line)
+        }
+
+        if !currentParagraph.isEmpty {
+            let paragraphContent = currentParagraph.joined(separator: "\n").trimmingCharacters(in: .whitespaces)
+            if !paragraphContent.isEmpty {
+                elements.append(ImageMarkdownElement(type: .paragraph, content: paragraphContent))
+            }
+        }
+
+        return elements
+    }
+}
+
+// MARK: - Enhanced Markdown Text Renderer (copied from TranslationResultWindow)
+struct ImageMarkdownText: View {
+    let elements: [ImageMarkdownElement]
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(parseMarkdownElements(text).enumerated()), id: \.offset) { index, element in
+            ForEach(Array(elements.enumerated()), id: \.offset) { _, element in
                 Group {
                     switch element.type {
                     case .header:
@@ -870,12 +1382,10 @@ struct ImageMarkdownText: View {
                             .fontWeight(.bold)
                             .padding(.vertical, 4)
                     case .paragraph:
-                        // Use custom text rendering with better bold formatting
                         renderFormattedText(element.content)
                             .multilineTextAlignment(.leading)
                             .fixedSize(horizontal: false, vertical: true)
                     case .listItem:
-                        // Render list item with bullet point
                         HStack(alignment: .top, spacing: 8) {
                             Text("•")
                                 .font(.system(size: 14, weight: .medium))
@@ -899,6 +1409,10 @@ struct ImageMarkdownText: View {
 
     // Render text with proper bold formatting
     private func renderFormattedText(_ text: String) -> Text {
+        guard !text.isEmpty else {
+            return Text("")
+        }
+
         // Parse bold text patterns manually for better control
         let parts = parseBoldText(text)
 
@@ -922,52 +1436,52 @@ struct ImageMarkdownText: View {
 
     // Parse text for bold formatting (** text **)
     private func parseBoldText(_ text: String) -> [TextPart] {
+        guard text.count >= 2 else {
+            return [TextPart(content: text, isBold: false)]
+        }
+
         var parts: [TextPart] = []
         var currentText = ""
-        var i = text.startIndex
+        var index = text.startIndex
+        let lastIndex = text.index(before: text.endIndex)
 
-        while i < text.endIndex {
-            if i < text.index(text.endIndex, offsetBy: -1) &&
-               text[i] == "*" && text[text.index(after: i)] == "*" {
+        while index < text.endIndex {
+            let nextIndex = text.index(after: index)
 
-                // Found start of potential bold section
+            if index < lastIndex && text[index] == "*" && text[nextIndex] == "*" {
                 if !currentText.isEmpty {
                     parts.append(TextPart(content: currentText, isBold: false))
-                    currentText = ""
+                    currentText.removeAll()
                 }
 
-                // Look for closing **
-                let startIndex = text.index(i, offsetBy: 2)
-                var endIndex = startIndex
+                let boldStart = text.index(index, offsetBy: 2)
+                var searchIndex = boldStart
                 var foundClosing = false
 
-                while endIndex < text.index(text.endIndex, offsetBy: -1) {
-                    if text[endIndex] == "*" && text[text.index(after: endIndex)] == "*" {
+                while searchIndex < lastIndex {
+                    let closingNext = text.index(after: searchIndex)
+                    if text[searchIndex] == "*" && text[closingNext] == "*" {
+                        let boldContent = String(text[boldStart..<searchIndex])
+                        if !boldContent.isEmpty {
+                            parts.append(TextPart(content: boldContent, isBold: true))
+                        }
+                        index = text.index(searchIndex, offsetBy: 2)
                         foundClosing = true
                         break
                     }
-                    endIndex = text.index(after: endIndex)
+                    searchIndex = text.index(after: searchIndex)
                 }
 
-                if foundClosing {
-                    // Extract bold content
-                    let boldContent = String(text[startIndex..<endIndex])
-                    if !boldContent.isEmpty {
-                        parts.append(TextPart(content: boldContent, isBold: true))
-                    }
-                    i = text.index(endIndex, offsetBy: 2) // Skip closing **
-                } else {
-                    // No closing **, treat as regular text
-                    currentText.append(text[i])
-                    i = text.index(after: i)
+                if !foundClosing {
+                    currentText.append(text[index])
+                    index = nextIndex
                 }
             } else {
-                currentText.append(text[i])
-                i = text.index(after: i)
+                currentText.append(text[index])
+                index = nextIndex
             }
         }
 
-        // Add remaining text
         if !currentText.isEmpty {
             parts.append(TextPart(content: currentText, isBold: false))
         }
