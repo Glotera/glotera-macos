@@ -76,6 +76,7 @@ class ImageTranslationData: ObservableObject {
     @Published var conversationHistory: [ConversationItem] = []
     @Published var followUpQuestion: String = ""
     @Published var isProcessingFollowUp: Bool = false
+    @Published var translationDisplayElements: [ImageMarkdownElement] = []
 
     let base64Data: String
     let savedImageURL: URL?
@@ -88,6 +89,11 @@ class ImageTranslationData: ObservableObject {
     }
 
     private var isInitializing = true
+    private let translationProcessingQueue = DispatchQueue(label: "com.glotera.imageTranslation.render", qos: .userInitiated)
+    private var pendingTranslationWorkItem: DispatchWorkItem?
+    private var latestStreamContent: String = ""
+    private var lastRenderedContent: String = ""
+    private let streamUpdateDebounceInterval: TimeInterval = 0.05
 
     // Get language name from language code using ConfigManager
     private func getLanguageNativeName(for code: String) -> String {
@@ -177,37 +183,45 @@ class ImageTranslationData: ObservableObject {
         isTranslating = true
         errorMessage = nil
         translationResult = ""
+        translationDisplayElements = []
         // Clear previous conversation history when starting new translation
         conversationHistory.removeAll()
+
+        cancelPendingTranslationRendering()
 
         // Use streaming translation for better user experience
         TranslatorClient.shared.translateImageStream(
             base64Data: base64Data,
             to: selectedTargetLanguage,
             onChunk: { [weak self] chunk, fullContent in
+                guard let self = self else { return }
                 Logger.info("📝 Image translation chunk received: chunk='\(chunk.prefix(50))...', fullContent length=\(fullContent.count)")
-                DispatchQueue.main.async { [weak self] in
-                    guard let self = self else { return }
-                    Logger.info("🔄 Updating UI with fullContent length: \(fullContent.count)")
-                    // Add safety check to prevent rapid updates
-                    if self.translationResult != fullContent {
-                        self.translationResult = fullContent
-                    }
-                }
+                Logger.info("🔄 Queuing UI update with fullContent length: \(fullContent.count)")
+                self.enqueueTranslationContentUpdate(fullContent, isFinal: false)
             },
             onComplete: { [weak self] result, quotaInfo in
+                guard let self = self else { return }
+                let finalContent = result ?? self.translationResult
+                self.enqueueTranslationContentUpdate(finalContent, isFinal: true)
+
                 DispatchQueue.main.async { [weak self] in
                     guard let self = self else { return }
                     self.isTranslating = false
                     if let result = result, !result.isEmpty {
-                        self.translationResult = result
                         Logger.info("Image translation completed successfully")
+                    } else if !self.translationResult.isEmpty {
+                        Logger.info("Image translation completed with streaming content")
                     } else {
                         self.errorMessage = "Translation completed but no result received"
                     }
+
+                    self.cancelPendingTranslationRendering()
                 }
             },
             onError: { [weak self] error in
+                guard let self = self else { return }
+                self.cancelPendingTranslationRendering()
+
                 DispatchQueue.main.async { [weak self] in
                     guard let self = self else { return }
                     self.isTranslating = false
@@ -216,6 +230,63 @@ class ImageTranslationData: ObservableObject {
                 }
             }
         )
+    }
+
+    private func enqueueTranslationContentUpdate(_ fullContent: String, isFinal: Bool) {
+        translationProcessingQueue.async { [weak self] in
+            guard let self = self else { return }
+
+            if !isFinal && fullContent == self.latestStreamContent {
+                // Ignore duplicate non-final updates to reduce redundant work
+                Logger.debug("Skipping duplicate stream content update - no new data to render")
+                return
+            }
+
+            self.latestStreamContent = fullContent
+            self.pendingTranslationWorkItem?.cancel()
+
+            let workItem = DispatchWorkItem { [weak self] in
+                guard let self = self else { return }
+                self.pendingTranslationWorkItem = nil
+
+                let content = self.latestStreamContent
+
+                if content == self.lastRenderedContent {
+                    Logger.debug("Skipping render for unchanged content - size: \(content.count) characters")
+                    return
+                }
+
+                self.lastRenderedContent = content
+
+                autoreleasepool {
+                    let elements = ImageMarkdownParser.parseElements(from: content)
+                    DispatchQueue.main.async {
+                        if self.translationResult != content {
+                            self.translationResult = content
+                        }
+                        self.translationDisplayElements = elements
+                    }
+                }
+            }
+
+            self.pendingTranslationWorkItem = workItem
+
+            if isFinal || self.streamUpdateDebounceInterval <= 0 {
+                workItem.perform()
+            } else {
+                self.translationProcessingQueue.asyncAfter(deadline: .now() + self.streamUpdateDebounceInterval, execute: workItem)
+            }
+        }
+    }
+
+    private func cancelPendingTranslationRendering() {
+        translationProcessingQueue.async { [weak self] in
+            guard let self = self else { return }
+            self.pendingTranslationWorkItem?.cancel()
+            self.pendingTranslationWorkItem = nil
+            self.latestStreamContent = ""
+            self.lastRenderedContent = ""
+        }
     }
 
     func submitFollowUpQuestion() {
@@ -556,7 +627,7 @@ struct ImageTranslationView: View {
                                         // Show translation content (either streaming or completed)
                                         HStack(alignment: .top) {
                                             // Always use Markdown rendering for better formatting, both during streaming and when completed
-                                            ImageMarkdownText(markdown: data.translationResult)
+                                            ImageMarkdownText(elements: data.translationDisplayElements)
                                                 .textSelection(.enabled)
                                                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -1086,24 +1157,29 @@ struct FullSizeImageView: View {
     }
 }
 
-// MARK: - Enhanced Markdown Text Renderer (copied from TranslationResultWindow)
-struct ImageMarkdownText: View {
-    let markdown: String
+// MARK: - Markdown Rendering Helpers
+struct ImageMarkdownElement {
+    enum ElementType {
+        case header
+        case paragraph
+        case separator
+        case listItem
+    }
 
-    // Preprocess content to handle newlines properly
-    private var processedText: String {
-        var result = markdown
+    let type: ElementType
+    let content: String
+}
 
-        // Handle escaped newlines if they exist
+enum ImageMarkdownParser {
+    private static func normalizedText(from raw: String) -> String {
+        var result = raw
+
         if result.contains("\\n") {
             result = result.replacingOccurrences(of: "\\n", with: "\n")
         }
 
-        // Normalize different line break formats to standard \n
         result = result.replacingOccurrences(of: "\r\n", with: "\n")
         result = result.replacingOccurrences(of: "\r", with: "\n")
-
-        // Normalize smart quotes to standard quotes
         result = result.replacingOccurrences(of: "\u{201C}", with: "\"")
         result = result.replacingOccurrences(of: "\u{201D}", with: "\"")
         result = result.replacingOccurrences(of: "\u{2018}", with: "'")
@@ -1112,15 +1188,105 @@ struct ImageMarkdownText: View {
         return result
     }
 
-    var body: some View {
-        // Use custom rendering that properly handles newlines
-        renderTextWithNewlines(processedText)
-    }
+    static func parseElements(from rawText: String) -> [ImageMarkdownElement] {
+        let text = normalizedText(from: rawText)
 
-    // Custom text renderer that properly handles markdown headers and formatting
-    private func renderTextWithNewlines(_ text: String) -> some View {
+        guard !text.isEmpty else {
+            return []
+        }
+
+        var elements: [ImageMarkdownElement] = []
+        let lines = text.components(separatedBy: .newlines)
+        var currentParagraph: [String] = []
+
+        for line in lines {
+            let trimmedLine = line.trimmingCharacters(in: .whitespaces)
+
+            if trimmedLine == "---" {
+                if !currentParagraph.isEmpty {
+                    let paragraphContent = currentParagraph.joined(separator: "\n").trimmingCharacters(in: .whitespaces)
+                    if !paragraphContent.isEmpty {
+                        elements.append(ImageMarkdownElement(type: .paragraph, content: paragraphContent))
+                    }
+                    currentParagraph.removeAll()
+                }
+                elements.append(ImageMarkdownElement(type: .separator, content: ""))
+                continue
+            }
+
+            if trimmedLine.hasPrefix("#") {
+                if !currentParagraph.isEmpty {
+                    let paragraphContent = currentParagraph.joined(separator: "\n").trimmingCharacters(in: .whitespaces)
+                    if !paragraphContent.isEmpty {
+                        elements.append(ImageMarkdownElement(type: .paragraph, content: paragraphContent))
+                    }
+                    currentParagraph.removeAll()
+                }
+
+                var headerContent = trimmedLine
+                while headerContent.hasPrefix("#") {
+                    headerContent = String(headerContent.dropFirst())
+                }
+                headerContent = headerContent.trimmingCharacters(in: .whitespaces)
+
+                if !headerContent.isEmpty {
+                    elements.append(ImageMarkdownElement(type: .header, content: headerContent))
+                }
+                continue
+            }
+
+            if trimmedLine.hasPrefix("-") {
+                if !currentParagraph.isEmpty {
+                    let paragraphContent = currentParagraph.joined(separator: "\n").trimmingCharacters(in: .whitespaces)
+                    if !paragraphContent.isEmpty {
+                        elements.append(ImageMarkdownElement(type: .paragraph, content: paragraphContent))
+                    }
+                    currentParagraph.removeAll()
+                }
+
+                var listItemContent = ""
+                if trimmedLine.count > 1 {
+                    listItemContent = String(trimmedLine.dropFirst()).trimmingCharacters(in: .whitespaces)
+                }
+
+                if !listItemContent.isEmpty {
+                    elements.append(ImageMarkdownElement(type: .listItem, content: listItemContent))
+                }
+                continue
+            }
+
+            if trimmedLine.isEmpty {
+                if !currentParagraph.isEmpty {
+                    let paragraphContent = currentParagraph.joined(separator: "\n").trimmingCharacters(in: .whitespaces)
+                    if !paragraphContent.isEmpty {
+                        elements.append(ImageMarkdownElement(type: .paragraph, content: paragraphContent))
+                    }
+                    currentParagraph.removeAll()
+                }
+                continue
+            }
+
+            currentParagraph.append(line)
+        }
+
+        if !currentParagraph.isEmpty {
+            let paragraphContent = currentParagraph.joined(separator: "\n").trimmingCharacters(in: .whitespaces)
+            if !paragraphContent.isEmpty {
+                elements.append(ImageMarkdownElement(type: .paragraph, content: paragraphContent))
+            }
+        }
+
+        return elements
+    }
+}
+
+// MARK: - Enhanced Markdown Text Renderer (copied from TranslationResultWindow)
+struct ImageMarkdownText: View {
+    let elements: [ImageMarkdownElement]
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(parseMarkdownElements(text).enumerated()), id: \.offset) { index, element in
+            ForEach(Array(elements.enumerated()), id: \.offset) { _, element in
                 Group {
                     switch element.type {
                     case .header:
@@ -1129,12 +1295,10 @@ struct ImageMarkdownText: View {
                             .fontWeight(.bold)
                             .padding(.vertical, 4)
                     case .paragraph:
-                        // Use custom text rendering with better bold formatting
                         renderFormattedText(element.content)
                             .multilineTextAlignment(.leading)
                             .fixedSize(horizontal: false, vertical: true)
                     case .listItem:
-                        // Render list item with bullet point
                         HStack(alignment: .top, spacing: 8) {
                             Text("•")
                                 .font(.system(size: 14, weight: .medium))
