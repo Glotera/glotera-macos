@@ -622,20 +622,23 @@ class ScreenshotTranslationManager: NSObject {
         // Test what ScreenshotManager would do with this image
         Logger.info("📊 Pre-capture size: \(preCapture.size.width) x \(preCapture.size.height)")
         
-        // Save the pre-capture for comparison
+        // Save the pre-capture for comparison with unique name
         let desktopURL = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first!
-        let preTestFileURL = desktopURL.appendingPathComponent("glotera_workflow_precapture.png")
-        
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyyMMdd_HHmmss"
+        let timestamp = dateFormatter.string(from: Date())
+        let preTestFileURL = desktopURL.appendingPathComponent("glotera_workflow_precapture_\(timestamp).png")
+
         if let tiffData = preCapture.tiffRepresentation,
            let bitmapRep = NSBitmapImageRep(data: tiffData),
            let pngData = bitmapRep.representation(using: .png, properties: [:]) {
             try? pngData.write(to: preTestFileURL)
             Logger.info("✅ Pre-capture saved to: \(preTestFileURL.path)")
         }
-        
+
         // Also test what the ScreenshotManager's captureFullScreen would return
         if let fullScreenCapture = ScreenshotManager.shared.captureFullScreen() {
-            let fullTestFileURL = desktopURL.appendingPathComponent("glotera_workflow_fullscreen.png")
+            let fullTestFileURL = desktopURL.appendingPathComponent("glotera_workflow_fullscreen_\(timestamp).png")
             
             if let tiffData = fullScreenCapture.tiffRepresentation,
                let bitmapRep = NSBitmapImageRep(data: tiffData),
