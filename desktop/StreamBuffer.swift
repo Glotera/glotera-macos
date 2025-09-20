@@ -168,7 +168,7 @@ class StreamBatchProcessor {
         // Trigger immediate processing for important events
         // Process immediately for: content chunks, end events, and errors
         if chunk.type == .chunk || chunk.type == .end || chunk.type == .error {
-            Logger.info("🔄 StreamBatchProcessor: Triggering immediate processing for \(chunk.type)")
+            Logger.debug("🔄 StreamBatchProcessor: Triggering immediate processing for \(chunk.type)")
             PerformanceTelemetry.shared.recordCounter("stream.immediate_processing_triggered")
             triggerImmediateProcessing()
         }
@@ -418,7 +418,7 @@ class StreamBatchProcessor {
         for update in updates {
             if case .contentUpdate(let chunk, let fullContent) = update {
                 accumulatedContent = fullContent // Track the latest full content
-                Logger.info("🎬 StreamBatchProcessor applying UI update: chunk='\(chunk.prefix(30))...', fullContent length=\(fullContent.count)")
+                Logger.debug("🎬 StreamBatchProcessor applying UI update: chunk='\(chunk.prefix(30))...', fullContent length=\(fullContent.count)")
                 streamCallbacks?.onChunk(chunk, fullContent)
             }
         }

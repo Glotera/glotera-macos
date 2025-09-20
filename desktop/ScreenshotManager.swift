@@ -419,9 +419,12 @@ class ScreenshotManager: NSObject {
             return nil
         }
 
-        // Generate unique filename
-        let timestamp = DateFormatter().string(from: Date()).replacingOccurrences(of: " ", with: "_").replacingOccurrences(of: ":", with: "-")
-        let filename = "screenshot_\(timestamp).png"
+        // Generate unique filename with timestamp and UUID
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyyMMdd_HHmmss"
+        let timestamp = dateFormatter.string(from: Date())
+        let uniqueID = UUID().uuidString.prefix(4) // Use first 4 characters of UUID for brevity
+        let filename = "screenshot_\(timestamp)_\(uniqueID).png"
         let fileURL = screenshotsDir.appendingPathComponent(filename)
 
         // Convert to PNG with compression
@@ -483,9 +486,12 @@ class ScreenshotManager: NSObject {
             return
         }
 
-        // Save to desktop
+        // Save to desktop with unique name
         let desktopURL = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first!
-        let testFileURL = desktopURL.appendingPathComponent("glotera_test_screenshot.png")
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyyMMdd_HHmmss"
+        let timestamp = dateFormatter.string(from: Date())
+        let testFileURL = desktopURL.appendingPathComponent("glotera_test_screenshot_\(timestamp).png")
 
         guard let tiffData = screenshot.tiffRepresentation,
               let bitmapRep = NSBitmapImageRep(data: tiffData),
@@ -593,7 +599,10 @@ class ScreenshotManager: NSObject {
     }
     
     private func saveTestImage(_ image: NSImage, name: String, to directory: URL) {
-        let fileURL = directory.appendingPathComponent("glotera_test_\(name).png")
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyyMMdd_HHmmss"
+        let timestamp = dateFormatter.string(from: Date())
+        let fileURL = directory.appendingPathComponent("glotera_test_\(name)_\(timestamp).png")
         
         guard let tiffData = image.tiffRepresentation,
               let bitmapRep = NSBitmapImageRep(data: tiffData),
@@ -684,7 +693,10 @@ class ScreenshotManager: NSObject {
     // Debug method to save images with selection rectangle overlay
     private func saveDebugImage(_ image: NSImage, name: String, rect: NSRect) {
         let desktopURL = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first!
-        let debugFileURL = desktopURL.appendingPathComponent("glotera_debug_\(name).png")
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyyMMdd_HHmmss"
+        let timestamp = dateFormatter.string(from: Date())
+        let debugFileURL = desktopURL.appendingPathComponent("glotera_debug_\(name)_\(timestamp).png")
 
         // Create a copy of the image with selection rectangle drawn on it
         let imageWithRect = addSelectionRectToImage(image, rect: rect)
@@ -707,7 +719,10 @@ class ScreenshotManager: NSObject {
     // Debug method to save images without overlay
     private func saveDebugImageSimple(_ image: NSImage, name: String) {
         let desktopURL = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first!
-        let debugFileURL = desktopURL.appendingPathComponent("glotera_debug_\(name).png")
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyyMMdd_HHmmss"
+        let timestamp = dateFormatter.string(from: Date())
+        let debugFileURL = desktopURL.appendingPathComponent("glotera_debug_\(name)_\(timestamp).png")
 
         guard let tiffData = image.tiffRepresentation,
               let bitmapRep = NSBitmapImageRep(data: tiffData),
