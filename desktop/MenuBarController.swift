@@ -53,7 +53,12 @@ class MenuBarController: NSObject, NSMenuDelegate {
 
         let checkUpdatesItem = NSMenuItem(title: "Check for Updates", action: #selector(checkForUpdates), keyEquivalent: "")
         checkUpdatesItem.target = self
-        menu.addItem(checkUpdatesItem) 
+        menu.addItem(checkUpdatesItem)
+
+        // Add Permissions menu item
+        let permissionsItem = NSMenuItem(title: "Check Permissions", action: #selector(checkPermissions), keyEquivalent: "")
+        permissionsItem.target = self
+        menu.addItem(permissionsItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -271,12 +276,54 @@ class MenuBarController: NSObject, NSMenuDelegate {
     
     @objc func checkForUpdates() {
         Logger.info("Check for Updates menu clicked")
-        
+
         // Use UpdateManager to check for updates
         UpdateManager.shared.checkForUpdates()
-        
+
         // Note: In Sparkle 2.7.1, the standard updater shows its own UI
         // No need for manual notification as Sparkle handles user feedback
+    }
+
+    @objc func checkPermissions() {
+        Logger.info("Check Permissions menu clicked")
+
+        // Show current permission status
+        let status = PermissionManager.shared.getPermissionStatus()
+
+        let alert = NSAlert()
+        alert.messageText = "Permission Status"
+        alert.alertStyle = .informational
+
+        var message = "Current permission status:\n\n"
+        message += "• Screen Recording: \(status.screenRecording ? "✅ Granted" : "❌ Not Granted")\n"
+        message += "• Accessibility: \(status.accessibility ? "✅ Granted" : "⚠️ Not Granted")\n\n"
+
+        if !status.screenRecording {
+            message += "⚠️ Screenshot translation requires Screen Recording permission.\n"
+            if status.dontRemindScreenRecording {
+                message += "(Automatic reminders are disabled)\n"
+            }
+        }
+
+        if !status.accessibility {
+            message += "⚠️ Some features may not work without Accessibility permission.\n"
+        }
+
+        alert.informativeText = message
+
+        if !status.screenRecording {
+            alert.addButton(withTitle: "Grant Screen Recording")
+            alert.addButton(withTitle: "Close")
+        } else {
+            alert.addButton(withTitle: "OK")
+        }
+
+        let response = alert.runModal()
+
+        if !status.screenRecording && response == .alertFirstButtonReturn {
+            // Request permission
+            PermissionManager.shared.requestScreenRecordingPermissionManually()
+        }
     }
 
     
@@ -1187,46 +1234,13 @@ class MenuBarController: NSObject, NSMenuDelegate {
     
     @objc func checkScreenRecordingPermission() {
         Logger.info("🔒 Checking screen recording permission...")
-        
-        if #available(macOS 10.15, *) {
-            // Test by trying to capture a small area
-            let testRect = CGRect(x: 0, y: 0, width: 10, height: 10)
-            let options: CGWindowListOption = [.optionOnScreenOnly]
-            
-            let hasPermission = CGWindowListCreateImage(testRect, options, kCGNullWindowID, []) != nil
-            
-            DispatchQueue.main.async {
-                let alert = NSAlert()
-                alert.messageText = "Screen Recording Permission Status"
-                
-                if hasPermission {
-                    alert.informativeText = "✅ Screen recording permission is granted. Screenshot translation should work properly."
-                    alert.alertStyle = .informational
-                    alert.addButton(withTitle: "OK")
-                } else {
-                    alert.informativeText = "❌ Screen recording permission is NOT granted. Please grant permission in System Preferences > Security & Privacy > Privacy > Screen Recording for screenshot translation to work."
-                    alert.alertStyle = .warning
-                    alert.addButton(withTitle: "Open System Preferences")
-                    alert.addButton(withTitle: "Cancel")
-                }
-                
-                let response = alert.runModal()
-                if !hasPermission && response == .alertFirstButtonReturn {
-                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
-                        NSWorkspace.shared.open(url)
-                    }
-                }
-            }
-        } else {
-            DispatchQueue.main.async {
-                let alert = NSAlert()
-                alert.messageText = "Screen Recording Permission Status"
-                alert.informativeText = "ℹ️ Running on macOS < 10.15. Screen recording permissions are not required on this version."
-                alert.alertStyle = .informational
-                alert.addButton(withTitle: "OK")
-                alert.runModal()
-            }
-        }
+
+        // Use PermissionManager to check and request permission
+        PermissionManager.shared.requestScreenRecordingPermissionManually()
+
+        // Also log current permission status
+        let status = PermissionManager.shared.getPermissionStatus()
+        Logger.info("Current permission status: \(status.summary)")
     }
     #endif
 

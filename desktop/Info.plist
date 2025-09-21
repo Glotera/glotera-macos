@@ -22,9 +22,7 @@
 	<key>NSAccessibilityUsageDescription</key>
 	<string>Used to automatically insert the translation result into the input field</string>
 	
-	<!-- keychain access description -->
-	<key>NSKeychainUsageDescription</key>
-	<string>Used to securely store your authentication token and user information</string>
+	<!-- Note: Keychain no longer used, migrated to UserDefaults -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

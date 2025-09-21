@@ -74,6 +74,7 @@
 		QU0T4L1M1TS567890123456 /* QuotaLimits.swift in Sources */ = {isa = PBXBuildFile; fileRef = QU0T4L1M1TS123456789ABCD /* QuotaLimits.swift */; };
 		QU0TA5AL3RT4W1ND0W567890 /* QuotaAlertWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = QU0TA5AL3RT4W1ND0W123456 /* QuotaAlertWindow.swift */; };
 		ed2bfef479fe4bcc89443344 /* ErrorNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = cc719fd545984ccaac0b1c82 /* ErrorNotificationManager.swift */; };
+		2DABC6BBFA8543479CCAF5CA /* PermissionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DABC6BBFA8543479CCAF5CB /* PermissionManager.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -156,6 +157,7 @@
 		QU0T4L1M1TS123456789ABCD /* QuotaLimits.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = QuotaLimits.swift; sourceTree = "<group>"; };
 		QU0TA5AL3RT4W1ND0W123456 /* QuotaAlertWindow.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = QuotaAlertWindow.swift; sourceTree = "<group>"; };
 		cc719fd545984ccaac0b1c82 /* ErrorNotificationManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ErrorNotificationManager.swift; sourceTree = "<group>"; };
+		2DABC6BBFA8543479CCAF5CB /* PermissionManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PermissionManager.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -273,6 +275,7 @@
 				B2C3D4E5F6789012345678AB /* Logger.swift */,
 				D4E5F67890123456789ABCDE /* LoggerExample.swift */,
 				9BE4ED722E012FF1002AC2AE /* MenuBarController.swift */,
+				2DABC6BBFA8543479CCAF5CB /* PermissionManager.swift */,
 				QU0TA5AL3RT4W1ND0W123456 /* QuotaAlertWindow.swift */,
 				QU0T4L1M1TS123456789ABCD /* QuotaLimits.swift */,
 				9BE4ED712E012FF1002AC2AE /* SettingsView.swift */,
@@ -465,6 +468,7 @@
 				603B83892E78259700C0F4D5 /* HotkeyManager.swift in Sources */,
 				C3D4E5F67890123456789ABC /* LoggerExample.swift in Sources */,
 				9BE4ED802E012FF1002AC2AE /* MenuBarController.swift in Sources */,
+				2DABC6BBFA8543479CCAF5CA /* PermissionManager.swift in Sources */,
 				QU0TA5AL3RT4W1ND0W567890 /* QuotaAlertWindow.swift in Sources */,
 				QU0T4L1M1TS567890123456 /* QuotaLimits.swift in Sources */,
 				9BE4ED7F2E012FF1002AC2AE /* SettingsView.swift in Sources */,
