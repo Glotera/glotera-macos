@@ -19,6 +19,11 @@ class InputManager {
     private var _isSendingSimulatedEvent = false
     private var simulatedEventStartTime: Date?
     private var simulatedEventTimeout: TimeInterval = 0.5 // 500ms 超时
+
+    // 双击空格延迟验证相关属性
+    private var pendingTranslationTimer: Timer?
+    private var shouldCancelTranslation = false
+    private var pendingTranslationCompletion: (() -> Void)?
     
     // 事件标记常量
     private let kEventFlagSimulated = CGEventFlags(rawValue: 1 << 30) // 使用bit 30，避免与系统事件冲突
@@ -808,6 +813,64 @@ class InputManager {
     // 获取模拟事件标志
     func getSimulatedEventFlag() -> CGEventFlags {
         return kEventFlagSimulated
+    }
+
+    // MARK: - 双击空格延迟验证方法
+
+    // 双击空格检测后调用 - 延迟验证是否真的要触发翻译
+    func handleDoubleSpaceWithValidation(completion: @escaping () -> Void) {
+        Logger.info("Double space detected, starting 300ms validation period")
+
+        // 取消之前的待处理任务
+        cancelPendingTranslation()
+
+        // 保存completion以便后续调用
+        pendingTranslationCompletion = completion
+        shouldCancelTranslation = false
+
+        // 设置300ms延迟触发
+        pendingTranslationTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { [weak self] _ in
+            guard let self = self else { return }
+
+            if !self.shouldCancelTranslation {
+                Logger.info("No keyboard input detected in 300ms, triggering translation")
+                // 执行翻译触发
+                self.pendingTranslationCompletion?()
+                self.clearPendingTranslation()
+            } else {
+                Logger.info("Translation cancelled due to keyboard input")
+            }
+        }
+    }
+
+    // 处理键盘输入事件 - 用于判断是否取消翻译触发
+    func handleKeyboardInputForTranslationValidation() {
+        // 如果有待处理的翻译任务，则取消
+        if pendingTranslationTimer != nil {
+            Logger.debug("Keyboard input detected during validation period, cancelling translation")
+            shouldCancelTranslation = true
+            cancelPendingTranslation()
+        }
+    }
+
+    // 取消待处理的翻译触发
+    func cancelPendingTranslation() {
+        pendingTranslationTimer?.invalidate()
+        pendingTranslationTimer = nil
+        pendingTranslationCompletion = nil
+        shouldCancelTranslation = false
+    }
+
+    // 清理待处理的翻译状态
+    private func clearPendingTranslation() {
+        pendingTranslationTimer = nil
+        pendingTranslationCompletion = nil
+        shouldCancelTranslation = false
+    }
+
+    // 检查是否有待处理的翻译任务
+    func hasPendingTranslation() -> Bool {
+        return pendingTranslationTimer != nil
     }
 
 }

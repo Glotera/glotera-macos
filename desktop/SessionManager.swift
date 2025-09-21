@@ -398,28 +398,29 @@ class SessionManager {
         return (hasCachedEntry, pendingCount)
     }
     
-    /// Check if current user has access to chat translation feature (Pro/Max only)
+    /// Check if current user has access to chat translation feature (All users have access)
     func hasChatTranslationAccess() -> Bool {
         guard let user = getCurrentUser() else {
             return false
         }
-        
-        // Allow access for pro and enterprise (max) users only
-        return user.userType.lowercased() == "pro" || user.userType.lowercased() == "max"
+
+        // Allow access for all authenticated users (limited by quota only)
+        Logger.debug("hasChatTranslationAccess: User '\(user.username)' with type '\(user.userType)' -> hasAccess: true")
+        return true
     }
     
-    /// Check if current user has access to Follow-up Question feature (Pro/Max only)
+    /// Check if current user has access to Follow-up Question feature (All users have access)
     func hasFollowupQuestionAccess() -> Bool {
         guard let user = getCurrentUser() else {
             Logger.debug("hasFollowupQuestionAccess: No current user found")
             return false
         }
-        
-        let hasAccess = user.userType.lowercased() == "pro" || user.userType.lowercased() == "max"
-        Logger.debug("hasFollowupQuestionAccess: User '\(user.username)' with type '\(user.userType)' -> hasAccess: \(hasAccess)")
-        
-        // Allow access for pro and enterprise (max) users only
-        return hasAccess
+
+        // All authenticated users have access to follow-up questions
+        Logger.debug("hasFollowupQuestionAccess: User '\(user.username)' with type '\(user.userType)' -> hasAccess: true")
+
+        // Allow access for all users (limited by quota only)
+        return true
     }
     
     /// Update only the userType for the current user
