@@ -72,9 +72,6 @@ class TranslationResultWindow: NSWindow {
             },
             onClose: { [weak self] in
                 self?.hide()
-            },
-            onUpgradePrompt: { [weak self] in
-                self?.showFollowupQuestionUpgradePrompt()
             }
         )
         
@@ -205,7 +202,21 @@ class TranslationResultWindow: NSWindow {
             Logger.info("Warning: resultView is nil in updateStreamContent")
             return
         }
-        
+
+        // Debug: Log the raw content to see what we're actually receiving
+        Logger.debug("🔍 Raw stream content received (length: \(content.count))")
+        if content.contains("\n\n") {
+            Logger.debug("✅ Content contains \\n\\n (double newlines)")
+            let paragraphs = content.components(separatedBy: "\n\n")
+            Logger.debug("📊 Found \(paragraphs.count) paragraphs")
+        } else if content.contains("\\n\\n") {
+            Logger.debug("⚠️ Content contains escaped \\\\n\\\\n")
+        } else if content.contains("\n") {
+            Logger.debug("📝 Content contains single newlines only")
+        } else {
+            Logger.debug("❌ Content has no newlines")
+        }
+
         // 确保在主线程更新UI
         if Thread.isMainThread {
             resultView.viewModel.updateTranslation(content, isStreaming: true)
@@ -451,25 +462,6 @@ class TranslationResultWindow: NSWindow {
         self.hide()
     }
     
-    private func showFollowupQuestionUpgradePrompt() {
-        let alert = NSAlert()
-        alert.messageText = "Follow-up Question"
-        alert.informativeText = "Follow-up Question feature is only available for Pro and Max users."
-        alert.alertStyle = .informational
-        
-        // Add buttons
-        alert.addButton(withTitle: "Upgrade Now")
-        alert.addButton(withTitle: "Cancel")
-        
-        // Set the window as parent for the alert
-        alert.beginSheetModal(for: self) { response in
-            if response == .alertFirstButtonReturn {
-                // User clicked "Upgrade Now"
-                EnvironmentManager.shared.openUpgradePage()
-            }
-            // User clicked "Cancel" or closed the dialog - do nothing
-        }
-    }
     
     override var canBecomeKey: Bool {
         return true
@@ -564,9 +556,6 @@ class TranslationResultWindow: NSWindow {
             },
             onClose: { [weak self] in
                 self?.hide()
-            },
-            onUpgradePrompt: { [weak self] in
-                self?.showFollowupQuestionUpgradePrompt()
             }
         )
         
@@ -627,23 +616,15 @@ class TranslationResultViewModel: ObservableObject {
     var onChatToggle: (() -> Void)?
     
     func toggleChat() {
-        // Only allow Follow-up Question toggle for Pro/Max users
-        guard SessionManager.shared.hasFollowupQuestionAccess() else {
-            Logger.info("Follow-up Question toggle blocked - user doesn't have Follow-up Question access")
-            return
-        }
-        
+        // All users can use follow-up questions (limited by quota)
         showingChat.toggle()
         onChatToggle?()
+        Logger.info("Follow-up Question toggled - showingChat: \(showingChat)")
     }
-    
+
     func sendChatMessage(_ message: String) {
-        // Only allow Follow-up Question messages for Pro/Max users
-        guard SessionManager.shared.hasFollowupQuestionAccess() else {
-            Logger.info("Follow-up Question message blocked - user doesn't have Follow-up Question access")
-            return
-        }
-        
+        // All users can send follow-up questions (limited by quota)
+
         // Add user message
         let userMessage = ChatBubbleMessage(content: message, isFromUser: true)
         chatMessages.append(userMessage)
@@ -730,16 +711,14 @@ struct TranslationResultView: View {
     @ObservedObject var viewModel: TranslationResultViewModel
     let onCopy: (String) -> Void
     let onClose: () -> Void
-    let onUpgradePrompt: () -> Void
-    
+
     @State private var showingCopySuccess = false
-    
-    init(original: String, translated: String, isStreaming: Bool, onCopy: @escaping (String) -> Void, onClose: @escaping () -> Void, onUpgradePrompt: @escaping () -> Void) {
+
+    init(original: String, translated: String, isStreaming: Bool, onCopy: @escaping (String) -> Void, onClose: @escaping () -> Void) {
         self.original = original
         self.viewModel = TranslationResultViewModel(translated: translated, isStreaming: isStreaming, originalText: original)
         self.onCopy = onCopy
         self.onClose = onClose
-        self.onUpgradePrompt = onUpgradePrompt
     }
     
     var body: some View {
@@ -756,42 +735,22 @@ struct TranslationResultView: View {
                     .foregroundColor(.primary)
                 
                 Spacer()
-                
-                // Follow-up Question toggle button (Pro/Max only)
-                if SessionManager.shared.hasFollowupQuestionAccess() {
-                    Button(action: {
-                        viewModel.toggleChat()
-                    }) {
-                        Image(systemName: viewModel.showingChat ? "text.bubble.fill" : "text.bubble")
-                            .font(.system(size: 14))
-                            .foregroundColor(.blue)
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                    .help("Toggle Follow-up Question")
-                    .onHover { isHovered in
-                        if isHovered {
-                            NSCursor.pointingHand.push()
-                        } else {
-                            NSCursor.pop()
-                        }
-                    }
-                } else {
-                    // Show upgrade hint for free users
-                    Button(action: {
-                        onUpgradePrompt()
-                    }) {
-                        Image(systemName: "text.bubble")
-                            .font(.system(size: 14))
-                            .foregroundColor(.secondary.opacity(0.6))
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                    .help("Follow-up Question (Pro/Max feature) - Click to upgrade")
-                    .onHover { isHovered in
-                        if isHovered {
-                            NSCursor.pointingHand.push()
-                        } else {
-                            NSCursor.pop()
-                        }
+
+                // Follow-up Question toggle button (available for all users)
+                Button(action: {
+                    viewModel.toggleChat()
+                }) {
+                    Image(systemName: viewModel.showingChat ? "text.bubble.fill" : "text.bubble")
+                        .font(.system(size: 14))
+                        .foregroundColor(.blue)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .help("Toggle Follow-up Question")
+                .onHover { isHovered in
+                    if isHovered {
+                        NSCursor.pointingHand.push()
+                    } else {
+                        NSCursor.pop()
                     }
                 }
                 
@@ -838,22 +797,22 @@ struct TranslationResultView: View {
             }
             
             // Main content area with proportional layout when chat is active
-            if viewModel.showingChat && SessionManager.shared.hasFollowupQuestionAccess() {
-                // When chat is active and user has access: 1:2 ratio (translation:chat) in 600px window
+            if viewModel.showingChat {
+                // When chat is active: 1:2 ratio (translation:chat) in 600px window
                 VStack(spacing: 0) {
                     // Translation content (200px out of 600px = 1/3 of total window)
                     TranslationContentView(original: original, viewModel: viewModel)
                         .frame(height: 200) // Fixed height for consistent 1:2 ratio
-                    
+
                     Divider()
                         .padding(.vertical, 4)
-                    
-                    // Chat section (400px out of 600px = 2/3 of total window) 
+
+                    // Chat section (400px out of 600px = 2/3 of total window)
                     ExpandedChatSection(viewModel: viewModel)
                         .frame(maxHeight: .infinity) // Takes remaining space (~396px after divider)
                 }
             } else {
-                // When chat is inactive or user doesn't have access: full space for translation
+                // When chat is inactive: full space for translation
                 TranslationContentView(original: original, viewModel: viewModel)
             }
         }
@@ -902,29 +861,7 @@ struct TranslationContentView: View {
     @ObservedObject var viewModel: TranslationResultViewModel
     
     // Process translation text to handle newlines and basic formatting without markdown rendering
-    private func processedTranslationText(_ text: String) -> String {
-        var result = text
-        
-        // Handle escaped newlines if they exist
-        if result.contains("\\n") {
-            result = result.replacingOccurrences(of: "\\n", with: "\n")
-        }
-        
-        // Normalize different line break formats to standard \n
-        result = result.replacingOccurrences(of: "\r\n", with: "\n")
-        result = result.replacingOccurrences(of: "\r", with: "\n")
-        
-        // Normalize smart quotes to standard quotes
-        result = result.replacingOccurrences(of: "\u{201C}", with: "\"") // Left double quotation mark
-        result = result.replacingOccurrences(of: "\u{201D}", with: "\"") // Right double quotation mark
-        result = result.replacingOccurrences(of: "\u{2018}", with: "'")  // Left single quotation mark
-        result = result.replacingOccurrences(of: "\u{2019}", with: "'")  // Right single quotation mark
-        
-        // Clean up excessive consecutive newlines but preserve intentional spacing
-        result = result.replacingOccurrences(of: "\n\n\n+", with: "\n\n", options: .regularExpression)
-        
-        return result
-    }
+    // processedTranslationText function removed - now handled by TranslationMarkdownText
     
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -952,12 +889,8 @@ struct TranslationContentView: View {
             VStack(alignment: .leading, spacing: 4) {
                 ScrollView {
                     HStack(alignment: .top) {
-                        Text(processedTranslationText(viewModel.translated))
-                            .font(.system(size: 14))
-                            .foregroundColor(.primary)
-                            .lineSpacing(6) // Increased line spacing for better readability
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .fixedSize(horizontal: false, vertical: true)
+                        // Use TranslationMarkdownText for better formatting
+                        TranslationMarkdownText(markdown: viewModel.translated)
                             .textSelection(.enabled)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4) // Add vertical padding for better visual separation
@@ -1405,5 +1338,317 @@ struct MarkdownText: View {
         let type: BlockType
         let lines: [String]
         let isLastParagraph: Bool
+    }
+}
+
+// MARK: - Translation Markdown Text Renderer (based on ImageMarkdownText)
+struct TranslationMarkdownText: View {
+    let markdown: String
+
+    // Preprocess content to handle newlines properly
+    private var processedText: String {
+        var result = markdown
+
+        // Debug logging to understand what we're processing
+        Logger.debug("🎨 TranslationMarkdownText processing text (length: \(result.count))")
+
+        // Check what kind of newlines we have before processing
+        if result.contains("\n\n") {
+            Logger.debug("✅ Text already contains real \\n\\n")
+        } else if result.contains("\\n\\n") {
+            Logger.debug("⚠️ Text contains escaped \\\\n\\\\n - will convert to real newlines")
+        }
+
+        // Handle escaped newlines if they exist
+        // IMPORTANT: Process \\n\\n first before single \\n to preserve paragraph breaks
+        if result.contains("\\n\\n") {
+            result = result.replacingOccurrences(of: "\\n\\n", with: "\n\n")
+            Logger.debug("📝 Converted \\\\n\\\\n to real paragraph breaks")
+        } else if result.contains("\\n") {
+            result = result.replacingOccurrences(of: "\\n", with: "\n")
+            Logger.debug("📝 Converted \\\\n to real newlines")
+        }
+
+        // Normalize different line break formats to standard \n
+        result = result.replacingOccurrences(of: "\r\n", with: "\n")
+        result = result.replacingOccurrences(of: "\r", with: "\n")
+
+        // Normalize smart quotes to standard quotes
+        result = result.replacingOccurrences(of: "\u{201C}", with: "\"")
+        result = result.replacingOccurrences(of: "\u{201D}", with: "\"")
+        result = result.replacingOccurrences(of: "\u{2018}", with: "'")
+        result = result.replacingOccurrences(of: "\u{2019}", with: "'")
+
+        // Final debug check
+        if result.contains("\n\n") {
+            let paragraphs = result.components(separatedBy: "\n\n")
+            Logger.debug("📊 After processing: \(paragraphs.count) paragraphs found")
+        }
+
+        return result
+    }
+
+    var body: some View {
+        // Use custom rendering that properly handles newlines
+        renderTextWithNewlines(processedText)
+    }
+
+    // Custom text renderer that properly handles markdown headers and formatting
+    private func renderTextWithNewlines(_ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(parseMarkdownElements(text).enumerated()), id: \.offset) { index, element in
+                Group {
+                    switch element.type {
+                    case .header:
+                        Text(element.content)
+                            .font(.system(size: 15, weight: .semibold))
+                            .fontWeight(.bold)
+                            .padding(.vertical, 2)
+                    case .paragraph:
+                        // Use custom text rendering with better bold formatting
+                        renderFormattedText(element.content)
+                            .font(.system(size: 14))
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .lineSpacing(6)
+                    case .listItem:
+                        // Render list item with bullet point
+                        HStack(alignment: .top, spacing: 6) {
+                            Text("•")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.primary)
+                                .padding(.top, 1)
+
+                            renderFormattedText(element.content)
+                                .font(.system(size: 14))
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .lineSpacing(6)
+                        }
+                        .padding(.vertical, 1)
+                    case .separator:
+                        Divider()
+                            .padding(.vertical, 4)
+                    case .emptyLine:
+                        // Preserve empty lines as vertical spacing with more visible spacing
+                        Spacer()
+                            .frame(height: 20) // More visible paragraph spacing
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // Render text with proper bold formatting
+    private func renderFormattedText(_ text: String) -> Text {
+        // Parse bold text patterns manually for better control
+        let parts = parseBoldText(text)
+
+        if parts.count == 1 && !parts[0].isBold {
+            // Simple case: no formatting needed
+            return Text(parts[0].content)
+        }
+
+        // Build attributed text by combining parts
+        var result = Text("")
+        for part in parts {
+            if part.isBold {
+                result = result + Text(part.content).fontWeight(.bold)
+            } else {
+                result = result + Text(part.content)
+            }
+        }
+
+        return result
+    }
+
+    // Parse text for bold formatting (** text **)
+    private func parseBoldText(_ text: String) -> [TextPart] {
+        var parts: [TextPart] = []
+        var currentText = ""
+        var i = text.startIndex
+
+        while i < text.endIndex {
+            if i < text.index(text.endIndex, offsetBy: -1) &&
+               text[i] == "*" && text[text.index(after: i)] == "*" {
+
+                // Found start of potential bold section
+                if !currentText.isEmpty {
+                    parts.append(TextPart(content: currentText, isBold: false))
+                    currentText = ""
+                }
+
+                // Look for closing **
+                let startIndex = text.index(i, offsetBy: 2)
+                var endIndex = startIndex
+                var foundClosing = false
+
+                while endIndex < text.index(text.endIndex, offsetBy: -1) {
+                    if text[endIndex] == "*" && text[text.index(after: endIndex)] == "*" {
+                        foundClosing = true
+                        break
+                    }
+                    endIndex = text.index(after: endIndex)
+                }
+
+                if foundClosing {
+                    // Extract bold content
+                    let boldContent = String(text[startIndex..<endIndex])
+                    if !boldContent.isEmpty {
+                        parts.append(TextPart(content: boldContent, isBold: true))
+                    }
+                    i = text.index(endIndex, offsetBy: 2) // Skip closing **
+                } else {
+                    // No closing **, treat as regular text
+                    currentText.append(text[i])
+                    i = text.index(after: i)
+                }
+            } else {
+                currentText.append(text[i])
+                i = text.index(after: i)
+            }
+        }
+
+        // Add remaining text
+        if !currentText.isEmpty {
+            parts.append(TextPart(content: currentText, isBold: false))
+        }
+
+        return parts.isEmpty ? [TextPart(content: text, isBold: false)] : parts
+    }
+
+    // Parse text into markdown elements (headers, paragraphs, separators)
+    private func parseMarkdownElements(_ text: String) -> [MarkdownElement] {
+        var elements: [MarkdownElement] = []
+
+        // Debug logging
+        Logger.debug("🔍 parseMarkdownElements: Processing text with length \(text.count)")
+
+        // Split by double newlines to preserve paragraph breaks
+        let paragraphs = text.components(separatedBy: "\n\n")
+        Logger.debug("📊 Found \(paragraphs.count) paragraphs in markdown")
+
+        for (index, paragraph) in paragraphs.enumerated() {
+            // Skip completely empty paragraphs
+            if paragraph.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Logger.debug("⏭️ Skipping empty paragraph at index \(index)")
+                continue
+            }
+
+            Logger.debug("📝 Processing paragraph \(index + 1)/\(paragraphs.count) with \(paragraph.count) chars")
+
+            // Process each paragraph line by line
+            let lines = paragraph.components(separatedBy: "\n")
+            var currentParagraphLines: [String] = []
+
+            for line in lines {
+                let trimmedLine = line.trimmingCharacters(in: .whitespaces)
+
+                // Check if it's a horizontal rule
+                if trimmedLine == "---" {
+                    // Add any accumulated paragraph content first
+                    if !currentParagraphLines.isEmpty {
+                        let content = currentParagraphLines.joined(separator: "\n")
+                        elements.append(MarkdownElement(type: .paragraph, content: content))
+                        currentParagraphLines.removeAll()
+                    }
+                    elements.append(MarkdownElement(type: .separator, content: ""))
+                    continue
+                }
+
+                // Check if it's a header (starts with #)
+                if trimmedLine.hasPrefix("#") {
+                    // Add any accumulated paragraph content first
+                    if !currentParagraphLines.isEmpty {
+                        let content = currentParagraphLines.joined(separator: "\n")
+                        elements.append(MarkdownElement(type: .paragraph, content: content))
+                        currentParagraphLines.removeAll()
+                    }
+
+                    // Extract header content (remove # characters and leading whitespace)
+                    var headerContent = trimmedLine
+                    while headerContent.hasPrefix("#") {
+                        headerContent = String(headerContent.dropFirst())
+                    }
+                    headerContent = headerContent.trimmingCharacters(in: .whitespaces)
+
+                    if !headerContent.isEmpty {
+                        elements.append(MarkdownElement(type: .header, content: headerContent))
+                    }
+                    continue
+                }
+
+                // Check if it's a list item (starts with -)
+                if trimmedLine.hasPrefix("-") {
+                    // Add any accumulated paragraph content first
+                    if !currentParagraphLines.isEmpty {
+                        let content = currentParagraphLines.joined(separator: "\n")
+                        elements.append(MarkdownElement(type: .paragraph, content: content))
+                        currentParagraphLines.removeAll()
+                    }
+
+                    // Extract list item content safely (remove - and leading whitespace)
+                    var listItemContent = ""
+                    if trimmedLine.hasPrefix("-") && trimmedLine.count > 1 {
+                        listItemContent = String(trimmedLine.dropFirst()).trimmingCharacters(in: .whitespaces)
+                    }
+
+                    if !listItemContent.isEmpty {
+                        elements.append(MarkdownElement(type: .listItem, content: listItemContent))
+                    }
+                    continue
+                }
+
+                // Regular line - add to current paragraph (preserve original line with spacing)
+                currentParagraphLines.append(line)
+            }
+
+            // Add any remaining paragraph content
+            if !currentParagraphLines.isEmpty {
+                let content = currentParagraphLines.joined(separator: "\n")
+                elements.append(MarkdownElement(type: .paragraph, content: content))
+                Logger.debug("📄 Added paragraph with \(currentParagraphLines.count) lines")
+            }
+
+            // IMPORTANT: Add empty line after each paragraph (except the last one) to preserve paragraph spacing
+            if index < paragraphs.count - 1 {
+                Logger.debug("➕ Adding empty line after paragraph \(index + 1)")
+                elements.append(MarkdownElement(type: .emptyLine, content: ""))
+            }
+        }
+
+        // Log summary of what we parsed
+        Logger.debug("📊 Parsed markdown summary: \(elements.count) total elements")
+        let paragraphCount = elements.filter { $0.type == .paragraph }.count
+        let emptyLineCount = elements.filter { $0.type == .emptyLine }.count
+        let headerCount = elements.filter { $0.type == .header }.count
+        let listCount = elements.filter { $0.type == .listItem }.count
+        Logger.debug("  - Paragraphs: \(paragraphCount)")
+        Logger.debug("  - Empty lines: \(emptyLineCount)")
+        Logger.debug("  - Headers: \(headerCount)")
+        Logger.debug("  - List items: \(listCount)")
+
+        return elements
+    }
+
+    // Helper structures for markdown parsing
+    private struct MarkdownElement {
+        enum ElementType {
+            case header
+            case paragraph
+            case separator
+            case listItem
+            case emptyLine
+        }
+
+        let type: ElementType
+        let content: String
+    }
+
+    // Helper structure for text formatting
+    private struct TextPart {
+        let content: String
+        let isBold: Bool
     }
 }

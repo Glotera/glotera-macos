@@ -715,13 +715,13 @@ class TranslatorClient: NSObject {
                 onComplete: onComplete,
                 onError: onError
             ),
-            quotaDelegate: quotaDelegate
+            quotaDelegate: self.quotaDelegate
         )
         
         // 创建专用的流式会话
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = timeoutInterval
-        config.timeoutIntervalForResource = timeoutInterval * 2
+        config.timeoutIntervalForResource = 120.0  // 2分钟，允许更长的流式传输
         
         // 根据环境配置网络参数
         if isProductionEnvironment {
@@ -730,7 +730,7 @@ class TranslatorClient: NSObject {
             config.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
             config.urlCache = nil
             config.httpShouldUsePipelining = false
-            config.timeoutIntervalForRequest = 60.0  // 生产环境延长超时
+            config.timeoutIntervalForRequest = 60.0  // 生产环境延长超时到2分钟
         } else {
             Logger.info("🏠 Configuring for development environment")
             config.httpMaximumConnectionsPerHost = 5
@@ -803,8 +803,8 @@ class TranslatorClient: NSObject {
         Logger.info("📡 Stream translation request started - waiting for response...")
         
         // Store startTime in the task for later reference in delegate methods
-        // We'll use objc_setAssociatedObject to attach timing info to the task
-        objc_setAssociatedObject(task, "streamStartTime", startTime, .OBJC_ASSOCIATION_RETAIN)
+        // Use COPY_NONATOMIC instead of RETAIN to avoid double free issues
+        objc_setAssociatedObject(task, "streamStartTime", startTime, .OBJC_ASSOCIATION_COPY_NONATOMIC)
     }
     
     // 便捷方法：流式翻译（向后兼容）
@@ -1023,7 +1023,28 @@ class TranslatorClient: NSObject {
         }
     }
     
+    private func cleanupStreamSession() {
+        // 只清理一次，避免重复清理
+        guard streamSession != nil else { return }
+
+        // 先清理streamProcessor，避免Timer相关的double free
+        streamProcessor?.cleanup()
+        streamProcessor = nil
+
+        // 清理URLSession
+        streamSession?.invalidateAndCancel()
+        streamSession = nil
+
+        // 清理其他引用
+        streamCallbacks = nil
+        streamBuffer = ""
+
+        Logger.debug("Stream session cleaned up safely")
+    }
+
     deinit {
+        // 确保在对象销毁前清理所有资源
+        cleanupStreamSession()
         NotificationCenter.default.removeObserver(self)
     }
     
@@ -1274,6 +1295,7 @@ extension TranslatorClient: URLSessionDataDelegate {
             DispatchQueue.main.async {
                 self.streamCallbacks?.onError("Invalid response format")
             }
+            cleanupStreamSession()
             completionHandler(.cancel)
             return
         }
@@ -1292,6 +1314,7 @@ extension TranslatorClient: URLSessionDataDelegate {
             DispatchQueue.main.async {
                 self.streamCallbacks?.onError("Server error: \(httpResponse.statusCode)")
             }
+            cleanupStreamSession()
             completionHandler(.cancel)
             return
         }
@@ -1305,17 +1328,16 @@ extension TranslatorClient: URLSessionDataDelegate {
             Logger.error("Failed to decode stream data")
             return
         }
-        
-        
-        // if isProductionEnvironment {
-        //     Logger.info("Raw data: \(dataString.prefix(200))...") // Only show first 200 characters
-        // }else{
-        //     Logger.info("Raw data: \(dataString)")
-        // }
-        
-        // 异步处理数据，避免阻塞delegate队列
-        DispatchQueue.global(qos: .userInteractive).async { [weak self] in
-            self?.processStreamData(dataString)
+
+        // 使用StreamBatchProcessor处理数据，而不是直接处理
+        // 这样可以避免并发问题和内存管理问题
+        if let processor = streamProcessor {
+            processor.addRawData(dataString)
+        } else {
+            // Fallback：如果processor不存在，使用原有方式
+            DispatchQueue.global(qos: .userInteractive).async { [weak self] in
+                self?.processStreamData(dataString)
+            }
         }
     }
     
@@ -1334,6 +1356,9 @@ extension TranslatorClient: URLSessionDataDelegate {
             DispatchQueue.main.async {
                 self.streamCallbacks?.onError("Network error: \(error.localizedDescription)")
             }
+
+            // 确保网络错误时也清理资源
+            cleanupStreamSession()
         } else {
             // 检查HTTP状态码，特别是429配额耗尽的情况
             if let httpResponse = task.response as? HTTPURLResponse {
@@ -1434,42 +1459,55 @@ extension TranslatorClient: URLSessionDataDelegate {
                     }
                     
                     // 清理并返回，不需要继续处理
-                    streamSession?.invalidateAndCancel()
-                    streamSession = nil
-                    streamCallbacks = nil
-                    streamBuffer = ""
+                    cleanupStreamSession()
                     return
                 }
             }
             
             // 处理缓冲区中剩余的数据
-            if !streamBuffer.isEmpty {
-                processStreamLine(streamBuffer)
+            // 注意：只在streamSession仍然存在时处理，避免访问已释放的资源
+            if streamSession != nil && !streamBuffer.isEmpty {
+                let remainingBuffer = streamBuffer // 创建本地副本
+                streamBuffer = "" // 先清空，避免重复处理
+                processStreamLine(remainingBuffer)
             }
+
+            // 如果使用 StreamProcessor，延迟清理以确保所有事件都被处理
+            if streamProcessor != nil {
+                Logger.info("📍 Delaying cleanup to allow StreamProcessor to finish processing")
+                // 延迟清理，给 processor 时间处理所有排队的事件
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    Logger.info("📍 Performing delayed cleanup after StreamProcessor processing")
+                    self?.cleanupStreamSession()
+                }
+            } else {
+                // 没有使用 processor，直接清理
+                cleanupStreamSession()
+            }
+
             Logger.info("✅ Stream translation completed successfully after \(String(format: "%.3f", duration * 1000))ms")
-        }
-         
-        // 清理
-        streamSession?.invalidateAndCancel()
-        streamSession = nil
-        streamCallbacks = nil
-        streamProcessor = nil
-        streamBuffer = "" 
+        } 
     }
     
     private func processStreamData(_ dataString: String) {
+        // 检查session是否仍然有效
+        guard streamSession != nil else {
+            Logger.debug("Stream session already cleaned up, ignoring data")
+            return
+        }
+
         // Add to buffer for processing
         streamBuffer += dataString
-        
+
         // Process complete lines
         let lines = streamBuffer.components(separatedBy: .newlines)
-        
+
         // Keep the last incomplete line in buffer
         if lines.count > 1 {
             streamBuffer = lines.last ?? ""
-            
+
             // Process complete lines
-            for line in lines.dropLast() {
+            for line in lines.dropLast() where streamSession != nil {
                 processStreamLine(line)
             }
         }
@@ -1543,6 +1581,11 @@ extension TranslatorClient: URLSessionDataDelegate {
                             capturedCallbacks?.onComplete(fullContent.isEmpty ? nil : fullContent, quotaInfo)
                         }
                     }
+
+                    // 流式翻译完成后清理资源
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        self.cleanupStreamSession()
+                    }
                     return
                     
                 case "error":
@@ -1552,6 +1595,9 @@ extension TranslatorClient: URLSessionDataDelegate {
                             self.streamCallbacks?.onError(errorMessage)
                         }
                     }
+
+                    // 错误时立即清理资源
+                    cleanupStreamSession()
                     return
                     
                 default:
@@ -1658,4 +1704,382 @@ extension TranslatorClient {
             task.resume()
         }
     }
-} 
+}
+
+// MARK: - Image Translation Extension
+extension TranslatorClient {
+
+    /// Translate image using base64 data
+    func translateImage(base64Data: String, to language: String, completion: @escaping (Result<TranslationResult, TranslationError>) -> Void) {
+        Logger.debug("Starting image translation to language: \(language)")
+        Logger.debug("Base64 data size: \(base64Data.count) characters")
+
+        // Record image translation attempt
+        recordPerformanceCounter("translation.image.attempt")
+        recordPerformanceCounter("translation.image.data_size", value: Double(base64Data.count))
+
+        let timer = PerformanceTelemetry.shared.startTiming("translation.image.total")
+        timer.addContext("target_language", language)
+        timer.addContext("data_size", base64Data.count)
+
+        // Use rate limiter
+        rateLimiter.execute {
+            self.performImageTranslation(base64Data: base64Data, to: language) { result in
+                switch result {
+                case .success(let translationResult):
+                    timer.addContext("result_length", translationResult.translated.count)
+                    timer.finish(success: true)
+                    recordPerformanceCounter("translation.image.success")
+                case .failure(let error):
+                    timer.addContext("error_type", String(describing: error))
+                    timer.finish(success: false)
+                    recordPerformanceCounter("translation.image.failure")
+                }
+                completion(result)
+            }
+        }
+    }
+
+    /// Stream translate image using base64 data
+    func translateImageStream(
+        base64Data: String,
+        to: String,
+        onChunk: @escaping (String, String) -> Void,
+        onComplete: @escaping (String?, QuotaInfo?) -> Void,
+        onError: @escaping (String) -> Void
+    ) {
+        Logger.info("Starting stream image translation to: \(to)")
+        Logger.debug("Base64 data size: \(base64Data.count) characters")
+
+        // Record stream image translation attempt
+        recordPerformanceCounter("translation.image.stream.attempt")
+        recordPerformanceCounter("translation.image.stream.data_size", value: Double(base64Data.count))
+
+        let timer = PerformanceTelemetry.shared.startTiming("translation.image.stream.total")
+        timer.addContext("target_language", to)
+        timer.addContext("data_size", base64Data.count)
+
+        // Client-side quota validation
+        validateQuotaBeforeTranslation { [weak self] quotaError in
+            if let quotaError = quotaError {
+                Logger.info("Stream image translation blocked by quota validation")
+                DispatchQueue.main.async {
+                    if case .quotaExceeded(let quotaInfo) = quotaError {
+                        onError(quotaInfo.quotaStatusMessage ?? "Translation quota exceeded")
+                    } else {
+                        onError("Translation quota exceeded")
+                    }
+                }
+                return
+            }
+
+            // Quota validation passed, proceed with stream translation
+            self?.performActualImageStreamTranslation(base64Data: base64Data, to: to, onChunk: onChunk, onComplete: onComplete, onError: onError)
+        }
+    }
+
+    private func performImageTranslation(base64Data: String, to language: String, completion: @escaping (Result<TranslationResult, TranslationError>) -> Void) {
+        // Client-side quota validation
+        validateQuotaBeforeTranslation { [weak self] quotaError in
+            if let quotaError = quotaError {
+                Logger.info("Image translation blocked by quota validation")
+                completion(.failure(quotaError))
+                return
+            }
+
+            // Quota validation passed, proceed with translation
+            self?.performActualImageTranslation(base64Data: base64Data, to: language, completion: completion)
+        }
+    }
+
+    private func performActualImageTranslation(base64Data: String, to language: String, completion: @escaping (Result<TranslationResult, TranslationError>) -> Void) {
+        let startTime = CFAbsoluteTimeGetCurrent()
+        Logger.info("🚀 Starting image translation API call to \(endpoint)")
+
+        guard let url = URL(string: endpoint) else {
+            Logger.error("Invalid API URL")
+            completion(.failure(.networkError("Invalid API URL")))
+            return
+        }
+
+        // Use cached authentication helper
+        AuthenticationHelper.shared.getAuthenticatedHeaders { [weak self] headers in
+            guard let self = self, let headers = headers else {
+                Logger.error("No valid authentication headers available - image translation requires login")
+                completion(.failure(.authenticationRequired("Authentication required")))
+                return
+            }
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+
+            // Set headers from authentication helper
+            for (key, value) in headers {
+                request.setValue(value, forHTTPHeaderField: key)
+            }
+
+            Logger.debug("Adding cached authentication header to image translation request")
+
+            // Build request body for image translation
+            let environment = EnvironmentManager.shared.getEnvironmentInfo()
+            guard let userId = SessionManager.shared.getCurrentUser()?.userId else {
+                Logger.error("No authenticated user available")
+                completion(.failure(.authenticationRequired("No authenticated user")))
+                return
+            }
+
+            // Create image translation request body according to requirements
+            let requestBody: [String: Any] = [
+                "type": "image",  // Specify this is image translation
+                "text": base64Data,  // Base64 image data goes in text field
+                "to": language,
+                "stream": false,
+                "user_id": userId,
+                "environment": environment
+            ]
+
+            do {
+                request.httpBody = try JSONSerialization.data(withJSONObject: requestBody, options: [])
+            } catch {
+                Logger.error("Failed to serialize image translation request body: \(error)")
+                completion(.failure(.parseError("Failed to serialize request")))
+                return
+            }
+
+            // Use connection pool for better performance
+            let session = connectionPool.getSession()
+            let task = session.dataTask(with: request) { data, response, error in
+                let endTime = CFAbsoluteTimeGetCurrent()
+                let duration = endTime - startTime
+
+                if let error = error {
+                    Logger.info("❌ Image translation API error after \(String(format: "%.3f", duration * 1000))ms: \(error.localizedDescription)")
+                    completion(.failure(.networkError(error.localizedDescription)))
+                    return
+                }
+
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    Logger.info("❌ Invalid response type after \(String(format: "%.3f", duration * 1000))ms")
+                    completion(.failure(.networkError("Invalid response type")))
+                    return
+                }
+
+                guard let data = data else {
+                    Logger.info("❌ No data received from image translation API after \(String(format: "%.3f", duration * 1000))ms")
+                    completion(.failure(.networkError("No data received")))
+                    return
+                }
+
+                // Handle HTTP status codes
+                if httpResponse.statusCode == 429 {
+                    Logger.warn("⚠️ Image translation quota exceeded after \(String(format: "%.3f", duration * 1000))ms")
+                    do {
+                        if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                           let quotaData = json["quota_info"] as? [String: Any] {
+                            let quotaInfo = QuotaInfo(from: quotaData)
+                            Logger.warn("Image translation quota exceeded for user")
+
+                            // Update cached quota info
+                            self.updateCachedQuotaInfo(quotaInfo)
+
+                            DispatchQueue.main.async {
+                                self.quotaDelegate?.didReceiveQuotaExceededError(quotaInfo)
+                            }
+
+                            completion(.failure(.quotaExceeded(quotaInfo)))
+                            return
+                        }
+                    } catch {
+                        Logger.error("Failed to parse quota exceeded response: \(error)")
+                    }
+                    completion(.failure(.serverError(429, "Quota exceeded")))
+                    return
+                }
+
+                guard httpResponse.statusCode == 200 else {
+                    Logger.info("❌ Image translation API HTTP error \(httpResponse.statusCode) after \(String(format: "%.3f", duration * 1000))ms")
+                    completion(.failure(.serverError(httpResponse.statusCode, "Server error")))
+                    return
+                }
+
+                // Parse success response
+                do {
+                    guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                        Logger.info("❌ Failed to parse image translation response after \(String(format: "%.3f", duration * 1000))ms")
+                        completion(.failure(.parseError("Invalid JSON response")))
+                        return
+                    }
+
+                    let result = TranslationResult(from: json)
+
+                    if result.translated.isEmpty {
+                        Logger.info("❌ Empty image translation result after \(String(format: "%.3f", duration * 1000))ms")
+                        completion(.failure(.parseError("Empty translation result")))
+                        return
+                    }
+
+                    Logger.info("✅ Image translation successful after \(String(format: "%.3f", duration * 1000))ms")
+
+                    // Handle quota info notifications
+                    if let quotaInfo = result.quotaInfo {
+                        self.updateCachedQuotaInfo(quotaInfo)
+
+                        DispatchQueue.main.async {
+                            self.quotaDelegate?.didReceiveQuotaUpdate(quotaInfo)
+
+                            if quotaInfo.isLowQuota {
+                                self.quotaDelegate?.didReceiveQuotaWarning(quotaInfo)
+                            }
+                        }
+
+                        Logger.debug("Quota info: \(quotaInfo.quotaDescription)")
+                    }
+
+                    completion(.success(result))
+                } catch {
+                    Logger.info("❌ Failed to parse JSON response after \(String(format: "%.3f", duration * 1000))ms: \(error)")
+                    completion(.failure(.parseError("JSON parsing failed")))
+                }
+            }
+            task.resume()
+        }
+    }
+
+    private func performActualImageStreamTranslation(
+        base64Data: String,
+        to: String,
+        onChunk: @escaping (String, String) -> Void,
+        onComplete: @escaping (String?, QuotaInfo?) -> Void,
+        onError: @escaping (String) -> Void
+    ) {
+        Logger.info("Starting actual stream image translation")
+
+        // Check authentication first
+        AuthenticationHelper.shared.ensureAuthenticated { isAuthenticated in
+            guard isAuthenticated else {
+                Logger.warn("Stream image translation attempted without authentication")
+                DispatchQueue.main.async {
+                    onError("Authentication required")
+                }
+                return
+            }
+
+            self.performStreamImageTranslation(base64Data: base64Data, to: to, onChunk: onChunk, onComplete: onComplete, onError: onError)
+        }
+    }
+
+    private func performStreamImageTranslation(
+        base64Data: String,
+        to: String,
+        onChunk: @escaping (String, String) -> Void,
+        onComplete: @escaping (String?, QuotaInfo?) -> Void,
+        onError: @escaping (String) -> Void
+    ) {
+        let startTime = CFAbsoluteTimeGetCurrent()
+        Logger.info("🚀 Starting stream image translation API call at \(Date())")
+
+        guard let url = URL(string: endpoint) else {
+            let duration = CFAbsoluteTimeGetCurrent() - startTime
+            Logger.info("❌ Invalid URL after \(String(format: "%.3f", duration * 1000))ms: \(endpoint)")
+            DispatchQueue.main.async {
+                onError("Invalid server URL")
+            }
+            return
+        }
+
+        // Save callbacks
+        streamCallbacks = StreamCallbacks(onChunk: onChunk, onComplete: onComplete, onError: onError)
+        streamBuffer = ""
+
+        // Initialize stream processor
+        streamProcessor = StreamBatchProcessor()
+        streamProcessor?.setCallbacks(
+            StreamProcessorCallbacks(
+                onChunk: onChunk,
+                onComplete: onComplete,
+                onError: onError
+            ),
+            quotaDelegate: self.quotaDelegate
+        )
+
+        // Create streaming session
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = timeoutInterval
+        config.timeoutIntervalForResource = 300.0  // 5分钟，允许更长的图像流式传输
+
+        // Configure for streaming
+        if isProductionEnvironment {
+            config.httpMaximumConnectionsPerHost = 1
+            config.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+            config.urlCache = nil
+            config.timeoutIntervalForRequest = 60.0  // 图像翻译延长超时到2分钟
+        } else {
+            config.httpMaximumConnectionsPerHost = 5
+            config.requestCachePolicy = .useProtocolCachePolicy
+            config.timeoutIntervalForRequest = 10.0
+        }
+
+        let streamQueue = OperationQueue()
+        streamQueue.qualityOfService = .userInteractive
+        streamQueue.maxConcurrentOperationCount = 1
+        streamQueue.name = "ImageStreamProcessingQueue"
+
+        streamSession = URLSession(configuration: config, delegate: self, delegateQueue: streamQueue)
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = timeoutInterval
+
+        // Add authentication header
+        guard let authToken = SessionManager.shared.getAuthToken() else {
+            Logger.error("No authentication token available for stream image translation")
+            DispatchQueue.main.async {
+                onError("Authentication required")
+            }
+            return
+        }
+
+        request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        request.setValue("keep-alive", forHTTPHeaderField: "Connection")
+
+        // Build request body for stream image translation
+        let environment = EnvironmentManager.shared.getEnvironmentInfo()
+        guard let userId = SessionManager.shared.getCurrentUser()?.userId else {
+            Logger.error("No authenticated user available for stream image translation")
+            DispatchQueue.main.async {
+                onError("Authentication required")
+            }
+            return
+        }
+
+        // Create stream image translation request body
+        let body: [String: Any] = [
+            "type": "image",  // Specify this is image translation
+            "text": base64Data,  // Base64 image data goes in text field
+            "to": to,
+            "stream": true,
+            "user_id": userId,
+            "environment": environment
+        ]
+
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        } catch {
+            Logger.info("Failed to serialize stream image request body: \(error)")
+            DispatchQueue.main.async {
+                onError("Failed to prepare request")
+            }
+            return
+        }
+
+        let task = streamSession!.dataTask(with: request)
+        task.resume()
+        Logger.info("📡 Stream image translation request started - waiting for response...")
+
+        // Store timing info
+        objc_setAssociatedObject(task, "streamStartTime", startTime, .OBJC_ASSOCIATION_COPY_NONATOMIC)
+    }
+}

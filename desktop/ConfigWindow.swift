@@ -423,39 +423,96 @@ struct FavoriteSettingsView: View {
                     Text("Return Key Interception")
                         .font(.headline)
                         .fontWeight(.semibold)
-                    
+
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
                             Toggle("With Trigger", isOn: $viewModel.returnKeyWithTrigger)
                                 .onChange(of: viewModel.returnKeyWithTrigger) { newValue in
                                     viewModel.updateReturnKeyWithTrigger(enabled: newValue)
                                 }
-                            
+
                             Spacer()
                         }
-                        
+
                         Text("When enabled, pressing Return key will automatically translate content when a trigger (like @zh) is detected in the input.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
-                        
+
                         HStack {
                             Toggle("Without Trigger", isOn: $viewModel.returnKeyWithoutTrigger)
                                 .onChange(of: viewModel.returnKeyWithoutTrigger) { newValue in
                                     viewModel.updateReturnKeyWithoutTrigger(enabled: newValue)
                                 }
-                            
+
                             Spacer()
                         }
                         Text("Only for Pro and Max users")
                             .font(.caption)
                             .foregroundColor(.red)
                             .fixedSize(horizontal: false, vertical: true)
-                        
+
                         Text("When enabled and the translation sidebar is open, pressing Return key will automatically translate content to sender's language without needing to type a trigger.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding()
+                    .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
+                    .cornerRadius(8)
+                }
+
+                // Screenshot Hotkey Section
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Screenshot Translation Hotkey")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Customize the hotkey combination to trigger screenshot translation")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        // Hotkey input field
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Press keys to set hotkey:")
+                                .font(.system(size: 13, weight: .medium))
+
+                            HStack {
+                                HotkeyInputField(
+                                    currentHotkey: viewModel.currentHotkeyDescription,
+                                    onHotkeyChanged: { keyString, modifiers in
+                                        viewModel.setHotkeyFromInput(
+                                            key: keyString,
+                                            shift: modifiers.contains(.shift),
+                                            option: modifiers.contains(.option),
+                                            cmd: modifiers.contains(.command),
+                                            control: modifiers.contains(.control)
+                                        )
+                                    }
+                                )
+                                .frame(width: 200, height: 32)
+
+                                Button("Reset to Default") {
+                                    viewModel.setHotkeyPreset(shift: true, option: true, cmd: false, control: false, key: "S")
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+
+                            Text("Requirements: At least one modifier key (⌘/⌃/⌥/⇧) + one letter/number key")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            if !viewModel.hotkeyValidationMessage.isEmpty {
+                                Text(viewModel.hotkeyValidationMessage)
+                                    .font(.caption)
+                                    .foregroundColor(viewModel.isCurrentHotkeyValid ? .green : .red)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
                     }
                     .padding()
                     .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
@@ -782,6 +839,15 @@ class LanguageConfigViewModel: ObservableObject {
     @Published var returnKeyWithTrigger: Bool = true
     @Published var returnKeyWithoutTrigger: Bool = true
     @Published var languageSuggestions: [SimpleLanguage] = []
+
+    // Screenshot hotkey settings
+    @Published var screenshotHotkeyKey: String = "S"
+    @Published var screenshotHotkeyUseCmd: Bool = false
+    @Published var screenshotHotkeyUseShift: Bool = true
+    @Published var screenshotHotkeyUseOption: Bool = true
+    @Published var screenshotHotkeyUseControl: Bool = false
+    @Published var hotkeyValidationMessage: String = ""
+    @Published var isCurrentHotkeyValid: Bool = true
     
     // Available languages for picker
     var availableLanguages: [SimpleLanguage] {
@@ -800,10 +866,21 @@ class LanguageConfigViewModel: ObservableObject {
             }
         }
     }
+
+    // Current hotkey description for display
+    var currentHotkeyDescription: String {
+        var components: [String] = []
+        if screenshotHotkeyUseControl { components.append("⌃") }
+        if screenshotHotkeyUseOption { components.append("⌥") }
+        if screenshotHotkeyUseShift { components.append("⇧") }
+        if screenshotHotkeyUseCmd { components.append("⌘") }
+        components.append(screenshotHotkeyKey)
+        return components.joined(separator: "")
+    }
     
     func loadConfigs() {
         configs = ConfigManager.shared.loadLanguageConfigs()
-        
+
         let appSettings = ConfigManager.shared.loadAppSettings()
         preferredLanguage = appSettings.preferredLanguage
         translationRuleType = appSettings.translationRuleType
@@ -811,8 +888,16 @@ class LanguageConfigViewModel: ObservableObject {
         translationRuleLanguagesExcludes = appSettings.translationRuleLanguagesExcludes
         returnKeyWithTrigger = appSettings.returnKeyWithTrigger
         returnKeyWithoutTrigger = appSettings.returnKeyWithoutTrigger
-        
+
+        // Load screenshot hotkey settings with defaults (Shift+Option+S)
+        screenshotHotkeyKey = UserDefaults.standard.string(forKey: "screenshot_hotkey_key") ?? "S"
+        screenshotHotkeyUseCmd = UserDefaults.standard.bool(forKey: "screenshot_hotkey_cmd")
+        screenshotHotkeyUseShift = UserDefaults.standard.object(forKey: "screenshot_hotkey_shift") == nil ? true : UserDefaults.standard.bool(forKey: "screenshot_hotkey_shift")
+        screenshotHotkeyUseOption = UserDefaults.standard.object(forKey: "screenshot_hotkey_option") == nil ? true : UserDefaults.standard.bool(forKey: "screenshot_hotkey_option")
+        screenshotHotkeyUseControl = UserDefaults.standard.bool(forKey: "screenshot_hotkey_control")
+
         Logger.info("Loaded \(configs.count) language configurations and app settings for configuration window")
+        Logger.info("Current screenshot hotkey: \(currentHotkeyDescription)")
     }
     
     func updateTriggers(for languageCode: String, triggers: [String]) {
@@ -908,10 +993,80 @@ class LanguageConfigViewModel: ObservableObject {
             Logger.error("Failed to update translation rule languages (excludes) setting")
         }
     }
-    
 
-    
-    
+    // Screenshot hotkey methods
+    func setHotkeyPreset(shift: Bool, option: Bool, cmd: Bool, control: Bool, key: String) {
+        screenshotHotkeyUseShift = shift
+        screenshotHotkeyUseOption = option
+        screenshotHotkeyUseCmd = cmd
+        screenshotHotkeyUseControl = control
+        screenshotHotkeyKey = key
+
+        hotkeyValidationMessage = "✅ Hotkey combination is valid"
+        isCurrentHotkeyValid = true
+
+        // Force UI update by triggering the computed property
+        objectWillChange.send()
+
+        // Save to UserDefaults immediately
+        saveHotkeySettings()
+
+        Logger.info("Screenshot hotkey preset applied: \(currentHotkeyDescription)")
+    }
+
+    func setHotkeyFromInput(key: String, shift: Bool, option: Bool, cmd: Bool, control: Bool) {
+        // Validate the hotkey combination
+        let hasModifier = shift || option || cmd || control
+        let isValidKey = isValidHotkeyKey(key)
+
+        if !hasModifier {
+            hotkeyValidationMessage = "⚠️ At least one modifier key is required"
+            isCurrentHotkeyValid = false
+            return
+        }
+
+        if !isValidKey {
+            hotkeyValidationMessage = "⚠️ Please use a letter (A-Z) or number (0-9) key"
+            isCurrentHotkeyValid = false
+            return
+        }
+
+        // Valid combination - update all properties
+        screenshotHotkeyUseShift = shift
+        screenshotHotkeyUseOption = option
+        screenshotHotkeyUseCmd = cmd
+        screenshotHotkeyUseControl = control
+        screenshotHotkeyKey = key.uppercased()
+
+        hotkeyValidationMessage = "✅ Hotkey combination is valid"
+        isCurrentHotkeyValid = true
+
+        // Force UI update by triggering the computed property
+        objectWillChange.send()
+
+        // Save to UserDefaults immediately
+        saveHotkeySettings()
+
+        Logger.info("Screenshot hotkey set from input: \(currentHotkeyDescription)")
+    }
+
+    private func isValidHotkeyKey(_ key: String) -> Bool {
+        return KeyCodeMapper.isValidHotkeyKey(key)
+    }
+
+    private func saveHotkeySettings() {
+        UserDefaults.standard.set(screenshotHotkeyKey, forKey: "screenshot_hotkey_key")
+        UserDefaults.standard.set(screenshotHotkeyUseCmd, forKey: "screenshot_hotkey_cmd")
+        UserDefaults.standard.set(screenshotHotkeyUseShift, forKey: "screenshot_hotkey_shift")
+        UserDefaults.standard.set(screenshotHotkeyUseOption, forKey: "screenshot_hotkey_option")
+        UserDefaults.standard.set(screenshotHotkeyUseControl, forKey: "screenshot_hotkey_control")
+
+        // Update the screenshot manager with new hotkey settings
+        ScreenshotTranslationManager.shared.reloadHotkeySettings()
+
+        Logger.info("Screenshot hotkey settings saved and applied: \(currentHotkeyDescription)")
+    }
+
     func resetToDefaults() {
         let alert = NSAlert()
         alert.messageText = "Reset to Default Configuration"
@@ -1174,20 +1329,143 @@ struct AboutView: View {
 struct InfoRow: View {
     let label: String
     let value: String
-    
+
     var body: some View {
         HStack {
             Text(label)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundColor(.primary)
                 .frame(width: 120, alignment: .leading)
-            
+
             Text(value)
                 .font(.system(size: 13))
                 .foregroundColor(.secondary)
                 .textSelection(.enabled)
-            
+
             Spacer()
         }
     }
+}
+
+// MARK: - Hotkey Input Field
+struct HotkeyInputField: NSViewRepresentable {
+    let currentHotkey: String
+    let onHotkeyChanged: (String, NSEvent.ModifierFlags) -> Void
+
+    func makeNSView(context: Context) -> HotkeyInputNSView {
+        let view = HotkeyInputNSView()
+        view.hotkeyDisplay = currentHotkey
+        view.onHotkeyChanged = onHotkeyChanged
+        return view
+    }
+
+    func updateNSView(_ nsView: HotkeyInputNSView, context: Context) {
+        // Force update the display when the hotkey changes
+        nsView.hotkeyDisplay = currentHotkey
+        nsView.needsDisplay = true
+
+        // If the view is currently capturing but we have a new hotkey, exit capture mode
+        if nsView.isCapturing && !currentHotkey.isEmpty {
+            DispatchQueue.main.async {
+                nsView.window?.makeFirstResponder(nil)
+            }
+        }
+    }
+}
+
+class HotkeyInputNSView: NSView {
+    var hotkeyDisplay: String = "" {
+        didSet {
+            needsDisplay = true
+        }
+    }
+    var onHotkeyChanged: ((String, NSEvent.ModifierFlags) -> Void)?
+    private(set) var isCapturing = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setupView()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setupView()
+    }
+
+    private func setupView() {
+        self.wantsLayer = true
+        self.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        self.layer?.borderColor = NSColor.controlColor.cgColor
+        self.layer?.borderWidth = 1.0
+        self.layer?.cornerRadius = 4.0
+    }
+
+    override var acceptsFirstResponder: Bool {
+        return true
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        isCapturing = true
+        self.layer?.borderColor = NSColor.controlAccentColor.cgColor
+        self.layer?.borderWidth = 2.0
+        needsDisplay = true
+        return super.becomeFirstResponder()
+    }
+
+    override func resignFirstResponder() -> Bool {
+        isCapturing = false
+        self.layer?.borderColor = NSColor.controlColor.cgColor
+        self.layer?.borderWidth = 1.0
+        needsDisplay = true
+        return super.resignFirstResponder()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        // Capture the key combination
+        let keyCode = event.keyCode
+        let modifierFlags = event.modifierFlags.intersection([.command, .shift, .control, .option])
+
+        // Convert key code to string
+        if let keyString = KeyCodeMapper.getKeyString(for: keyCode) {
+            onHotkeyChanged?(keyString, modifierFlags)
+
+            // Resign first responder after capturing the key to exit capture mode
+            DispatchQueue.main.async { [weak self] in
+                self?.window?.makeFirstResponder(nil)
+            }
+        }
+    }
+
+    override func flagsChanged(with event: NSEvent) {
+        // Don't do anything on modifier-only changes
+        // We only care about actual key presses with modifiers
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+
+        let displayText = isCapturing ? "Press keys..." : (hotkeyDisplay.isEmpty ? "Click to set" : hotkeyDisplay)
+
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 13),
+            .foregroundColor: isCapturing ? NSColor.controlAccentColor : NSColor.labelColor
+        ]
+
+        let attributedString = NSAttributedString(string: displayText, attributes: attributes)
+        let textSize = attributedString.size()
+
+        let textRect = NSRect(
+            x: (bounds.width - textSize.width) / 2,
+            y: (bounds.height - textSize.height) / 2,
+            width: textSize.width,
+            height: textSize.height
+        )
+
+        attributedString.draw(in: textRect)
+    }
+
 }

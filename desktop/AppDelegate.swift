@@ -20,11 +20,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         Logger.info("AppDelegate did finish launching")
-        
+
         // 启用文件日志记录
         Logger.enableFileLogging(fileName: "glotera.log", maxFileSize: 5 * 1024 * 1024, maxFiles: 3)
-         
-        
+
         menuBarController = MenuBarController()
         inputMonitor = InputMonitor()
         
@@ -42,15 +41,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // Initialize chat translation manager
         _ = ChatTranslationManager.shared
-        
+
+        // Initialize screenshot translation manager with modern hotkeys
+        Logger.info("🔄 About to initialize ScreenshotTranslationManager...")
+        _ = ScreenshotTranslationManager.shared
+        Logger.info("✅ ScreenshotTranslationManager initialization completed")
+
         // Initialize update manager and check for updates
         _ = UpdateManager.shared
         UpdateManager.shared.performFirstLaunchCheck()
-        
+
+        // Check permissions after all managers are initialized
+        Logger.info("🚀 Checking permissions...")
+
+        // For testing: reset permission flow if environment variable is set
+        if ProcessInfo.processInfo.environment["RESET_PERMISSIONS"] == "1" {
+            Logger.info("🔄 RESET_PERMISSIONS environment variable detected - resetting permission flow")
+            PermissionManager.shared.resetPermissionFlow()
+        }
+
+        PermissionManager.shared.checkPermissionsOnStartup()
+
         // Check authentication status on startup
         checkAuthenticationStatus()
-        
-        // Try to setup event monitoring
+
+        // Try to setup event monitoring (only if permissions are granted)
         setupEventMonitoring()
         
         // 启动选中文本监听
@@ -452,14 +467,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Logger.info("Event monitoring cleanup complete")
     }
     
-    private func setupEventMonitoring() { 
-        
+    private func setupEventMonitoring() {
+
         // Check accessibility permissions first
         if !AXIsProcessTrusted() {
-            Logger.warn("Accessibility permissions not granted")
-            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
-            let result = AXIsProcessTrustedWithOptions(options as CFDictionary)
-            Logger.info("Permission request result: \(result)")
+            Logger.warn("Accessibility permissions not granted - event monitoring disabled")
+            // Don't prompt here - let PermissionManager handle it
             return
         }
         

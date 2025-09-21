@@ -53,7 +53,12 @@ class MenuBarController: NSObject, NSMenuDelegate {
 
         let checkUpdatesItem = NSMenuItem(title: "Check for Updates", action: #selector(checkForUpdates), keyEquivalent: "")
         checkUpdatesItem.target = self
-        menu.addItem(checkUpdatesItem) 
+        menu.addItem(checkUpdatesItem)
+
+        // Add Permissions menu item
+        let permissionsItem = NSMenuItem(title: "Check Permissions", action: #selector(checkPermissions), keyEquivalent: "")
+        permissionsItem.target = self
+        menu.addItem(permissionsItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -93,6 +98,25 @@ class MenuBarController: NSObject, NSMenuDelegate {
         let logoBarStatusItem = NSMenuItem(title: "Check Logo Bar Status", action: #selector(checkLogoBarStatus), keyEquivalent: "")
         logoBarStatusItem.target = self
         debugMenu.addItem(logoBarStatusItem)
+        
+        // Screenshot Debug Functions
+        debugMenu.addItem(NSMenuItem.separator())
+        
+        let screenshotDiagnosisItem = NSMenuItem(title: "Screenshot Diagnosis", action: #selector(runScreenshotDiagnosis), keyEquivalent: "")
+        screenshotDiagnosisItem.target = self
+        debugMenu.addItem(screenshotDiagnosisItem)
+        
+        let testImmediateCaptureItem = NSMenuItem(title: "Test Immediate Capture", action: #selector(testImmediateCapture), keyEquivalent: "")
+        testImmediateCaptureItem.target = self
+        debugMenu.addItem(testImmediateCaptureItem)
+        
+        let testWorkflowItem = NSMenuItem(title: "Test Screenshot Workflow", action: #selector(testScreenshotWorkflow), keyEquivalent: "")
+        testWorkflowItem.target = self
+        debugMenu.addItem(testWorkflowItem)
+        
+        let checkPermissionsItem = NSMenuItem(title: "Check Screen Recording Permission", action: #selector(checkScreenRecordingPermission), keyEquivalent: "")
+        checkPermissionsItem.target = self
+        debugMenu.addItem(checkPermissionsItem)
         
         menu.addItem(debugMenuItem)
         #endif
@@ -252,12 +276,54 @@ class MenuBarController: NSObject, NSMenuDelegate {
     
     @objc func checkForUpdates() {
         Logger.info("Check for Updates menu clicked")
-        
+
         // Use UpdateManager to check for updates
         UpdateManager.shared.checkForUpdates()
-        
+
         // Note: In Sparkle 2.7.1, the standard updater shows its own UI
         // No need for manual notification as Sparkle handles user feedback
+    }
+
+    @objc func checkPermissions() {
+        Logger.info("Check Permissions menu clicked")
+
+        // Show current permission status
+        let status = PermissionManager.shared.getPermissionStatus()
+
+        let alert = NSAlert()
+        alert.messageText = "Permission Status"
+        alert.alertStyle = .informational
+
+        var message = "Current permission status:\n\n"
+        message += "• Screen Recording: \(status.screenRecording ? "✅ Granted" : "❌ Not Granted")\n"
+        message += "• Accessibility: \(status.accessibility ? "✅ Granted" : "⚠️ Not Granted")\n\n"
+
+        if !status.screenRecording {
+            message += "⚠️ Screenshot translation requires Screen Recording permission.\n"
+            if status.dontRemindScreenRecording {
+                message += "(Automatic reminders are disabled)\n"
+            }
+        }
+
+        if !status.accessibility {
+            message += "⚠️ Some features may not work without Accessibility permission.\n"
+        }
+
+        alert.informativeText = message
+
+        if !status.screenRecording {
+            alert.addButton(withTitle: "Grant Screen Recording")
+            alert.addButton(withTitle: "Close")
+        } else {
+            alert.addButton(withTitle: "OK")
+        }
+
+        let response = alert.runModal()
+
+        if !status.screenRecording && response == .alertFirstButtonReturn {
+            // Request permission
+            PermissionManager.shared.requestScreenRecordingPermissionManually()
+        }
     }
 
     
@@ -1117,5 +1183,65 @@ class MenuBarController: NSObject, NSMenuDelegate {
             fetchQuotaInfoIfNeeded()
         }
     }
+    
+    // MARK: - Screenshot Debug Methods
+    
+    #if DEBUG
+    @objc func runScreenshotDiagnosis() {
+        Logger.info("🔍 Running comprehensive screenshot diagnosis...")
+        ScreenshotManager.shared.diagnoseDifferentCaptureMethods()
+        
+        // Show alert to user
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = "Screenshot Diagnosis Complete"
+            alert.informativeText = "Test images have been saved to your Desktop. Check for files starting with 'glotera_test_' to see what each capture method produces."
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        }
+    }
+    
+    @objc func testImmediateCapture() {
+        Logger.info("📸 Testing immediate screenshot capture...")
+        ScreenshotTranslationManager.shared.testImmediateScreenshotCapture()
+        
+        // Show alert to user
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = "Immediate Capture Test Complete"
+            alert.informativeText = "Test image saved to Desktop as 'glotera_immediate_capture_test.png'. This shows what the hotkey would capture right now."
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        }
+    }
+    
+    @objc func testScreenshotWorkflow() {
+        Logger.info("🔄 Testing complete screenshot workflow...")
+        ScreenshotTranslationManager.shared.testFullScreenshotWorkflow()
+        
+        // Show alert to user
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = "Screenshot Workflow Test Complete"
+            alert.informativeText = "Test images saved to Desktop: 'glotera_workflow_precapture.png' and 'glotera_workflow_fullscreen.png' show the comparison between the two capture methods."
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        }
+    }
+    
+    @objc func checkScreenRecordingPermission() {
+        Logger.info("🔒 Checking screen recording permission...")
+
+        // Use PermissionManager to check and request permission
+        PermissionManager.shared.requestScreenRecordingPermissionManually()
+
+        // Also log current permission status
+        let status = PermissionManager.shared.getPermissionStatus()
+        Logger.info("Current permission status: \(status.summary)")
+    }
+    #endif
 
 } 

@@ -118,9 +118,9 @@ class StreamBatchProcessor {
     private var batchTimer: Timer?
     
     // Configuration
-    private let maxBatchSize: Int = 10
-    private let batchTimeoutMs: TimeInterval = 16.67 // ~60 FPS (16.67ms)
-    private let maxProcessingTime: TimeInterval = 8.0 // 8ms max processing per batch
+    private let maxBatchSize: Int = 3  // Smaller batches for faster updates
+    private let batchTimeoutMs: TimeInterval = 8.33 // ~120 FPS (8.33ms) for smoother streaming
+    private let maxProcessingTime: TimeInterval = 4.0 // 4ms max processing per batch
     
     // Performance tracking
     private var processedChunks = 0
@@ -144,7 +144,12 @@ class StreamBatchProcessor {
     }
     
     deinit {
+        cleanupTimer()
+    }
+
+    private func cleanupTimer() {
         batchTimer?.invalidate()
+        batchTimer = nil
     }
     
     // MARK: - Public Interface
@@ -157,11 +162,14 @@ class StreamBatchProcessor {
             Logger.warn("StreamBatchProcessor: Dropped chunk (total dropped: \(droppedChunks))")
         } else {
             PerformanceTelemetry.shared.recordCounter("stream.chunk_added")
+            Logger.info("🔄 StreamBatchProcessor: Added chunk of type \(chunk.type), triggering immediate processing")
         }
-        
-        // Trigger immediate processing for high-priority events
-        if chunk.type.priority <= 1 { // error or end events
-            PerformanceTelemetry.shared.recordCounter("stream.priority_processing_triggered")
+
+        // Trigger immediate processing for important events
+        // Process immediately for: content chunks, end events, and errors
+        if chunk.type == .chunk || chunk.type == .end || chunk.type == .error {
+            Logger.debug("🔄 StreamBatchProcessor: Triggering immediate processing for \(chunk.type)")
+            PerformanceTelemetry.shared.recordCounter("stream.immediate_processing_triggered")
             triggerImmediateProcessing()
         }
     }
@@ -172,10 +180,18 @@ class StreamBatchProcessor {
         for line in lines {
             let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
             
-            guard !trimmedLine.isEmpty && trimmedLine != "data: [DONE]" else {
+            guard !trimmedLine.isEmpty else {
                 continue
             }
-            
+
+            // Handle [DONE] marker as end event
+            if trimmedLine == "data: [DONE]" {
+                Logger.info("📍 StreamBatchProcessor: Received [DONE] marker, creating end event")
+                let endChunk = StreamChunk(type: .end, content: "", fullContent: nil, metadata: nil)
+                addChunk(endChunk)
+                continue
+            }
+
             if trimmedLine.hasPrefix("data: ") {
                 let jsonString = String(trimmedLine.dropFirst(6))
                 if let chunk = parseStreamChunk(jsonString) {
@@ -185,6 +201,13 @@ class StreamBatchProcessor {
         }
     }
     
+    func cleanup() {
+        cleanupTimer()
+        streamCallbacks = nil
+        quotaDelegate = nil
+        accumulatedContent = ""
+    }
+
     func getPerformanceStats() -> (processed: Int, dropped: Int, bufferUtilization: Double, avgProcessingTime: TimeInterval) {
         // Record telemetry metrics
         PerformanceTelemetry.shared.recordMetric(PerformanceMetric(
@@ -194,7 +217,7 @@ class StreamBatchProcessor {
             timestamp: Date(),
             context: nil
         ))
-        
+
         PerformanceTelemetry.shared.recordMetric(PerformanceMetric(
             name: "stream.dropped_chunks",
             value: Double(droppedChunks),
@@ -202,7 +225,7 @@ class StreamBatchProcessor {
             timestamp: Date(),
             context: nil
         ))
-        
+
         PerformanceTelemetry.shared.recordMetric(PerformanceMetric(
             name: "stream.buffer_utilization",
             value: buffer.utilization,
@@ -210,7 +233,7 @@ class StreamBatchProcessor {
             timestamp: Date(),
             context: nil
         ))
-        
+
         PerformanceTelemetry.shared.recordMetric(PerformanceMetric(
             name: "stream.avg_processing_time",
             value: averageProcessingTime * 1000, // Convert to ms
@@ -218,17 +241,25 @@ class StreamBatchProcessor {
             timestamp: Date(),
             context: nil
         ))
-        
+
         return (processedChunks, droppedChunks, buffer.utilization, averageProcessingTime)
     }
     
     // MARK: - Batch Processing
     
     private func setupBatchTimer() {
-        batchTimer = Timer.scheduledTimer(withTimeInterval: batchTimeoutMs / 1000.0, repeats: true) { [weak self] _ in
-            self?.processBatch()
+        // Clean up any existing timer first
+        cleanupTimer()
+
+        batchTimer = Timer.scheduledTimer(withTimeInterval: batchTimeoutMs / 1000.0, repeats: true) { [weak self] timer in
+            // Check if self still exists and timer is still valid
+            guard let self = self, timer.isValid else {
+                timer.invalidate()
+                return
+            }
+            self.processBatch()
         }
-        
+
         // Use a high-priority run loop mode
         if let timer = batchTimer {
             RunLoop.main.add(timer, forMode: .common)
@@ -303,23 +334,25 @@ class StreamBatchProcessor {
                 }
                 
             case .end:
+                Logger.info("📍 StreamBatchProcessor: Processing END event")
                 var quotaInfo: QuotaInfo?
                 var finalTranslated: String?
-                
+
                 // Parse quota info from metadata
                 if let metadata = chunk.metadata {
                     quotaInfo = parseQuotaInfo(metadata)
-                    
+
                     // Try to extract final translated result from metadata (legacy format)
                     if let result = metadata["result"] as? [String: Any],
                        let translated = result["translated"] as? String {
                         finalTranslated = translated
                     }
                 }
-                
+
                 // Use finalTranslated if available, otherwise use chunk.content
                 let completionContent = finalTranslated ?? (chunk.content.isEmpty ? nil : chunk.content)
                 completionUpdate = .completion(completionContent, quotaInfo)
+                Logger.info("📍 StreamBatchProcessor: Created completion update with content length: \(completionContent?.count ?? 0)")
                 
             case .error:
                 errorUpdate = .error(chunk.content)
@@ -385,6 +418,7 @@ class StreamBatchProcessor {
         for update in updates {
             if case .contentUpdate(let chunk, let fullContent) = update {
                 accumulatedContent = fullContent // Track the latest full content
+                Logger.debug("🎬 StreamBatchProcessor applying UI update: chunk='\(chunk.prefix(30))...', fullContent length=\(fullContent.count)")
                 streamCallbacks?.onChunk(chunk, fullContent)
             }
         }
@@ -415,6 +449,7 @@ class StreamBatchProcessor {
                 Logger.warn("StreamBatchProcessor: No content available for completion - both finalContent and accumulatedContent are empty")
             }
             
+            Logger.info("📍 StreamBatchProcessor: Calling onComplete with content length: \(resultContent?.count ?? 0)")
             streamCallbacks?.onComplete(resultContent, quotaInfo)
         }
     }
