@@ -187,27 +187,31 @@ class InputMonitor {
                         Logger.info("===========================================")
                         Logger.debug("Double space detected in callback (interval: \(String(format: "%.3f", currentTime.timeIntervalSince(shared.lastSpaceTime!)))s)")
                         shared.lastSpaceTime = nil // 立即重置避免重复触发
-                        
+
                         // 更严格的验证：检查事件间隔是否有非空格非修饰键
                         let nonSpaceEvents = shared.keyEventsBetweenSpaces.filter { keyCode in
-                            return keyCode != kVK_Space && 
-                                   keyCode != kVK_Command && 
-                                   keyCode != kVK_Shift && 
-                                   keyCode != kVK_Option && 
+                            return keyCode != kVK_Space &&
+                                   keyCode != kVK_Command &&
+                                   keyCode != kVK_Shift &&
+                                   keyCode != kVK_Option &&
                                    keyCode != kVK_Control &&
                                    keyCode != kVK_CapsLock &&
                                    keyCode != kVK_Function
                         }
-                        
+
                         if nonSpaceEvents.isEmpty {
-                            // 验证通过，高优先级异步处理翻译逻辑
+                            // 验证通过，使用延迟验证机制处理翻译
                             DispatchQueue.main.async {
-                                shared.handleDoubleSpaceKey()
+                                // 使用InputManager的延迟验证机制
+                                InputManager.shared.handleDoubleSpaceWithValidation {
+                                    // 300ms后没有新的键盘输入，执行翻译
+                                    shared.handleDoubleSpaceKey()
+                                }
                             }
                         } else {
                             Logger.debug("Double space validation failed: found \(nonSpaceEvents.count) non-space keys: \(nonSpaceEvents)")
                         }
-                        
+
                         shared.keyEventsBetweenSpaces.removeAll()
                         let finishTime = Date()
                         Logger.info("Double Space Time: \(finishTime.timeIntervalSince(currentTime))s")
@@ -220,7 +224,21 @@ class InputMonitor {
                             Logger.debug("First space detected, waiting for second space")
                         }
                     }
-                } else if keyCode == kVK_Return || keyCode == kVK_ANSI_KeypadEnter { // 回车键
+                } else {
+                    // 非空格键输入时，检查是否需要取消待处理的翻译
+                    // 排除修饰键，只关注实际的字符输入
+                    if keyCode != kVK_Command &&
+                       keyCode != kVK_Shift &&
+                       keyCode != kVK_Option &&
+                       keyCode != kVK_Control &&
+                       keyCode != kVK_CapsLock &&
+                       keyCode != kVK_Function {
+                        // 有实际的字符输入，取消待处理的翻译触发
+                        InputManager.shared.handleKeyboardInputForTranslationValidation()
+                    }
+                }
+
+                if keyCode == kVK_Return || keyCode == kVK_ANSI_KeypadEnter { // 回车键
                     // 快速检查，避免复杂逻辑
                     if shared.shouldInterceptEnter() {
                         // 立即提交处理任务
