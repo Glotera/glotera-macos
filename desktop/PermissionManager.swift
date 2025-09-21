@@ -173,7 +173,7 @@ class PermissionManager {
             if needsScreenRecording {
                 // Wait 30 seconds then request screen recording
                 Logger.info("⏰ Will request screen recording permission in 30 seconds...")
-                DispatchQueue.main.asyncAfter(deadline: .now() + 15.0) { [weak self] in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
                     self?.requestScreenRecordingPermissionSilently()
                 }
             }
