@@ -154,6 +154,7 @@ class ScreenshotTranslationManager: NSObject {
     static let shared = ScreenshotTranslationManager()
 
     private var globalMonitor: Any?
+    private var localMonitor: Any?  // Add local monitor for in-app events
     private var translationWindow: ImageTranslationWindow?
     private var isScreenshotInProgress = false
     override init() {
@@ -167,19 +168,31 @@ class ScreenshotTranslationManager: NSObject {
         let userHotkey = getUserConfiguredHotkey()
         Logger.info("🔑 Setting up screenshot hotkey (\(userHotkey.description)) using NSEvent...")
 
-        // Remove existing monitor if any
+        // Remove existing monitors if any
         if let existingMonitor = globalMonitor {
             NSEvent.removeMonitor(existingMonitor)
+            globalMonitor = nil
+        }
+        if let existingLocal = localMonitor {
+            NSEvent.removeMonitor(existingLocal)
+            localMonitor = nil
         }
 
+        // Add global monitor for events outside the app
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             self?.handleKeyEvent(event)
         }
 
-        if globalMonitor != nil {
-            Logger.info("✅ NSEvent global monitor installed successfully for screenshot hotkey: \(userHotkey.description)")
+        // Add local monitor for events within the app (so it works when app has focus)
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            self?.handleKeyEvent(event)
+            return event  // Return the event so it continues to be processed
+        }
+
+        if globalMonitor != nil && localMonitor != nil {
+            Logger.info("✅ NSEvent monitors (global + local) installed successfully for screenshot hotkey: \(userHotkey.description)")
         } else {
-            Logger.error("❌ Failed to install NSEvent global monitor for screenshot hotkey")
+            Logger.error("❌ Failed to install NSEvent monitors for screenshot hotkey")
         }
     }
 
@@ -541,6 +554,12 @@ class ScreenshotTranslationManager: NSObject {
             NSEvent.removeMonitor(monitor)
             globalMonitor = nil
             Logger.info("🧹 Screenshot hotkey global monitor manually removed")
+        }
+
+        if let monitor = localMonitor {
+            NSEvent.removeMonitor(monitor)
+            localMonitor = nil
+            Logger.info("🧹 Screenshot hotkey local monitor manually removed")
         }
 
         // Close any existing translation window
