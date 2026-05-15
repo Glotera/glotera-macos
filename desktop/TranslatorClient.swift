@@ -287,7 +287,11 @@ class TranslatorClient: NSObject {
     private var streamBuffer = ""
     private var streamCallbacks: StreamCallbacks?
     private var streamProcessor: StreamBatchProcessor?
-    
+
+    // Chat streaming session management (to prevent premature deallocation)
+    private var chatStreamingSession: URLSession?
+    private var chatStreamingDelegate: ChatStreamingDelegate?
+
     private struct StreamCallbacks {
         let onChunk: (String, String) -> Void
         let onComplete: (String?, QuotaInfo?) -> Void
@@ -1005,18 +1009,30 @@ class TranslatorClient: NSObject {
             }
             
             // Create streaming delegate for real-time data processing
+            // IMPORTANT: Store strong references to prevent premature deallocation during streaming
             let streamingDelegate = ChatStreamingDelegate(
                 onStreamUpdate: onStreamUpdate,
-                onCompletion: completion
+                onCompletion: { [weak self] result in
+                    // Clean up references after completion
+                    defer {
+                        self?.chatStreamingSession = nil
+                        self?.chatStreamingDelegate = nil
+                    }
+                    completion(result)
+                }
             )
-            
+
             // Create custom URLSession with streaming delegate
             let streamingSession = URLSession(
                 configuration: .default,
                 delegate: streamingDelegate,
                 delegateQueue: nil
-            ) 
-            
+            )
+
+            // Store strong references to prevent deallocation during streaming
+            self.chatStreamingDelegate = streamingDelegate
+            self.chatStreamingSession = streamingSession
+
             let streamingTask = streamingSession.dataTask(with: request)
             streamingDelegate.task = streamingTask
             streamingTask.resume()
@@ -1140,38 +1156,35 @@ class ChatStreamingDelegate: NSObject, URLSessionDataDelegate {
     
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
         guard let httpResponse = response as? HTTPURLResponse else {
-            DispatchQueue.main.async {
-                self.onCompletion(.failure(.networkError("Invalid response type")))
-            }
+            // Don't call onCompletion here - let didCompleteWithError handle it
+            // Store error info in task for didCompleteWithError to process
+            objc_setAssociatedObject(dataTask, "chatResponseError", "Invalid response type", .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
             completionHandler(.cancel)
             return
         }
-        
-        
+
+
         if httpResponse.statusCode == 401 {
-            DispatchQueue.main.async {
-                self.onCompletion(.failure(.authenticationRequired("Authentication required")))
-            }
+            // Store error info for didCompleteWithError to process
+            objc_setAssociatedObject(dataTask, "chatResponseError", "authenticationRequired:Authentication required", .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
             completionHandler(.cancel)
             return
         }
-        
+
         if httpResponse.statusCode == 429 {
-            DispatchQueue.main.async {
-                self.onCompletion(.failure(.serverError(429, "Chat quota exceeded")))
-            }
+            // Store error info for didCompleteWithError to process
+            objc_setAssociatedObject(dataTask, "chatResponseError", "serverError:429:Chat quota exceeded", .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
             completionHandler(.cancel)
             return
         }
-        
+
         guard httpResponse.statusCode == 200 else {
-            DispatchQueue.main.async {
-                self.onCompletion(.failure(.serverError(httpResponse.statusCode, "Server error")))
-            }
+            // Store error info for didCompleteWithError to process
+            objc_setAssociatedObject(dataTask, "chatResponseError", "serverError:\(httpResponse.statusCode):Server error", .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
             completionHandler(.cancel)
             return
         }
-        
+
         completionHandler(.allow)
     }
     
@@ -1265,17 +1278,43 @@ class ChatStreamingDelegate: NSObject, URLSessionDataDelegate {
     }
     
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didCompleteWithError error: Error?) {
+        // Check if there was a response error stored from didReceive response
+        if let responseErrorString = objc_getAssociatedObject(dataTask, "chatResponseError") as? String {
+            Logger.debug("Processing stored chat response error: \(responseErrorString)")
+
+            // Parse the error string to create appropriate TranslationError
+            let components = responseErrorString.split(separator: ":").map(String.init)
+            let translationError: TranslationError
+
+            if components.first == "authenticationRequired" {
+                translationError = .authenticationRequired(components.count > 1 ? components[1] : "Authentication required")
+            } else if components.first == "serverError", components.count >= 3,
+                      let statusCode = Int(components[1]) {
+                translationError = .serverError(statusCode, components[2])
+            } else {
+                translationError = .networkError(responseErrorString)
+            }
+
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.onCompletion(.failure(translationError))
+            }
+            return
+        }
+
         // Process any remaining buffer content
         if !buffer.isEmpty {
             processStreamLine(buffer)
         }
-        
+
         if let error = error {
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
                 self.onCompletion(.failure(.networkError(error.localizedDescription)))
             }
         } else {
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
                 self.onCompletion(.success(self.completeResponse))
             }
         }

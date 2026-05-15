@@ -572,15 +572,24 @@ class TranslationResultWindow: NSWindow {
 
 // MARK: - Chat Models
 struct ChatBubbleMessage: Identifiable {
-    let id = UUID()
+    let id: UUID
     let content: String
     let isFromUser: Bool
     let timestamp: Date
-    
+
     init(content: String, isFromUser: Bool) {
+        self.id = UUID()
         self.content = content
         self.isFromUser = isFromUser
         self.timestamp = Date()
+    }
+
+    // Initializer to preserve ID and timestamp during streaming updates
+    init(id: UUID, content: String, isFromUser: Bool, timestamp: Date) {
+        self.id = id
+        self.content = content
+        self.isFromUser = isFromUser
+        self.timestamp = timestamp
     }
 }
 
@@ -670,12 +679,17 @@ class TranslationResultViewModel: ObservableObject {
             onStreamUpdate: { [weak self] streamContent in
                 DispatchQueue.main.async {
                     // Update the AI message content with streaming data
-                    if let strongSelf = self, aiMessageIndex < strongSelf.chatMessages.count {
-                        strongSelf.chatMessages[aiMessageIndex] = ChatBubbleMessage(
-                            content: streamContent,
-                            isFromUser: false
-                        )
-                    }
+                    guard let strongSelf = self, aiMessageIndex < strongSelf.chatMessages.count else { return }
+
+                    // Instead of replacing the entire message, update the existing one's content
+                    // This preserves the message ID and prevents view recreation
+                    let existingMessage = strongSelf.chatMessages[aiMessageIndex]
+                    strongSelf.chatMessages[aiMessageIndex] = ChatBubbleMessage(
+                        id: existingMessage.id, // Preserve the same ID
+                        content: streamContent,
+                        isFromUser: false,
+                        timestamp: existingMessage.timestamp // Preserve timestamp
+                    )
                 }
             },
             completion: { [weak self] result in
@@ -1264,25 +1278,25 @@ struct MarkdownText: View {
     // Custom text renderer that properly handles \n and \n\n
     private func renderTextWithNewlines(_ text: String) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(parseTextBlocks(text).enumerated()), id: \.offset) { index, block in
+            ForEach(parseTextBlocks(text)) { block in
                 switch block.type {
                 case .paragraph:
                     VStack(alignment: .leading, spacing: 2) {
-                        ForEach(Array(block.lines.enumerated()), id: \.offset) { lineIndex, line in
-                            if !line.trimmingCharacters(in: .whitespaces).isEmpty {
+                        ForEach(block.lines) { lineItem in
+                            if !lineItem.content.trimmingCharacters(in: .whitespaces).isEmpty {
                                 if #available(macOS 12.0, *) {
                                     // Try to render with markdown for formatting
-                                    if let attributedString = try? AttributedString(markdown: line) {
+                                    if let attributedString = try? AttributedString(markdown: lineItem.content) {
                                         Text(attributedString)
                                             .multilineTextAlignment(.leading)
                                             .fixedSize(horizontal: false, vertical: true)
                                     } else {
-                                        Text(line)
+                                        Text(lineItem.content)
                                             .multilineTextAlignment(.leading)
                                             .fixedSize(horizontal: false, vertical: true)
                                     }
                                 } else {
-                                    Text(line)
+                                    Text(lineItem.content)
                                         .multilineTextAlignment(.leading)
                                         .fixedSize(horizontal: false, vertical: true)
                                 }
@@ -1290,7 +1304,7 @@ struct MarkdownText: View {
                         }
                     }
                     .padding(.bottom, block.isLastParagraph ? 0 : 8) // Add spacing between paragraphs
-                    
+
                 case .separator:
                     Divider()
                         .padding(.vertical, 8)
@@ -1303,40 +1317,53 @@ struct MarkdownText: View {
     // Parse text into blocks handling \n and \n\n correctly
     private func parseTextBlocks(_ text: String) -> [TextBlock] {
         var blocks: [TextBlock] = []
-        
+
         // Split by double newlines to get paragraphs
         let paragraphs = text.components(separatedBy: "\n\n")
-        
+
         for (index, paragraph) in paragraphs.enumerated() {
             let trimmedParagraph = paragraph.trimmingCharacters(in: .whitespaces)
-            
+
             if trimmedParagraph.isEmpty {
                 continue
             }
-            
+
             // Check if it's a horizontal rule
             if trimmedParagraph == "---" {
                 blocks.append(TextBlock(type: .separator, lines: [], isLastParagraph: false))
             } else {
                 // Split paragraph by single newlines to get lines
-                let lines = paragraph.components(separatedBy: "\n")
+                let lineStrings = paragraph.components(separatedBy: "\n")
+                let lines = lineStrings.enumerated().map { LineItem(index: $0.offset, content: $0.element) }
                 let isLast = (index == paragraphs.count - 1)
                 blocks.append(TextBlock(type: .paragraph, lines: lines, isLastParagraph: isLast))
             }
         }
-        
+
         return blocks
     }
-    
+
     // Helper structures for text parsing
-    private struct TextBlock {
+    private struct LineItem: Identifiable {
+        let id: String
+        let content: String
+
+        init(index: Int, content: String) {
+            // Create stable ID based on index and content hash
+            self.id = "\(index)-\(content.hashValue)"
+            self.content = content
+        }
+    }
+
+    private struct TextBlock: Identifiable {
         enum BlockType {
             case paragraph
             case separator
         }
-        
+
+        let id: UUID = UUID()
         let type: BlockType
-        let lines: [String]
+        let lines: [LineItem]
         let isLastParagraph: Bool
     }
 }

@@ -38,6 +38,7 @@
 		60366E812E41F815005AE609 /* ChatMessagesUtil.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60366E7A2E41F815005AE609 /* ChatMessagesUtil.swift */; };
 		603B83852E78259700C0F4D5 /* ScreenshotManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 603B83832E78259600C0F4D5 /* ScreenshotManager.swift */; };
 		603B83862E78259700C0F4D5 /* ImageTranslationWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 603B83822E78259600C0F4D5 /* ImageTranslationWindow.swift */; };
+		603B83862E78259700C0F4D6 /* AudioTestWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 603B83822E78259600C0F4D6 /* AudioTestWindow.swift */; };
 		603B83872E78259700C0F4D5 /* ImageTranslationHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 603B83812E78259600C0F4D5 /* ImageTranslationHistory.swift */; };
 		603B83882E78259700C0F4D5 /* ScreenshotTranslationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 603B83842E78259600C0F4D5 /* ScreenshotTranslationManager.swift */; };
 		603B83892E78259700C0F4D5 /* HotkeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 603B83802E78259600C0F4D5 /* HotkeyManager.swift */; };
@@ -117,6 +118,7 @@
 		603B83802E78259600C0F4D5 /* HotkeyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyManager.swift; sourceTree = "<group>"; };
 		603B83812E78259600C0F4D5 /* ImageTranslationHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageTranslationHistory.swift; sourceTree = "<group>"; };
 		603B83822E78259600C0F4D5 /* ImageTranslationWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageTranslationWindow.swift; sourceTree = "<group>"; };
+		603B83822E78259600C0F4D6 /* AudioTestWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioTestWindow.swift; sourceTree = "<group>"; };
 		603B83832E78259600C0F4D5 /* ScreenshotManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotManager.swift; sourceTree = "<group>"; };
 		603B83842E78259600C0F4D5 /* ScreenshotTranslationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotTranslationManager.swift; sourceTree = "<group>"; };
 		608349422E18F981008EBB87 /* SimpleMemoryManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimpleMemoryManager.swift; sourceTree = "<group>"; };
@@ -248,6 +250,7 @@
 				603B83802E78259600C0F4D5 /* HotkeyManager.swift */,
 				603B83812E78259600C0F4D5 /* ImageTranslationHistory.swift */,
 				603B83822E78259600C0F4D5 /* ImageTranslationWindow.swift */,
+				603B83822E78259600C0F4D6 /* AudioTestWindow.swift */,
 				603B83832E78259600C0F4D5 /* ScreenshotManager.swift */,
 				603B83842E78259600C0F4D5 /* ScreenshotTranslationManager.swift */,
 				60366E7D2E41F815005AE609 /* chat */,
@@ -463,6 +466,7 @@
 				602693012E2CB9670046465E /* AppleScriptManager.swift in Sources */,
 				603B83852E78259700C0F4D5 /* ScreenshotManager.swift in Sources */,
 				603B83862E78259700C0F4D5 /* ImageTranslationWindow.swift in Sources */,
+				603B83862E78259700C0F4D6 /* AudioTestWindow.swift in Sources */,
 				603B83872E78259700C0F4D5 /* ImageTranslationHistory.swift in Sources */,
 				603B83882E78259700C0F4D5 /* ScreenshotTranslationManager.swift in Sources */,
 				603B83892E78259700C0F4D5 /* HotkeyManager.swift in Sources */,

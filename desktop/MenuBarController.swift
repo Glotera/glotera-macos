@@ -4,6 +4,7 @@ import UserNotifications
 class MenuBarController: NSObject, NSMenuDelegate {
     let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private var languageConfigWindow: ConfigWindow?
+    private var audioTestWindow: AudioTestWindow?
     private var statusInfoStorage: [String: String] = [:] // 存储状态信息
     private var settingsObserver: NSObjectProtocol?
     private var lastQuotaInfo: QuotaInfo?
@@ -117,7 +118,13 @@ class MenuBarController: NSObject, NSMenuDelegate {
         let checkPermissionsItem = NSMenuItem(title: "Check Screen Recording Permission", action: #selector(checkScreenRecordingPermission), keyEquivalent: "")
         checkPermissionsItem.target = self
         debugMenu.addItem(checkPermissionsItem)
-        
+
+        // Audio Test
+        debugMenu.addItem(NSMenuItem.separator())
+        let audioTestItem = NSMenuItem(title: "Audio Test", action: #selector(showAudioTest), keyEquivalent: "")
+        audioTestItem.target = self
+        debugMenu.addItem(audioTestItem)
+
         menu.addItem(debugMenuItem)
         #endif
 
@@ -1241,6 +1248,24 @@ class MenuBarController: NSObject, NSMenuDelegate {
         // Also log current permission status
         let status = PermissionManager.shared.getPermissionStatus()
         Logger.info("Current permission status: \(status.summary)")
+    }
+
+    @objc func showAudioTest() {
+        Logger.info("🔊 Showing Audio Test window")
+
+        // If window already exists, bring it to front
+        if let existingWindow = audioTestWindow {
+            existingWindow.makeKeyAndOrderFront(nil)
+            existingWindow.orderFrontRegardless()
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        // Create new audio test window
+        audioTestWindow = AudioTestWindow()
+        audioTestWindow?.makeKeyAndOrderFront(nil)
+        audioTestWindow?.orderFrontRegardless()
+        NSApp.activate(ignoringOtherApps: true)
     }
     #endif
 

@@ -144,13 +144,30 @@ class InputMonitor {
                 Logger.info("Filtered out simulated event (keyCode: \(keyCode), flags: \(flags))")
                 return Unmanaged.passUnretained(event)
             }
-            
+
             // 检查是否正在发送模拟事件（额外的安全检查）
             // if InputManager.shared.isSendingSimulatedEvent() {
             //     Logger.warn("Skipping event processing - currently sending simulated events")
             //     return Unmanaged.passUnretained(event)
             // }
-            
+
+            // 快速放行系统关键快捷键 (Cmd+C, Cmd+V, Cmd+X) - 防止干扰系统剪贴板功能
+            let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+            let flags = event.flags
+            if flags.contains(.maskCommand) {
+                // Cmd+C (复制), Cmd+V (粘贴), Cmd+X (剪切)
+                if keyCode == kVK_ANSI_C || keyCode == kVK_ANSI_V || keyCode == kVK_ANSI_X {
+                    // 只有在没有其他修饰键的情况下才放行 (纯 Cmd+C/V/X)
+                    let hasOnlyCmd = !flags.contains(.maskShift) &&
+                                    !flags.contains(.maskAlternate) &&
+                                    !flags.contains(.maskControl)
+                    if hasOnlyCmd {
+                        // 快速返回，不做任何处理，让系统处理这些快捷键
+                        return Unmanaged.passUnretained(event)
+                    }
+                }
+            }
+
             // 极简的事件统计更新
             let shared = InputMonitor.shared
             let currentTime = Date()
@@ -164,7 +181,7 @@ class InputMonitor {
             
             // 只处理关键事件，快速返回
             if type == .keyDown {
-                let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+                // keyCode 已在上面定义，直接使用
                 
                 // 记录空格之间的键盘事件
                 if shared.lastSpaceTime != nil {
